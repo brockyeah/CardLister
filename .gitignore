@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# DB + uploads (local dev — Railway uses its own volume)
+*.db
+cardlister.db
+uploads/
+backend/static/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Defensive: any service account / credentials JSON dropped in the repo by accident
+*service-account*.json
+*service_account*.json
+*credentials*.json
+gcp-*.json
+google-credentials*.json
+
+# Logs
+*.log
+/tmp/uvicorn.log
+
+# Personal notes (remove this line if you want to track notes.txt in git)
+notes.txt
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+
+*.txt

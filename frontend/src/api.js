@@ -1,0 +1,77 @@
+import axios from 'axios'
+
+const TOKEN_KEY = 'cardlister_token'
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY)
+export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t)
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+// Same-origin in production; Vite dev proxy handles /api and /uploads in dev.
+const api = axios.create({ baseURL: '/' })
+
+api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (resp) => resp,
+  (err) => {
+    if (err.response?.status === 401) {
+      clearToken()
+      // Hard reload so any in-memory state is dropped — simplest possible logout.
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(err)
+  },
+)
+
+// --- Auth ---
+export const login = (password) =>
+  api.post('/api/auth/login', { password }).then((r) => r.data)
+
+// --- Scan ---
+export const scanCard = (file) => {
+  const fd = new FormData()
+  fd.append('image', file)
+  return api
+    .post('/api/scan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    .then((r) => r.data)
+}
+
+// --- Pricing ---
+export const getPricing = (payload) =>
+  api.post('/api/pricing', payload).then((r) => r.data)
+
+// --- Cards ---
+export const listCards = (params = {}) =>
+  api.get('/api/cards', { params }).then((r) => r.data)
+
+export const createCard = (payload) =>
+  api.post('/api/cards', payload).then((r) => r.data)
+
+export const updateCard = (id, payload) =>
+  api.patch(`/api/cards/${id}`, payload).then((r) => r.data)
+
+export const deleteCard = (id) =>
+  api.delete(`/api/cards/${id}`).then((r) => r.data)
+
+export const markSold = (id, payload) =>
+  api.post(`/api/cards/${id}/mark-sold`, payload).then((r) => r.data)
+
+export const attachEbayListing = (id, payload) =>
+  api.post(`/api/cards/${id}/ebay-id`, payload).then((r) => r.data)
+
+// --- eBay URL ---
+export const getEbayUrl = (id) =>
+  api.get(`/api/ebay/${id}/url`).then((r) => r.data)
+
+export const getEbayListingText = (id) =>
+  api.get(`/api/ebay/${id}/listing-text`).then((r) => r.data)
+
+export default api
