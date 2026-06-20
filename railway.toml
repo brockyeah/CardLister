@@ -3,9 +3,12 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 
-# IMPORTANT: attach a Railway Volume to /data so SQLite + uploads survive redeploys.
-# Then set the env var DB_PATH=/data/cardlister.db
+# Start command is defined in the Dockerfile's CMD line. Don't add a startCommand
+# here — Railway passes it through as a literal string and won't expand $PORT,
+# but the Dockerfile uses `sh -c` which expands it correctly.
+
+# IMPORTANT: attach a Railway Volume mounted at /data so SQLite + uploads
+# survive redeploys, and set the env var DB_PATH=/data/cardlister.db.
