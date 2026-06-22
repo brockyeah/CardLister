@@ -1,10 +1,16 @@
 import axios from 'axios'
 
 const TOKEN_KEY = 'cardlister_token'
+const USERNAME_KEY = 'cardlister_username'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t)
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+export const getUsername = () => localStorage.getItem(USERNAME_KEY)
+export const setUsername = (u) => localStorage.setItem(USERNAME_KEY, u)
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USERNAME_KEY)
+}
 
 // Same-origin in production; Vite dev proxy handles /api and /uploads in dev.
 const api = axios.create({ baseURL: '/' })
@@ -32,13 +38,19 @@ api.interceptors.response.use(
 )
 
 // --- Auth ---
-export const login = (password) =>
-  api.post('/api/auth/login', { password }).then((r) => r.data)
+export const login = (username, password) =>
+  api.post('/api/auth/login', { username, password }).then((r) => r.data)
+
+// --- Analytics / cost split ---
+// params: { range: 'today'|'7d'|'30d'|'month'|'all', user?, model? }
+export const getAnalytics = (params = {}) =>
+  api.get('/api/analytics', { params }).then((r) => r.data)
 
 // --- Scan ---
-export const scanCard = (file) => {
+export const scanCard = (file, preset = 'balance') => {
   const fd = new FormData()
   fd.append('image', file)
+  fd.append('preset', preset)
   return api
     .post('/api/scan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     .then((r) => r.data)
@@ -67,10 +79,7 @@ export const markSold = (id, payload) =>
 export const attachEbayListing = (id, payload) =>
   api.post(`/api/cards/${id}/ebay-id`, payload).then((r) => r.data)
 
-// --- eBay URL ---
-export const getEbayUrl = (id) =>
-  api.get(`/api/ebay/${id}/url`).then((r) => r.data)
-
+// --- eBay listing text ---
 export const getEbayListingText = (id) =>
   api.get(`/api/ebay/${id}/listing-text`).then((r) => r.data)
 

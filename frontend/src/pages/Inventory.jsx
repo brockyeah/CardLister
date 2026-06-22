@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
-import { listCards, markSold, attachEbayListing, getEbayUrl, deleteCard, getEbayListingText } from '../api'
+import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText } from '../api'
 
 function StatTile({ label, value }) {
   return (

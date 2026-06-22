@@ -2,7 +2,7 @@
 
 A dead-simple internal tool for listing baseball cards on eBay faster.
 
-**Workflow:** snap a photo → Claude vision extracts the card details → Mavin.io looks up recent sold comps → review and tweak the form → click Save and an eBay pre-fill listing opens in a new tab. Every card is mirrored to a Google Sheet.
+**Workflow:** snap a photo → Claude vision extracts the card details → sold-comp lookup (130point → Mavin → eBay) suggests a price → review and tweak the form → click Save to copy a ready-to-paste listing to your clipboard and open eBay's sell page. Every card is mirrored to a Google Sheet.
 
 ---
 
@@ -10,8 +10,8 @@ A dead-simple internal tool for listing baseball cards on eBay faster.
 
 - **Backend:** FastAPI (Python 3.11), SQLAlchemy, SQLite
 - **Frontend:** React 18 + Tailwind CSS, built with Vite
-- **AI:** Anthropic Claude `claude-sonnet-4-20250514` with vision
-- **Pricing:** Mavin.io scrape (BeautifulSoup + httpx)
+- **AI:** Anthropic Claude `claude-opus-4-7` with vision + adaptive thinking
+- **Pricing:** eBay API when configured (primary), else a sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
 - **Inventory mirror:** Google Sheets API (write-only)
 - **Deploy:** Single Docker container on Railway (one service, one URL)
 
@@ -76,12 +76,20 @@ docker run --rm -p 8000:8000 \
 
 | Variable | Required | Description |
 |---|---|---|
-| `CARDLISTER_PASSWORD` | yes | The single password you'll type in to log in. Defaults to `changeme` for first-run convenience — change it. |
-| `JWT_SECRET` | yes | Long random string used to sign session tokens. Use `openssl rand -hex 32`. |
+| `CARDLISTER_USERS` | optional | Comma-separated `username:password` pairs for multi-user access + per-user cost tracking, e.g. `brock:s3cret,sam:hunter2`. If unset, the app falls back to a single `owner` user (see `CARDLISTER_PASSWORD`). |
+| `CARDLISTER_PASSWORD` | yes* | Password for the fallback single `owner` user when `CARDLISTER_USERS` is not set (log in with a blank username). Defaults to `changeme`; in production (`APP_ENV=production` or a Railway deploy) the app refuses to start if left at the default. |
+| `JWT_SECRET` | yes | Long random string used to sign session tokens. Use `openssl rand -hex 32`. Same production fail-fast as above. |
+| `APP_ENV` | optional | Set to `production` to enforce the secret checks above. Auto-detected on Railway; defaults to development locally. |
 | `ANTHROPIC_API_KEY` | recommended | From <https://console.anthropic.com>. If missing, `/api/scan` returns mock data so the UI still works end-to-end. |
+| `CLAUDE_MODEL` | optional | Fallback vision model id (default `claude-opus-4-7`). Per-scan choice is normally driven by the **Scan mode** selector (Cost / Balanced / Accuracy); this is the fallback when no preset is sent. |
+| `CLAUDE_EFFORT` | optional | Fallback thinking depth: `low` \| `medium` \| `high` (default `medium`). Also superseded per-scan by the Scan mode selector. |
+| `VISION_MAX_IMAGE_PX` | optional | Long-edge pixel cap applied to images before they're sent to the vision API (the on-disk upload is untouched). Defaults to `1300`; set `0` to disable downsampling. |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | optional | The full JSON contents of a Google service account key file, as a single string. |
 | `GOOGLE_SHEET_ID` | optional | The Sheet ID from the URL (`docs.google.com/spreadsheets/d/<THIS-PART>/edit`). |
-| `EBAY_APP_ID` | optional | Reserved for Phase 2 Browse API fallback pricing. |
+| `EBAY_APP_ID` | optional | eBay App ID (OAuth client_id). With `EBAY_CERT_ID`, the eBay API becomes the **primary** comp source; without it the app falls back to the HTML scrapers. |
+| `EBAY_CERT_ID` | optional | eBay Cert ID (OAuth client_secret), paired with `EBAY_APP_ID`. |
+| `EBAY_MARKETPLACE_ID` | optional | eBay marketplace, default `EBAY_US`. |
+| `EBAY_ENV` | optional | `production` (default) or `sandbox`. |
 | `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** |
 
 ---
@@ -145,8 +153,8 @@ Example: `2021 Bowman Chrome Wander Franco #BCP-100 RC /99 Tampa Bay Rays`
 
 The app is fully usable without any API keys:
 
-- **No `ANTHROPIC_API_KEY`** → `/api/scan` returns a hardcoded mock card and labels it `mock: true` in the response (the UI shows a yellow banner).
-- **Mavin scrape returns nothing** → pricing returns `$9.99` with `source: "mock"`.
+- **No `ANTHROPIC_API_KEY`** → `/api/scan` returns a hardcoded mock card and labels it `mock: true` in the response (the UI shows a yellow banner). If the key *is* set but the vision call fails, the response instead carries an `error` string and a blank card, and the UI shows a red error banner — distinct from mock mode.
+- **All comp sources return nothing** (130point, Mavin, eBay) → pricing returns `$9.99` with `source: "mock"` and a note explaining what failed.
 
 This is intentional — it lets you exercise the full flow during development.
 
@@ -182,16 +190,19 @@ cardlister/
 │   ├── database.py          # Engine, session, Base
 │   ├── models.py            # Card SQLAlchemy model
 │   ├── schemas.py           # Pydantic request/response schemas
-│   ├── auth.py              # Password check + JWT
+│   ├── auth.py              # Named users + JWT
 │   ├── routers/
 │   │   ├── cards.py         # CRUD + mark sold + attach eBay listing
-│   │   ├── scan.py          # Image upload → Claude vision
-│   │   ├── pricing.py       # Mavin scrape
-│   │   ├── ebay.py          # Pre-fill URL builder
-│   │   └── sheets.py        # Manual resync endpoints
+│   │   ├── scan.py          # Image upload → Claude vision (records usage)
+│   │   ├── pricing.py       # eBay API + scraper comp chain
+│   │   ├── ebay.py          # Listing text builder
+│   │   ├── sheets.py        # Manual resync endpoints
+│   │   └── analytics.py     # Usage + cost analytics (filters)
 │   ├── services/
 │   │   ├── claude_vision.py # Claude API call
-│   │   ├── mavin.py         # Mavin.io HTML scraper
+│   │   ├── ebay_api.py      # eBay API pricing (primary)
+│   │   ├── onethirtypoint.py / mavin.py / ebay_pricing.py  # scraper fallbacks
+│   │   ├── pricing_utils.py # shared query/price helpers
 │   │   └── google_sheets.py # Sheets API write layer
 │   └── requirements.txt
 ├── frontend/
@@ -201,7 +212,8 @@ cardlister/
 │   │   ├── pages/
 │   │   │   ├── Login.jsx
 │   │   │   ├── Scanner.jsx  # Upload + review (default page)
-│   │   │   └── Inventory.jsx
+│   │   │   ├── Inventory.jsx
+│   │   │   └── Analytics.jsx # Usage + cost analytics
 │   │   └── components/
 │   │       ├── CardForm.jsx
 │   │       ├── CardTable.jsx

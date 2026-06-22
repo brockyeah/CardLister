@@ -4,13 +4,14 @@ We scrape the public sold-listings search page (no API key required). eBay
 returns far more reliable comps than Mavin for modern cards because they ARE
 the marketplace; Mavin aggregates other sites and often misses.
 """
-import re
 import statistics
 from typing import List, Optional, Tuple
 from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
+
+from .pricing_utils import build_query, parse_price
 
 # Full browser-like headers — eBay returns 403 for minimal header sets.
 # This is still vulnerable to deeper anti-bot measures; if scraping breaks
@@ -42,36 +43,6 @@ BROWSER_HEADERS = {
 EBAY_BASEBALL_CATEGORY = "261328"
 
 
-def _build_query(
-    year: Optional[int],
-    brand: Optional[str],
-    player_name: Optional[str],
-    set_name: Optional[str],
-    card_number: Optional[str],
-) -> str:
-    parts = [str(p) for p in (year, brand, player_name, set_name, card_number) if p]
-    return " ".join(parts).strip()
-
-
-_PRICE_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]{1,2})?)")
-
-
-def _parse_price(text: str) -> Optional[float]:
-    """Pull the first dollar amount out of a price string.
-
-    Handles formats like '$12.50', '$10.00 to $15.00' (take the lower bound),
-    and '$1,250.00' (commas stripped first).
-    """
-    cleaned = text.replace(",", "")
-    match = _PRICE_RE.search(cleaned)
-    if not match:
-        return None
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
-
-
 def fetch_ebay_sold_comps(
     player_name: str,
     year: Optional[int] = None,
@@ -80,7 +51,7 @@ def fetch_ebay_sold_comps(
     card_number: Optional[str] = None,
 ) -> Tuple[List[dict], Optional[float], Optional[str]]:
     """Returns (comps, suggested_price, note). suggested_price is None if no comps."""
-    query = _build_query(year, brand, player_name, set_name, card_number)
+    query = build_query(year, brand, player_name, set_name, card_number)
     if not query:
         return [], None, "Empty query — cannot search eBay."
 
@@ -119,7 +90,7 @@ def fetch_ebay_sold_comps(
         if "Shop on eBay" in title:
             continue
 
-        price = _parse_price(price_el.get_text(" ", strip=True))
+        price = parse_price(price_el.get_text(" ", strip=True))
         if price is None or price <= 0:
             continue
 

@@ -25,6 +25,14 @@ const EMPTY_FORM = {
 
 const EBAY_SELL_URL = 'https://www.ebay.com/sl/sell'
 
+// Keep keys in sync with PRESETS in backend/services/claude_vision.py.
+const SCAN_MODES = [
+  { key: 'cost', label: 'Cost', desc: 'Sonnet 4.6 · low thinking — cheapest' },
+  { key: 'balance', label: 'Balanced', desc: 'Opus 4.7 · medium thinking' },
+  { key: 'accuracy', label: 'Accuracy', desc: 'Opus 4.7 · high thinking — most thorough' },
+]
+const SCAN_MODE_KEY = 'cardlister_scan_mode'
+
 export default function Scanner() {
   const fileInputRef = useRef(null)
   const dropRef = useRef(null)
@@ -37,6 +45,13 @@ export default function Scanner() {
   const [scanning, setScanning] = useState(false)
   const [pricingLoading, setPricingLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+
+  // Scan mode (model + thinking preset), remembered across sessions.
+  const [mode, setMode] = useState(() => localStorage.getItem(SCAN_MODE_KEY) || 'balance')
+  const chooseMode = (key) => {
+    setMode(key)
+    localStorage.setItem(SCAN_MODE_KEY, key)
+  }
 
   const [form, setForm] = useState(EMPTY_FORM)
   const [imagePath, setImagePath] = useState('')          // server path once scanned
@@ -75,9 +90,12 @@ export default function Scanner() {
     setPricingNote('')
     setPricingSource('')
     try {
-      const result = await scanCard(stagedFile)
+      const result = await scanCard(stagedFile, mode)
       setImagePath(result.image_path)
       setMock(!!result.mock)
+      // A real extraction was attempted but failed (distinct from mock mode) —
+      // surface it instead of the misleading "set ANTHROPIC_API_KEY" banner.
+      if (result.error) setError(result.error)
       const next = { ...EMPTY_FORM, ...result.extracted, image_path: result.image_path }
       setForm(next)
       clearStaged()
@@ -172,6 +190,33 @@ export default function Scanner() {
         </p>
       </div>
 
+      {/* Scan mode: model + thinking-effort preset, applied to the next scan. */}
+      <div className="card-panel">
+        <div className="label mb-2">Scan mode</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {SCAN_MODES.map((m) => {
+            const active = mode === m.key
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => chooseMode(m.key)}
+                className={`text-left rounded-lg px-3 py-2 border transition ${
+                  active
+                    ? 'border-emerald-500 bg-emerald-600/15'
+                    : 'border-ink-600 bg-ink-800 hover:border-ink-500'
+                }`}
+              >
+                <div className={`font-semibold ${active ? 'text-emerald-300' : 'text-gray-200'}`}>
+                  {m.label}
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">{m.desc}</div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {toast && (
         <div className="bg-emerald-900/40 border border-emerald-600 text-emerald-100 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
           <span>{toast.message}</span>
@@ -202,7 +247,6 @@ export default function Scanner() {
             ref={fileInputRef}
             type="file"
             accept="image/*,application/pdf"
-            capture="environment"
             className="hidden"
             onChange={(e) => stageFile(e.target.files?.[0])}
           />

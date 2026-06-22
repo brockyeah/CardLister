@@ -48,3 +48,20 @@ class Card(Base):
 
     # Row index in the synced Google Sheet (so we can update in place)
     sheets_row = Column(Integer, nullable=True)
+
+
+class UsageEvent(Base):
+    """One row per billable Anthropic call, attributed to a user.
+
+    Used to split shared API costs: aggregate by username over a period and
+    price the tokens. New table, so create_all picks it up with no migration.
+    """
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, index=True, nullable=False, default="")
+    kind = Column(String, default="scan")  # what triggered the call
+    model = Column(String, default="")
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

@@ -7,10 +7,13 @@ from pydantic import BaseModel, ConfigDict
 # --- Auth ---
 class LoginRequest(BaseModel):
     password: str
+    # Optional so single-user (owner-only) setups can leave it blank.
+    username: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
     token: str
+    username: str
 
 
 # --- Cards ---
@@ -78,6 +81,8 @@ class ScanResponse(BaseModel):
     image_path: str
     extracted: dict
     mock: bool = False
+    # Set when a real extraction was attempted but failed (distinct from mock mode).
+    error: Optional[str] = None
 
 
 # --- Pricing ---
@@ -97,11 +102,6 @@ class PricingResponse(BaseModel):
 
 
 # --- eBay ---
-class EbayUrlResponse(BaseModel):
-    url: str
-    title: str
-
-
 class EbayListingUpdate(BaseModel):
     ebay_listing_id: str
     ebay_listing_url: str
@@ -111,3 +111,45 @@ class EbayListingUpdate(BaseModel):
 class MarkSoldRequest(BaseModel):
     sold_price: float
     sold_at: Optional[datetime] = None
+
+
+# --- Analytics / cost split ---
+class UsageRow(BaseModel):
+    username: str
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class ModelRow(BaseModel):
+    model: str
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class DayRow(BaseModel):
+    date: str              # "YYYY-MM-DD"
+    scans: int
+    est_cost_usd: float
+
+
+class AnalyticsTotals(BaseModel):
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class AnalyticsReport(BaseModel):
+    range: str                         # today | 7d | 30d | month | all
+    since: Optional[datetime] = None   # None for all-time
+    until: datetime
+    totals: AnalyticsTotals
+    by_user: List[UsageRow]
+    by_model: List[ModelRow]
+    by_day: List[DayRow]
+    users: List[str]                   # distinct values for filter dropdowns
+    models: List[str]

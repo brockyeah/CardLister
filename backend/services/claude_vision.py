@@ -13,20 +13,48 @@ import json
 import base64
 import logging
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # Opus is meaningfully better than Sonnet at fine-detail vision extraction
 # and benefits more from extended thinking on multi-step inference (year,
-# card #, parallel color from border tint, etc).
-CLAUDE_MODEL = "claude-opus-4-7"
+# card #, parallel color from border tint, etc). Overridable via env so you can
+# A/B a cheaper model (e.g. claude-sonnet-4-6) without a code change.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-7")
 
 # Opus 4.7 uses adaptive thinking — the model decides how much to think based
 # on the effort hint. "medium" is the sweet spot for card extraction: enough
 # reasoning to infer year/card#/parallel from partial evidence without burning
-# tokens on trivial cases.
-THINKING_EFFORT = "medium"
+# tokens on trivial cases. Lower it ("low") to cut cost, raise it ("high") for
+# tougher cards. Overridable via CLAUDE_EFFORT.
+THINKING_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
+
+# Long-edge pixel cap for images sent to the vision API. Card photos from phones
+# are often 3000px+, which bills up to ~4,784 image tokens on Opus 4.7; ~1300px
+# stays legible for text extraction at a fraction of the token cost. Set to 0 to
+# disable downsampling (send the original). The on-disk upload is never modified.
+VISION_MAX_IMAGE_PX = int(os.getenv("VISION_MAX_IMAGE_PX", "1300"))
+
+# User-selectable scan presets (chosen per-scan on the scan page). Each maps to a
+# (model, effort) pair. All three use models that support adaptive thinking + the
+# effort param, so the API call shape is identical regardless of choice.
+# NOTE: keep these keys/labels in sync with the selector in frontend Scanner.jsx.
+PRESETS = {
+    "cost":     {"label": "Cost",     "model": "claude-sonnet-4-6", "effort": "low"},
+    "balance":  {"label": "Balanced", "model": "claude-opus-4-7",   "effort": "medium"},
+    "accuracy": {"label": "Accuracy", "model": "claude-opus-4-7",   "effort": "high"},
+}
+DEFAULT_PRESET = "balance"
+
+
+def resolve_preset(key: Optional[str]) -> Tuple[str, str]:
+    """Map a preset key to (model, effort). Unknown/None falls back to the env
+    defaults (CLAUDE_MODEL / THINKING_EFFORT)."""
+    preset = PRESETS.get(key or "")
+    if preset is None:
+        return CLAUDE_MODEL, THINKING_EFFORT
+    return preset["model"], preset["effort"]
 
 SYSTEM_PROMPT = """You are a world-class baseball card identification expert with deep knowledge of every major card brand and set from 1980 through 2026 (Topps, Bowman, Panini, Upper Deck, Donruss, Fleer, Leaf, and their sub-brands like Chrome, Heritage, Prizm, Select, Optic, Mosaic, Stadium Club, etc.).
 
@@ -103,6 +131,65 @@ MOCK_RESPONSE = {
 }
 
 
+def _blank_card(note: str) -> dict:
+    """An empty card shaped like the prompt — used when extraction errors out so
+    the user gets a blank form to hand-edit rather than misleading mock values."""
+    return {
+        "player_name": "",
+        "year": None,
+        "brand": "",
+        "set_name": "",
+        "card_number": "",
+        "team": "",
+        "is_rookie": False,
+        "is_autograph": False,
+        "is_patch": False,
+        "is_refractor": False,
+        "parallel_color": None,
+        "serial_number": None,
+        "condition": "NM",
+        "confidence_notes": note,
+    }
+
+
+def _encode_for_api(path: Path, media_type: str) -> Tuple[str, str]:
+    """Return (base64_data, media_type) to send to the API.
+
+    Images larger than VISION_MAX_IMAGE_PX on the long edge are downsampled and
+    re-encoded as JPEG to cut image-token cost; PDFs and already-small images
+    pass through untouched. The file on disk is never modified — only the bytes
+    sent to the API are shrunk. Falls back to the original on any error.
+    """
+    raw = path.read_bytes()
+
+    def _passthrough() -> Tuple[str, str]:
+        return base64.standard_b64encode(raw).decode("utf-8"), media_type
+
+    if media_type == "application/pdf" or VISION_MAX_IMAGE_PX <= 0:
+        return _passthrough()
+
+    try:
+        import io
+
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(raw))
+        long_edge = max(img.size)
+        if long_edge <= VISION_MAX_IMAGE_PX:
+            return _passthrough()
+
+        scale = VISION_MAX_IMAGE_PX / long_edge
+        new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+        img = img.convert("RGB").resize(new_size, Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        logger.info("Downsampled vision image: %dpx long edge → %s", long_edge, new_size)
+        return base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
+    except Exception:
+        logger.warning("Image downsample failed; sending original", exc_info=True)
+        return _passthrough()
+
+
 def _guess_media_type(path: Path) -> str:
     suffix = path.suffix.lower()
     return {
@@ -135,24 +222,38 @@ def _extract_json_from_text(text: str) -> dict:
         raise
 
 
-def extract_card_from_image(image_path: str) -> Tuple[dict, bool]:
-    """Returns (extracted_dict, is_mock).
+def extract_card_from_image(
+    image_path: str,
+    model: Optional[str] = None,
+    effort: Optional[str] = None,
+) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
+    """Returns (extracted_dict, is_mock, error, usage).
+
+    `model`/`effort` override the env defaults (used by the scan-page presets).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
-    Always returns a dict shaped like the prompt — on any error we degrade to
-    mock data with an explanation in confidence_notes so the user can still hand-edit.
+    Always returns a dict shaped like the prompt. The three outcomes are distinct:
+      - no API key  → (mock data, True, None, None)        intentional dev mode
+      - success     → (extracted, False, None, usage)       usage = token counts
+      - call failed → (blank card, False, error_msg, None)  so the caller can show
+                       a real error, not a misleading "set ANTHROPIC_API_KEY" banner.
+
+    `usage` (when present) is {"model", "input_tokens", "output_tokens"} so the
+    caller can attribute the API cost to the current user.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return MOCK_RESPONSE.copy(), True
+        return MOCK_RESPONSE.copy(), True, None, None
+
+    model = model or CLAUDE_MODEL
+    effort = effort or THINKING_EFFORT
 
     try:
         import anthropic
 
         path = Path(image_path)
-        media_type = _guess_media_type(path)
-        with open(path, "rb") as f:
-            file_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+        # Downsamples large images and may switch the media type to image/jpeg.
+        file_b64, media_type = _encode_for_api(path, _guess_media_type(path))
 
         # PDFs use the "document" content block; images use "image".
         # Both encode the bytes the same way (base64), so the only difference
@@ -178,14 +279,14 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool]:
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=model,
             max_tokens=8192,
             # Adaptive thinking + an effort hint — Opus 4.7's API. Lets the model
             # reason through partial evidence (border colors → parallel,
             # copyright → year, set + player → card #) without us micromanaging
             # the token budget.
             thinking={"type": "adaptive"},
-            output_config={"effort": THINKING_EFFORT},
+            output_config={"effort": effort},
             system=SYSTEM_PROMPT,
             messages=[
                 {
@@ -212,11 +313,17 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool]:
             raise ValueError("No text block in Claude response")
 
         data = _extract_json_from_text(text)
-        return data, False
+        usage = {
+            "model": model,
+            "input_tokens": getattr(response.usage, "input_tokens", 0) or 0,
+            "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
+        }
+        return data, False, None, usage
 
     except Exception as e:
         # Log to terminal too so failures aren't invisible in the backend logs.
         logger.exception("Claude vision extraction failed")
-        fallback = MOCK_RESPONSE.copy()
-        fallback["confidence_notes"] = f"Vision extraction failed: {e}. Please fill in manually."
-        return fallback, True
+        error = f"Vision extraction failed: {e}"
+        blank = _blank_card(f"{error}. Please fill in manually.")
+        # is_mock=False: a real key is set, this is an error — not mock mode.
+        return blank, False, error, None

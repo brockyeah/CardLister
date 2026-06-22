@@ -1,10 +1,17 @@
 """SQLAlchemy engine, session, and base setup."""
 import os
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 DB_PATH = os.getenv("DB_PATH", "./cardlister.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+
+def uploads_dir() -> Path:
+    """Uploads sit alongside the SQLite DB file so a single Railway volume covers both."""
+    return Path(DB_PATH).resolve().parent / "uploads"
 
 # check_same_thread=False is required for SQLite + FastAPI's threaded request model
 engine = create_engine(
