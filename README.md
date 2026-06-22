@@ -76,7 +76,8 @@ docker run --rm -p 8000:8000 \
 
 | Variable | Required | Description |
 |---|---|---|
-| `CARDLISTER_PASSWORD` | yes | The single password you'll type in to log in. Defaults to `changeme` for first-run convenience — change it. In production (`APP_ENV=production` or a Railway deploy) the app refuses to start if this is left at the default. |
+| `CARDLISTER_USERS` | optional | Comma-separated `username:password` pairs for multi-user access + per-user cost tracking, e.g. `brock:s3cret,sam:hunter2`. If unset, the app falls back to a single `owner` user (see `CARDLISTER_PASSWORD`). |
+| `CARDLISTER_PASSWORD` | yes* | Password for the fallback single `owner` user when `CARDLISTER_USERS` is not set (log in with a blank username). Defaults to `changeme`; in production (`APP_ENV=production` or a Railway deploy) the app refuses to start if left at the default. |
 | `JWT_SECRET` | yes | Long random string used to sign session tokens. Use `openssl rand -hex 32`. Same production fail-fast as above. |
 | `APP_ENV` | optional | Set to `production` to enforce the secret checks above. Auto-detected on Railway; defaults to development locally. |
 | `ANTHROPIC_API_KEY` | recommended | From <https://console.anthropic.com>. If missing, `/api/scan` returns mock data so the UI still works end-to-end. |
@@ -189,16 +190,19 @@ cardlister/
 │   ├── database.py          # Engine, session, Base
 │   ├── models.py            # Card SQLAlchemy model
 │   ├── schemas.py           # Pydantic request/response schemas
-│   ├── auth.py              # Password check + JWT
+│   ├── auth.py              # Named users + JWT
 │   ├── routers/
 │   │   ├── cards.py         # CRUD + mark sold + attach eBay listing
-│   │   ├── scan.py          # Image upload → Claude vision
-│   │   ├── pricing.py       # Mavin scrape
-│   │   ├── ebay.py          # Pre-fill URL builder
-│   │   └── sheets.py        # Manual resync endpoints
+│   │   ├── scan.py          # Image upload → Claude vision (records usage)
+│   │   ├── pricing.py       # eBay API + scraper comp chain
+│   │   ├── ebay.py          # Listing text builder
+│   │   ├── sheets.py        # Manual resync endpoints
+│   │   └── usage.py         # Per-user cost-split report
 │   ├── services/
 │   │   ├── claude_vision.py # Claude API call
-│   │   ├── mavin.py         # Mavin.io HTML scraper
+│   │   ├── ebay_api.py      # eBay API pricing (primary)
+│   │   ├── onethirtypoint.py / mavin.py / ebay_pricing.py  # scraper fallbacks
+│   │   ├── pricing_utils.py # shared query/price helpers
 │   │   └── google_sheets.py # Sheets API write layer
 │   └── requirements.txt
 ├── frontend/
@@ -208,7 +212,8 @@ cardlister/
 │   │   ├── pages/
 │   │   │   ├── Login.jsx
 │   │   │   ├── Scanner.jsx  # Upload + review (default page)
-│   │   │   └── Inventory.jsx
+│   │   │   ├── Inventory.jsx
+│   │   │   └── Usage.jsx    # Per-user cost split
 │   │   └── components/
 │   │       ├── CardForm.jsx
 │   │       ├── CardTable.jsx

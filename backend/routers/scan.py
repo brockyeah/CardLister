@@ -4,9 +4,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
 
 from ..auth import require_auth
-from ..database import uploads_dir
+from ..database import get_db, uploads_dir
+from ..models import UsageEvent
 from ..schemas import ScanResponse
 from ..services.claude_vision import extract_card_from_image
 
@@ -18,7 +20,11 @@ ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 
 
 @router.post("", response_model=ScanResponse)
-async def scan_card(image: UploadFile = File(...)):
+async def scan_card(
+    image: UploadFile = File(...),
+    username: str = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
     suffix = Path(image.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         # Unknown extension — coerce to .jpg so downstream stays predictable.
@@ -41,7 +47,19 @@ async def scan_card(image: UploadFile = File(...)):
     # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
     # thread so it doesn't block the event loop (and every other request) while
     # this async endpoint waits on it.
-    extracted, is_mock, error = await run_in_threadpool(extract_card_from_image, str(file_path))
+    extracted, is_mock, error, usage = await run_in_threadpool(extract_card_from_image, str(file_path))
+
+    # Attribute the API cost to the logged-in user (only real, billed calls have
+    # usage — mock mode and failures don't).
+    if usage:
+        db.add(UsageEvent(
+            username=username,
+            kind="scan",
+            model=usage.get("model", ""),
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        ))
+        db.commit()
 
     # The frontend uses this URL path to render the thumbnail.
     public_path = f"/uploads/{filename}"

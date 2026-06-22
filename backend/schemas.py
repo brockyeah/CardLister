@@ -7,10 +7,13 @@ from pydantic import BaseModel, ConfigDict
 # --- Auth ---
 class LoginRequest(BaseModel):
     password: str
+    # Optional so single-user (owner-only) setups can leave it blank.
+    username: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
     token: str
+    username: str
 
 
 # --- Cards ---
@@ -108,3 +111,19 @@ class EbayListingUpdate(BaseModel):
 class MarkSoldRequest(BaseModel):
     sold_price: float
     sold_at: Optional[datetime] = None
+
+
+# --- Usage / cost split ---
+class UsageRow(BaseModel):
+    username: str
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class UsageReport(BaseModel):
+    period: str            # e.g. "2026-06"
+    since: datetime        # start of the reporting window (UTC)
+    rows: List[UsageRow]
+    total_cost_usd: float

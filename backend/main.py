@@ -7,9 +7,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from .database import init_db, uploads_dir
-from .auth import check_password, create_token, validate_secrets
+from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
-from .routers import cards, scan, pricing, ebay, sheets
+from .routers import cards, scan, pricing, ebay, sheets, usage
 
 app = FastAPI(title="CardLister", version="1.0.0")
 
@@ -37,9 +37,10 @@ def on_startup():
 # --- Auth route ---
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest):
-    if not check_password(payload.password):
-        raise HTTPException(status_code=401, detail="Invalid password")
-    return TokenResponse(token=create_token())
+    username = (payload.username or DEFAULT_USERNAME).strip()
+    if not authenticate(username, payload.password):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return TokenResponse(token=create_token(username), username=username)
 
 
 @app.get("/api/health")
@@ -53,6 +54,7 @@ app.include_router(scan.router, prefix="/api/scan", tags=["scan"])
 app.include_router(pricing.router, prefix="/api/pricing", tags=["pricing"])
 app.include_router(ebay.router, prefix="/api/ebay", tags=["ebay"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
+app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
 
 
 # --- Uploaded images served back to the browser ---

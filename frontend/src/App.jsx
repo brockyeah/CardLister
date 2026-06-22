@@ -1,8 +1,9 @@
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
-import { getToken, clearToken } from './api'
+import { getToken, getUsername, clearToken } from './api'
 import Login from './pages/Login.jsx'
 import Scanner from './pages/Scanner.jsx'
 import Inventory from './pages/Inventory.jsx'
+import Usage from './pages/Usage.jsx'
 
 function RequireAuth({ children }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -30,7 +31,11 @@ function NavBar() {
         <nav className="flex items-center gap-2">
           <NavLink to="/" end className={linkClass}>Scan</NavLink>
           <NavLink to="/inventory" className={linkClass}>Inventory</NavLink>
-          <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-200 ml-2 px-2">
+          <NavLink to="/usage" className={linkClass}>Usage</NavLink>
+          {getUsername() && (
+            <span className="text-sm text-gray-500 ml-2 hidden sm:inline">{getUsername()}</span>
+          )}
+          <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-200 ml-1 px-2">
             Log out
           </button>
         </nav>
@@ -65,6 +70,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Shell><Inventory /></Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/usage"
+        element={
+          <RequireAuth>
+            <Shell><Usage /></Shell>
           </RequireAuth>
         }
       />

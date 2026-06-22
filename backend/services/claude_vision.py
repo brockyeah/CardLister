@@ -202,19 +202,22 @@ def _extract_json_from_text(text: str) -> dict:
         raise
 
 
-def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str]]:
-    """Returns (extracted_dict, is_mock, error).
+def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
+    """Returns (extracted_dict, is_mock, error, usage).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
     Always returns a dict shaped like the prompt. The three outcomes are distinct:
-      - no API key  → (mock data, True, None)        intentional dev mode
-      - success     → (extracted, False, None)
-      - call failed → (blank card, False, error_msg) so the caller can show a
-                       real error instead of a misleading "set ANTHROPIC_API_KEY" banner.
+      - no API key  → (mock data, True, None, None)        intentional dev mode
+      - success     → (extracted, False, None, usage)       usage = token counts
+      - call failed → (blank card, False, error_msg, None)  so the caller can show
+                       a real error, not a misleading "set ANTHROPIC_API_KEY" banner.
+
+    `usage` (when present) is {"model", "input_tokens", "output_tokens"} so the
+    caller can attribute the API cost to the current user.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return MOCK_RESPONSE.copy(), True, None
+        return MOCK_RESPONSE.copy(), True, None, None
 
     try:
         import anthropic
@@ -281,7 +284,12 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str]]
             raise ValueError("No text block in Claude response")
 
         data = _extract_json_from_text(text)
-        return data, False, None
+        usage = {
+            "model": CLAUDE_MODEL,
+            "input_tokens": getattr(response.usage, "input_tokens", 0) or 0,
+            "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
+        }
+        return data, False, None, usage
 
     except Exception as e:
         # Log to terminal too so failures aren't invisible in the backend logs.
@@ -289,4 +297,4 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str]]
         error = f"Vision extraction failed: {e}"
         blank = _blank_card(f"{error}. Please fill in manually.")
         # is_mock=False: a real key is set, this is an error — not mock mode.
-        return blank, False, error
+        return blank, False, error, None
