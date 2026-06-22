@@ -78,6 +78,8 @@ class ScanResponse(BaseModel):
     image_path: str
     extracted: dict
     mock: bool = False
+    # Set when a real extraction was attempted but failed (distinct from mock mode).
+    error: Optional[str] = None
 
 
 # --- Pricing ---
@@ -97,11 +99,6 @@ class PricingResponse(BaseModel):
 
 
 # --- eBay ---
-class EbayUrlResponse(BaseModel):
-    url: str
-    title: str
-
-
 class EbayListingUpdate(BaseModel):
     ebay_listing_id: str
     ebay_listing_url: str

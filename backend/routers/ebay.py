@@ -1,23 +1,18 @@
-"""eBay pre-fill URL builder.
+"""eBay listing text builder.
 
-We construct a URL that opens eBay's sell-your-item form with key fields populated.
-The user reviews and clicks Publish themselves — no direct API listing in Phase 1.
+eBay's pre-fill URL params no longer reliably populate the sell form, so the
+working flow is a clipboard hand-off: we build the title + description + price
+and the user pastes them into eBay's sell page. Direct API listing is Phase 2.
 """
-from urllib.parse import urlencode
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
 from ..models import Card
-from ..schemas import EbayUrlResponse
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
-EBAY_BASE_URL = "https://www.ebay.com/sell/listing"
-EBAY_CATEGORY_ID = "261328"   # Sports Trading Cards > Baseball
-EBAY_CONDITION_CODE = "3000"  # Used (cards have no NIB equivalent in eBay's enum)
 EBAY_TITLE_MAX = 80
 
 
@@ -86,27 +81,6 @@ def build_description(card: Card) -> str:
     lines.append("")
     lines.append("Ships in a protective sleeve and top loader. Combined shipping available.")
     return "\n".join(lines)
-
-
-@router.get("/{card_id}/url", response_model=EbayUrlResponse)
-def ebay_url(card_id: int, db: Session = Depends(get_db)):
-    card = db.query(Card).filter(Card.id == card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Card not found")
-
-    title = build_title(card)
-    description = build_description(card)
-    price = card.listed_price if card.listed_price is not None else (card.suggested_price or 0)
-
-    params = {
-        "item.title": title,
-        "item.categoryId": EBAY_CATEGORY_ID,
-        "item.condition": EBAY_CONDITION_CODE,
-        "item.price.amount": f"{price:.2f}",
-        "item.description": description,
-    }
-    url = f"{EBAY_BASE_URL}?{urlencode(params)}"
-    return EbayUrlResponse(url=url, title=title)
 
 
 @router.get("/{card_id}/listing-text")

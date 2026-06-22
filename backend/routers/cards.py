@@ -56,11 +56,8 @@ def get_card(card_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=CardOut)
 def create_card(payload: CardCreate, db: Session = Depends(get_db)):
     card = Card(**payload.model_dump())
-    # Anything saved here is going on eBay next, so default to "active".
-    if not card.status:
-        card.status = "active"
-    else:
-        card.status = "active"
+    # Anything saved here is going on eBay next, so always mark it "active".
+    card.status = "active"
     db.add(card)
     db.commit()
     db.refresh(card)

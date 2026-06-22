@@ -2,7 +2,7 @@
 
 A dead-simple internal tool for listing baseball cards on eBay faster.
 
-**Workflow:** snap a photo → Claude vision extracts the card details → Mavin.io looks up recent sold comps → review and tweak the form → click Save and an eBay pre-fill listing opens in a new tab. Every card is mirrored to a Google Sheet.
+**Workflow:** snap a photo → Claude vision extracts the card details → sold-comp lookup (130point → Mavin → eBay) suggests a price → review and tweak the form → click Save to copy a ready-to-paste listing to your clipboard and open eBay's sell page. Every card is mirrored to a Google Sheet.
 
 ---
 
@@ -10,8 +10,8 @@ A dead-simple internal tool for listing baseball cards on eBay faster.
 
 - **Backend:** FastAPI (Python 3.11), SQLAlchemy, SQLite
 - **Frontend:** React 18 + Tailwind CSS, built with Vite
-- **AI:** Anthropic Claude `claude-sonnet-4-20250514` with vision
-- **Pricing:** Mavin.io scrape (BeautifulSoup + httpx)
+- **AI:** Anthropic Claude `claude-opus-4-7` with vision + adaptive thinking
+- **Pricing:** sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
 - **Inventory mirror:** Google Sheets API (write-only)
 - **Deploy:** Single Docker container on Railway (one service, one URL)
 
@@ -145,8 +145,8 @@ Example: `2021 Bowman Chrome Wander Franco #BCP-100 RC /99 Tampa Bay Rays`
 
 The app is fully usable without any API keys:
 
-- **No `ANTHROPIC_API_KEY`** → `/api/scan` returns a hardcoded mock card and labels it `mock: true` in the response (the UI shows a yellow banner).
-- **Mavin scrape returns nothing** → pricing returns `$9.99` with `source: "mock"`.
+- **No `ANTHROPIC_API_KEY`** → `/api/scan` returns a hardcoded mock card and labels it `mock: true` in the response (the UI shows a yellow banner). If the key *is* set but the vision call fails, the response instead carries an `error` string and a blank card, and the UI shows a red error banner — distinct from mock mode.
+- **All comp sources return nothing** (130point, Mavin, eBay) → pricing returns `$9.99` with `source: "mock"` and a note explaining what failed.
 
 This is intentional — it lets you exercise the full flow during development.
 

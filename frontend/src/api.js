@@ -67,10 +67,7 @@ export const markSold = (id, payload) =>
 export const attachEbayListing = (id, payload) =>
   api.post(`/api/cards/${id}/ebay-id`, payload).then((r) => r.data)
 
-// --- eBay URL ---
-export const getEbayUrl = (id) =>
-  api.get(`/api/ebay/${id}/url`).then((r) => r.data)
-
+// --- eBay listing text ---
 export const getEbayListingText = (id) =>
   api.get(`/api/ebay/${id}/listing-text`).then((r) => r.data)
 

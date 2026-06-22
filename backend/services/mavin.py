@@ -10,42 +10,14 @@ from urllib.parse import quote_plus
 import httpx
 from bs4 import BeautifulSoup
 
+from .pricing_utils import build_query, parse_price
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
 MOCK_PRICE = 9.99
-
-
-def _build_query(
-    year: Optional[int],
-    brand: Optional[str],
-    player_name: Optional[str],
-    set_name: Optional[str],
-    card_number: Optional[str],
-) -> str:
-    parts = [str(p) for p in (year, brand, player_name, set_name, card_number) if p]
-    return " ".join(parts).strip()
-
-
-def _parse_price(text: str) -> Optional[float]:
-    """Extract first dollar amount from a string like '$12.50' or 'Sold for $9.99'."""
-    cleaned = text.replace(",", "").strip()
-    if "$" not in cleaned:
-        return None
-    try:
-        after = cleaned.split("$", 1)[1]
-        # Stop at first non-price character
-        num = ""
-        for ch in after:
-            if ch.isdigit() or ch == ".":
-                num += ch
-            else:
-                break
-        return float(num) if num else None
-    except (ValueError, IndexError):
-        return None
 
 
 def fetch_mavin_comps(
@@ -59,7 +31,7 @@ def fetch_mavin_comps(
 
     source is "mavin", "mock", or "none".
     """
-    query = _build_query(year, brand, player_name, set_name, card_number)
+    query = build_query(year, brand, player_name, set_name, card_number)
     if not query:
         return [], None, "none", "Empty query."
 
@@ -86,8 +58,8 @@ def fetch_mavin_comps(
 
     for el in candidates[:20]:
         text = el.get_text(" ", strip=True)
-        price = _parse_price(text)
-        if price is None or price <= 0:
+        price = parse_price(text)
+        if price is None:
             continue
         title_el = el.find(["h3", "h4", "a", "span"])
         title = title_el.get_text(strip=True) if title_el else text[:120]

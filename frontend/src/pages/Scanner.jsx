@@ -78,6 +78,9 @@ export default function Scanner() {
       const result = await scanCard(stagedFile)
       setImagePath(result.image_path)
       setMock(!!result.mock)
+      // A real extraction was attempted but failed (distinct from mock mode) —
+      // surface it instead of the misleading "set ANTHROPIC_API_KEY" banner.
+      if (result.error) setError(result.error)
       const next = { ...EMPTY_FORM, ...result.extracted, image_path: result.image_path }
       setForm(next)
       clearStaged()

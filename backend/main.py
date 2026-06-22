@@ -1,5 +1,4 @@
 """FastAPI app entrypoint. Wires up routers, static files, uploads, and auth login."""
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -7,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
-from .database import init_db
-from .auth import check_password, create_token
+from .database import init_db, uploads_dir
+from .auth import check_password, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
 from .routers import cards, scan, pricing, ebay, sheets
 
@@ -27,17 +26,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
+    # Refuse to boot a production deploy with default/insecure secrets.
+    validate_secrets()
     init_db()
     # Make sure the uploads directory exists. On Railway this should resolve to /data/uploads
     # via the DB_PATH-derived parent, but locally it just sits next to the project.
-    uploads_dir = _uploads_dir()
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _uploads_dir() -> Path:
-    """Uploads sit alongside the SQLite DB file so a single Railway volume covers both."""
-    db_path = Path(os.getenv("DB_PATH", "./cardlister.db")).resolve()
-    return db_path.parent / "uploads"
+    uploads_dir().mkdir(parents=True, exist_ok=True)
 
 
 # --- Auth route ---
@@ -67,7 +61,7 @@ app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 def serve_upload(filename: str):
     # Strip any path traversal attempts; only allow the bare filename.
     safe_name = Path(filename).name
-    file_path = _uploads_dir() / safe_name
+    file_path = uploads_dir() / safe_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(str(file_path))

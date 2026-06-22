@@ -13,7 +13,7 @@ import json
 import base64
 import logging
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,27 @@ MOCK_RESPONSE = {
 }
 
 
+def _blank_card(note: str) -> dict:
+    """An empty card shaped like the prompt — used when extraction errors out so
+    the user gets a blank form to hand-edit rather than misleading mock values."""
+    return {
+        "player_name": "",
+        "year": None,
+        "brand": "",
+        "set_name": "",
+        "card_number": "",
+        "team": "",
+        "is_rookie": False,
+        "is_autograph": False,
+        "is_patch": False,
+        "is_refractor": False,
+        "parallel_color": None,
+        "serial_number": None,
+        "condition": "NM",
+        "confidence_notes": note,
+    }
+
+
 def _guess_media_type(path: Path) -> str:
     suffix = path.suffix.lower()
     return {
@@ -135,16 +156,19 @@ def _extract_json_from_text(text: str) -> dict:
         raise
 
 
-def extract_card_from_image(image_path: str) -> Tuple[dict, bool]:
-    """Returns (extracted_dict, is_mock).
+def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str]]:
+    """Returns (extracted_dict, is_mock, error).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
-    Always returns a dict shaped like the prompt — on any error we degrade to
-    mock data with an explanation in confidence_notes so the user can still hand-edit.
+    Always returns a dict shaped like the prompt. The three outcomes are distinct:
+      - no API key  → (mock data, True, None)        intentional dev mode
+      - success     → (extracted, False, None)
+      - call failed → (blank card, False, error_msg) so the caller can show a
+                       real error instead of a misleading "set ANTHROPIC_API_KEY" banner.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return MOCK_RESPONSE.copy(), True
+        return MOCK_RESPONSE.copy(), True, None
 
     try:
         import anthropic
@@ -212,11 +236,12 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool]:
             raise ValueError("No text block in Claude response")
 
         data = _extract_json_from_text(text)
-        return data, False
+        return data, False, None
 
     except Exception as e:
         # Log to terminal too so failures aren't invisible in the backend logs.
         logger.exception("Claude vision extraction failed")
-        fallback = MOCK_RESPONSE.copy()
-        fallback["confidence_notes"] = f"Vision extraction failed: {e}. Please fill in manually."
-        return fallback, True
+        error = f"Vision extraction failed: {e}"
+        blank = _blank_card(f"{error}. Please fill in manually.")
+        # is_mock=False: a real key is set, this is an error — not mock mode.
+        return blank, False, error
