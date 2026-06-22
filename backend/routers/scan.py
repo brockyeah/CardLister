@@ -2,7 +2,7 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -10,7 +10,7 @@ from ..auth import require_auth
 from ..database import get_db, uploads_dir
 from ..models import UsageEvent
 from ..schemas import ScanResponse
-from ..services.claude_vision import extract_card_from_image
+from ..services.claude_vision import DEFAULT_PRESET, extract_card_from_image, resolve_preset
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -22,6 +22,7 @@ ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 @router.post("", response_model=ScanResponse)
 async def scan_card(
     image: UploadFile = File(...),
+    preset: str = Form(DEFAULT_PRESET),
     username: str = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
@@ -44,10 +45,15 @@ async def scan_card(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
 
+    # The user's chosen scan mode (cost / balance / accuracy) → model + effort.
+    model, effort = resolve_preset(preset)
+
     # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
     # thread so it doesn't block the event loop (and every other request) while
     # this async endpoint waits on it.
-    extracted, is_mock, error, usage = await run_in_threadpool(extract_card_from_image, str(file_path))
+    extracted, is_mock, error, usage = await run_in_threadpool(
+        extract_card_from_image, str(file_path), model, effort
+    )
 
     # Attribute the API cost to the logged-in user (only real, billed calls have
     # usage — mock mode and failures don't).

@@ -36,6 +36,26 @@ THINKING_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
 # disable downsampling (send the original). The on-disk upload is never modified.
 VISION_MAX_IMAGE_PX = int(os.getenv("VISION_MAX_IMAGE_PX", "1300"))
 
+# User-selectable scan presets (chosen per-scan on the scan page). Each maps to a
+# (model, effort) pair. All three use models that support adaptive thinking + the
+# effort param, so the API call shape is identical regardless of choice.
+# NOTE: keep these keys/labels in sync with the selector in frontend Scanner.jsx.
+PRESETS = {
+    "cost":     {"label": "Cost",     "model": "claude-sonnet-4-6", "effort": "low"},
+    "balance":  {"label": "Balanced", "model": "claude-opus-4-7",   "effort": "medium"},
+    "accuracy": {"label": "Accuracy", "model": "claude-opus-4-7",   "effort": "high"},
+}
+DEFAULT_PRESET = "balance"
+
+
+def resolve_preset(key: Optional[str]) -> Tuple[str, str]:
+    """Map a preset key to (model, effort). Unknown/None falls back to the env
+    defaults (CLAUDE_MODEL / THINKING_EFFORT)."""
+    preset = PRESETS.get(key or "")
+    if preset is None:
+        return CLAUDE_MODEL, THINKING_EFFORT
+    return preset["model"], preset["effort"]
+
 SYSTEM_PROMPT = """You are a world-class baseball card identification expert with deep knowledge of every major card brand and set from 1980 through 2026 (Topps, Bowman, Panini, Upper Deck, Donruss, Fleer, Leaf, and their sub-brands like Chrome, Heritage, Prizm, Select, Optic, Mosaic, Stadium Club, etc.).
 
 The user is a seasoned collector who will manually verify your work, so prefer confident educated guesses over empty fields. An empty field is worse than a reasonable guess the user can correct.
@@ -202,8 +222,14 @@ def _extract_json_from_text(text: str) -> dict:
         raise
 
 
-def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
+def extract_card_from_image(
+    image_path: str,
+    model: Optional[str] = None,
+    effort: Optional[str] = None,
+) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
     """Returns (extracted_dict, is_mock, error, usage).
+
+    `model`/`effort` override the env defaults (used by the scan-page presets).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
     Always returns a dict shaped like the prompt. The three outcomes are distinct:
@@ -218,6 +244,9 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str],
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return MOCK_RESPONSE.copy(), True, None, None
+
+    model = model or CLAUDE_MODEL
+    effort = effort or THINKING_EFFORT
 
     try:
         import anthropic
@@ -250,14 +279,14 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str],
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=model,
             max_tokens=8192,
             # Adaptive thinking + an effort hint — Opus 4.7's API. Lets the model
             # reason through partial evidence (border colors → parallel,
             # copyright → year, set + player → card #) without us micromanaging
             # the token budget.
             thinking={"type": "adaptive"},
-            output_config={"effort": THINKING_EFFORT},
+            output_config={"effort": effort},
             system=SYSTEM_PROMPT,
             messages=[
                 {
@@ -285,7 +314,7 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str],
 
         data = _extract_json_from_text(text)
         usage = {
-            "model": CLAUDE_MODEL,
+            "model": model,
             "input_tokens": getattr(response.usage, "input_tokens", 0) or 0,
             "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
         }

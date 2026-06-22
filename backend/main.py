@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .database import init_db, uploads_dir
 from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
-from .routers import cards, scan, pricing, ebay, sheets, usage
+from .routers import cards, scan, pricing, ebay, sheets, analytics
 
 app = FastAPI(title="CardLister", version="1.0.0")
 
@@ -54,7 +54,7 @@ app.include_router(scan.router, prefix="/api/scan", tags=["scan"])
 app.include_router(pricing.router, prefix="/api/pricing", tags=["pricing"])
 app.include_router(ebay.router, prefix="/api/ebay", tags=["ebay"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
-app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 
 
 # --- Uploaded images served back to the browser ---

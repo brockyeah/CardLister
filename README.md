@@ -81,8 +81,8 @@ docker run --rm -p 8000:8000 \
 | `JWT_SECRET` | yes | Long random string used to sign session tokens. Use `openssl rand -hex 32`. Same production fail-fast as above. |
 | `APP_ENV` | optional | Set to `production` to enforce the secret checks above. Auto-detected on Railway; defaults to development locally. |
 | `ANTHROPIC_API_KEY` | recommended | From <https://console.anthropic.com>. If missing, `/api/scan` returns mock data so the UI still works end-to-end. |
-| `CLAUDE_MODEL` | optional | Vision model id. Defaults to `claude-opus-4-7`. Set to `claude-sonnet-4-6` to cut cost (test accuracy first). |
-| `CLAUDE_EFFORT` | optional | Thinking depth: `low` \| `medium` \| `high`. Defaults to `medium`. Lower = cheaper. |
+| `CLAUDE_MODEL` | optional | Fallback vision model id (default `claude-opus-4-7`). Per-scan choice is normally driven by the **Scan mode** selector (Cost / Balanced / Accuracy); this is the fallback when no preset is sent. |
+| `CLAUDE_EFFORT` | optional | Fallback thinking depth: `low` \| `medium` \| `high` (default `medium`). Also superseded per-scan by the Scan mode selector. |
 | `VISION_MAX_IMAGE_PX` | optional | Long-edge pixel cap applied to images before they're sent to the vision API (the on-disk upload is untouched). Defaults to `1300`; set `0` to disable downsampling. |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | optional | The full JSON contents of a Google service account key file, as a single string. |
 | `GOOGLE_SHEET_ID` | optional | The Sheet ID from the URL (`docs.google.com/spreadsheets/d/<THIS-PART>/edit`). |
@@ -197,7 +197,7 @@ cardlister/
 │   │   ├── pricing.py       # eBay API + scraper comp chain
 │   │   ├── ebay.py          # Listing text builder
 │   │   ├── sheets.py        # Manual resync endpoints
-│   │   └── usage.py         # Per-user cost-split report
+│   │   └── analytics.py     # Usage + cost analytics (filters)
 │   ├── services/
 │   │   ├── claude_vision.py # Claude API call
 │   │   ├── ebay_api.py      # eBay API pricing (primary)
@@ -213,7 +213,7 @@ cardlister/
 │   │   │   ├── Login.jsx
 │   │   │   ├── Scanner.jsx  # Upload + review (default page)
 │   │   │   ├── Inventory.jsx
-│   │   │   └── Usage.jsx    # Per-user cost split
+│   │   │   └── Analytics.jsx # Usage + cost analytics
 │   │   └── components/
 │   │       ├── CardForm.jsx
 │   │       ├── CardTable.jsx

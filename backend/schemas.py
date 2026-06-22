@@ -113,7 +113,7 @@ class MarkSoldRequest(BaseModel):
     sold_at: Optional[datetime] = None
 
 
-# --- Usage / cost split ---
+# --- Analytics / cost split ---
 class UsageRow(BaseModel):
     username: str
     scans: int
@@ -122,8 +122,34 @@ class UsageRow(BaseModel):
     est_cost_usd: float
 
 
-class UsageReport(BaseModel):
-    period: str            # e.g. "2026-06"
-    since: datetime        # start of the reporting window (UTC)
-    rows: List[UsageRow]
-    total_cost_usd: float
+class ModelRow(BaseModel):
+    model: str
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class DayRow(BaseModel):
+    date: str              # "YYYY-MM-DD"
+    scans: int
+    est_cost_usd: float
+
+
+class AnalyticsTotals(BaseModel):
+    scans: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float
+
+
+class AnalyticsReport(BaseModel):
+    range: str                         # today | 7d | 30d | month | all
+    since: Optional[datetime] = None   # None for all-time
+    until: datetime
+    totals: AnalyticsTotals
+    by_user: List[UsageRow]
+    by_model: List[ModelRow]
+    by_day: List[DayRow]
+    users: List[str]                   # distinct values for filter dropdowns
+    models: List[str]

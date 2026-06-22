@@ -3,7 +3,7 @@ import { getToken, getUsername, clearToken } from './api'
 import Login from './pages/Login.jsx'
 import Scanner from './pages/Scanner.jsx'
 import Inventory from './pages/Inventory.jsx'
-import Usage from './pages/Usage.jsx'
+import Analytics from './pages/Analytics.jsx'
 
 function RequireAuth({ children }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -31,7 +31,7 @@ function NavBar() {
         <nav className="flex items-center gap-2">
           <NavLink to="/" end className={linkClass}>Scan</NavLink>
           <NavLink to="/inventory" className={linkClass}>Inventory</NavLink>
-          <NavLink to="/usage" className={linkClass}>Usage</NavLink>
+          <NavLink to="/analytics" className={linkClass}>Analytics</NavLink>
           {getUsername() && (
             <span className="text-sm text-gray-500 ml-2 hidden sm:inline">{getUsername()}</span>
           )}
@@ -74,10 +74,10 @@ export default function App() {
         }
       />
       <Route
-        path="/usage"
+        path="/analytics"
         element={
           <RequireAuth>
-            <Shell><Usage /></Shell>
+            <Shell><Analytics /></Shell>
           </RequireAuth>
         }
       />

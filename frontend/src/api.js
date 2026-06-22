@@ -41,13 +41,16 @@ api.interceptors.response.use(
 export const login = (username, password) =>
   api.post('/api/auth/login', { username, password }).then((r) => r.data)
 
-// --- Usage / cost split ---
-export const getUsage = () => api.get('/api/usage').then((r) => r.data)
+// --- Analytics / cost split ---
+// params: { range: 'today'|'7d'|'30d'|'month'|'all', user?, model? }
+export const getAnalytics = (params = {}) =>
+  api.get('/api/analytics', { params }).then((r) => r.data)
 
 // --- Scan ---
-export const scanCard = (file) => {
+export const scanCard = (file, preset = 'balance') => {
   const fd = new FormData()
   fd.append('image', file)
+  fd.append('preset', preset)
   return api
     .post('/api/scan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     .then((r) => r.data)
