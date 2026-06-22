@@ -2,10 +2,10 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..auth import require_auth
 from ..models import Card
 from ..schemas import (
@@ -17,12 +17,25 @@ from ..services.google_sheets import sync_card
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 
-def _sync_safely(card: Card, db: Session) -> None:
-    """Sync to Sheets, persist the returned row index. Errors are swallowed by sync_card."""
-    row = sync_card(card)
-    if row and card.sheets_row != row:
-        card.sheets_row = row
-        db.commit()
+def _sync_card_to_sheets(card_id: int) -> None:
+    """Background task: mirror a card to Google Sheets and persist its row index.
+
+    Runs after the response is sent, on its own DB session — the request-scoped
+    session is already closed by then. Sheets failures are swallowed inside
+    sync_card, so a slow or failing Google API call never delays or breaks the
+    user's save.
+    """
+    db = SessionLocal()
+    try:
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if card is None:
+            return
+        row = sync_card(card)
+        if row and card.sheets_row != row:
+            card.sheets_row = row
+            db.commit()
+    finally:
+        db.close()
 
 
 @router.get("", response_model=List[CardOut])
@@ -54,19 +67,19 @@ def get_card(card_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=CardOut)
-def create_card(payload: CardCreate, db: Session = Depends(get_db)):
+def create_card(payload: CardCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     card = Card(**payload.model_dump())
     # Anything saved here is going on eBay next, so always mark it "active".
     card.status = "active"
     db.add(card)
     db.commit()
     db.refresh(card)
-    _sync_safely(card, db)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
 
 
 @router.patch("/{card_id}", response_model=CardOut)
-def update_card(card_id: int, payload: CardUpdate, db: Session = Depends(get_db)):
+def update_card(card_id: int, payload: CardUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -74,7 +87,7 @@ def update_card(card_id: int, payload: CardUpdate, db: Session = Depends(get_db)
         setattr(card, k, v)
     db.commit()
     db.refresh(card)
-    _sync_safely(card, db)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
 
 
@@ -89,7 +102,7 @@ def delete_card(card_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{card_id}/ebay-id", response_model=CardOut)
-def attach_ebay_listing(card_id: int, payload: EbayListingUpdate, db: Session = Depends(get_db)):
+def attach_ebay_listing(card_id: int, payload: EbayListingUpdate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """User pastes back the eBay listing ID + URL after publishing."""
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
@@ -98,12 +111,12 @@ def attach_ebay_listing(card_id: int, payload: EbayListingUpdate, db: Session = 
     card.ebay_listing_url = payload.ebay_listing_url
     db.commit()
     db.refresh(card)
-    _sync_safely(card, db)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
 
 
 @router.post("/{card_id}/mark-sold", response_model=CardOut)
-def mark_sold(card_id: int, payload: MarkSoldRequest, db: Session = Depends(get_db)):
+def mark_sold(card_id: int, payload: MarkSoldRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -112,5 +125,5 @@ def mark_sold(card_id: int, payload: MarkSoldRequest, db: Session = Depends(get_
     card.sold_at = payload.sold_at or datetime.utcnow()
     db.commit()
     db.refresh(card)
-    _sync_safely(card, db)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card

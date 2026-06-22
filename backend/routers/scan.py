@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 from ..auth import require_auth
 from ..database import uploads_dir
@@ -37,7 +38,10 @@ async def scan_card(image: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
 
-    extracted, is_mock, error = extract_card_from_image(str(file_path))
+    # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
+    # thread so it doesn't block the event loop (and every other request) while
+    # this async endpoint waits on it.
+    extracted, is_mock, error = await run_in_threadpool(extract_card_from_image, str(file_path))
 
     # The frontend uses this URL path to render the thumbnail.
     public_path = f"/uploads/{filename}"

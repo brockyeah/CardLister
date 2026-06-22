@@ -19,14 +19,22 @@ logger = logging.getLogger(__name__)
 
 # Opus is meaningfully better than Sonnet at fine-detail vision extraction
 # and benefits more from extended thinking on multi-step inference (year,
-# card #, parallel color from border tint, etc).
-CLAUDE_MODEL = "claude-opus-4-7"
+# card #, parallel color from border tint, etc). Overridable via env so you can
+# A/B a cheaper model (e.g. claude-sonnet-4-6) without a code change.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-7")
 
 # Opus 4.7 uses adaptive thinking — the model decides how much to think based
 # on the effort hint. "medium" is the sweet spot for card extraction: enough
 # reasoning to infer year/card#/parallel from partial evidence without burning
-# tokens on trivial cases.
-THINKING_EFFORT = "medium"
+# tokens on trivial cases. Lower it ("low") to cut cost, raise it ("high") for
+# tougher cards. Overridable via CLAUDE_EFFORT.
+THINKING_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
+
+# Long-edge pixel cap for images sent to the vision API. Card photos from phones
+# are often 3000px+, which bills up to ~4,784 image tokens on Opus 4.7; ~1300px
+# stays legible for text extraction at a fraction of the token cost. Set to 0 to
+# disable downsampling (send the original). The on-disk upload is never modified.
+VISION_MAX_IMAGE_PX = int(os.getenv("VISION_MAX_IMAGE_PX", "1300"))
 
 SYSTEM_PROMPT = """You are a world-class baseball card identification expert with deep knowledge of every major card brand and set from 1980 through 2026 (Topps, Bowman, Panini, Upper Deck, Donruss, Fleer, Leaf, and their sub-brands like Chrome, Heritage, Prizm, Select, Optic, Mosaic, Stadium Club, etc.).
 
@@ -124,6 +132,44 @@ def _blank_card(note: str) -> dict:
     }
 
 
+def _encode_for_api(path: Path, media_type: str) -> Tuple[str, str]:
+    """Return (base64_data, media_type) to send to the API.
+
+    Images larger than VISION_MAX_IMAGE_PX on the long edge are downsampled and
+    re-encoded as JPEG to cut image-token cost; PDFs and already-small images
+    pass through untouched. The file on disk is never modified — only the bytes
+    sent to the API are shrunk. Falls back to the original on any error.
+    """
+    raw = path.read_bytes()
+
+    def _passthrough() -> Tuple[str, str]:
+        return base64.standard_b64encode(raw).decode("utf-8"), media_type
+
+    if media_type == "application/pdf" or VISION_MAX_IMAGE_PX <= 0:
+        return _passthrough()
+
+    try:
+        import io
+
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(raw))
+        long_edge = max(img.size)
+        if long_edge <= VISION_MAX_IMAGE_PX:
+            return _passthrough()
+
+        scale = VISION_MAX_IMAGE_PX / long_edge
+        new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+        img = img.convert("RGB").resize(new_size, Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        logger.info("Downsampled vision image: %dpx long edge → %s", long_edge, new_size)
+        return base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
+    except Exception:
+        logger.warning("Image downsample failed; sending original", exc_info=True)
+        return _passthrough()
+
+
 def _guess_media_type(path: Path) -> str:
     suffix = path.suffix.lower()
     return {
@@ -174,9 +220,8 @@ def extract_card_from_image(image_path: str) -> Tuple[dict, bool, Optional[str]]
         import anthropic
 
         path = Path(image_path)
-        media_type = _guess_media_type(path)
-        with open(path, "rb") as f:
-            file_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+        # Downsamples large images and may switch the media type to image/jpeg.
+        file_b64, media_type = _encode_for_api(path, _guess_media_type(path))
 
         # PDFs use the "document" content block; images use "image".
         # Both encode the bytes the same way (base64), so the only difference
