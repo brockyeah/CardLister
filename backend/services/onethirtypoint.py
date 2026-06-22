@@ -9,13 +9,14 @@ Defensive parsing: 130point's HTML may shift over time so we try multiple
 selectors and fall back to a "find any element with a price near a title"
 heuristic before giving up.
 """
-import re
 import statistics
 from typing import List, Optional, Tuple
 from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
+
+from .pricing_utils import PRICE_RE, build_query, parse_price
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -31,34 +32,6 @@ BROWSER_HEADERS = {
     "Cache-Control": "no-cache",
     "Upgrade-Insecure-Requests": "1",
 }
-
-_PRICE_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]{1,2})?)")
-
-
-def _build_query(
-    year: Optional[int],
-    brand: Optional[str],
-    player_name: Optional[str],
-    set_name: Optional[str],
-    card_number: Optional[str],
-) -> str:
-    parts = [str(p) for p in (year, brand, player_name, set_name, card_number) if p]
-    return " ".join(parts).strip()
-
-
-def _parse_price(text: str) -> Optional[float]:
-    if not text:
-        return None
-    cleaned = text.replace(",", "")
-    match = _PRICE_RE.search(cleaned)
-    if not match:
-        return None
-    try:
-        value = float(match.group(1))
-        return value if value > 0 else None
-    except ValueError:
-        return None
-
 
 def _extract_comps_from_html(html: str) -> List[dict]:
     """Best-effort parse. Tries structured selectors first, then a fallback heuristic."""
@@ -80,7 +53,7 @@ def _extract_comps_from_html(html: str) -> List[dict]:
         for cell in cells:
             text = cell.get_text(" ", strip=True)
             if "$" in text and price_value is None:
-                price_value = _parse_price(text)
+                price_value = parse_price(text)
             elif len(text) > len(title_text):
                 title_text = text
 
@@ -95,7 +68,7 @@ def _extract_comps_from_html(html: str) -> List[dict]:
     # --- Path B: card-style result blocks ---
     for el in soup.select(".result, .sale, .item, .listing, li.product, div.card-result"):
         text = el.get_text(" ", strip=True)
-        price = _parse_price(text)
+        price = parse_price(text)
         if not price:
             continue
         title_el = el.find(["h3", "h4", "a", "span"])
@@ -115,11 +88,11 @@ def _extract_comps_from_html(html: str) -> List[dict]:
             continue
         if "$" not in text:
             continue
-        price = _parse_price(text)
+        price = parse_price(text)
         if not price:
             continue
         # Skip elements that contain a bunch of other priced children — we want leaves.
-        if len(el.find_all(string=_PRICE_RE)) > 2:
+        if len(el.find_all(string=PRICE_RE)) > 2:
             continue
         comps.append({"title": text[:200], "price": price})
         if len(comps) >= 10:
@@ -136,7 +109,7 @@ def fetch_130point_comps(
     card_number: Optional[str] = None,
 ) -> Tuple[List[dict], Optional[float], Optional[str]]:
     """Returns (comps, suggested_price, note). suggested_price is None if no comps."""
-    query = _build_query(year, brand, player_name, set_name, card_number)
+    query = build_query(year, brand, player_name, set_name, card_number)
     if not query:
         return [], None, "Empty query — cannot search 130point."
 
