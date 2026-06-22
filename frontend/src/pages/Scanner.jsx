@@ -205,7 +205,6 @@ export default function Scanner() {
             ref={fileInputRef}
             type="file"
             accept="image/*,application/pdf"
-            capture="environment"
             className="hidden"
             onChange={(e) => stageFile(e.target.files?.[0])}
           />

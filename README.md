@@ -11,7 +11,7 @@ A dead-simple internal tool for listing baseball cards on eBay faster.
 - **Backend:** FastAPI (Python 3.11), SQLAlchemy, SQLite
 - **Frontend:** React 18 + Tailwind CSS, built with Vite
 - **AI:** Anthropic Claude `claude-opus-4-7` with vision + adaptive thinking
-- **Pricing:** sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
+- **Pricing:** eBay API when configured (primary), else a sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
 - **Inventory mirror:** Google Sheets API (write-only)
 - **Deploy:** Single Docker container on Railway (one service, one URL)
 
@@ -85,7 +85,10 @@ docker run --rm -p 8000:8000 \
 | `VISION_MAX_IMAGE_PX` | optional | Long-edge pixel cap applied to images before they're sent to the vision API (the on-disk upload is untouched). Defaults to `1300`; set `0` to disable downsampling. |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | optional | The full JSON contents of a Google service account key file, as a single string. |
 | `GOOGLE_SHEET_ID` | optional | The Sheet ID from the URL (`docs.google.com/spreadsheets/d/<THIS-PART>/edit`). |
-| `EBAY_APP_ID` | optional | Reserved for Phase 2 Browse API fallback pricing. |
+| `EBAY_APP_ID` | optional | eBay App ID (OAuth client_id). With `EBAY_CERT_ID`, the eBay API becomes the **primary** comp source; without it the app falls back to the HTML scrapers. |
+| `EBAY_CERT_ID` | optional | eBay Cert ID (OAuth client_secret), paired with `EBAY_APP_ID`. |
+| `EBAY_MARKETPLACE_ID` | optional | eBay marketplace, default `EBAY_US`. |
+| `EBAY_ENV` | optional | `production` (default) or `sandbox`. |
 | `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** |
 
 ---

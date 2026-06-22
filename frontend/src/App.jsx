@@ -25,7 +25,7 @@ function NavBar() {
     <header className="bg-ink-800 border-b border-ink-700 sticky top-0 z-10">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl font-black tracking-tight text-emerald-400">GolfLover73125</span>
+          <span className="text-xl font-black tracking-tight text-emerald-400">CardLister</span>
         </div>
         <nav className="flex items-center gap-2">
           <NavLink to="/" end className={linkClass}>Scan</NavLink>
