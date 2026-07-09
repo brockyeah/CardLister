@@ -224,12 +224,10 @@ export default function Scanner() {
       setPricingSource('')
 
       if (activeKey) {
-        let nextReady = null
-        setQueue((prev) => {
-          const updated = prev.map((q) => (q.key === activeKey ? { ...q, status: 'saved' } : q))
-          nextReady = updated.find((q) => q.status === 'ready') || null
-          return updated
-        })
+        // Compute from the render snapshot — reading state back out of a
+        // setQueue updater is deferred by React and never runs in time here.
+        const nextReady = queue.find((q) => q.key !== activeKey && q.status === 'ready') || null
+        setQueue((prev) => prev.map((q) => (q.key === activeKey ? { ...q, status: 'saved' } : q)))
         setActiveKey(null)
         if (nextReady) setTimeout(() => reviewQueueItem(nextReady), 0)
       }
