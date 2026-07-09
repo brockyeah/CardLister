@@ -31,6 +31,7 @@ class CardBase(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: str = "NM"
+    quantity: int = 1
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: str = ""
@@ -56,6 +57,7 @@ class CardUpdate(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: Optional[str] = None
+    quantity: Optional[int] = None
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: Optional[str] = None

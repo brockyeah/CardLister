@@ -17,6 +17,7 @@ const EMPTY_FORM = {
   parallel_color: null,
   serial_number: null,
   condition: 'NM',
+  quantity: 1,
   suggested_price: null,
   listed_price: null,
   image_path: '',

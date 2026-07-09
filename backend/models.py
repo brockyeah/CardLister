@@ -29,6 +29,7 @@ class Card(Base):
 
     # Condition + pricing
     condition = Column(String, default="NM")
+    quantity = Column(Integer, nullable=False, default=1, server_default="1")
     suggested_price = Column(Float, nullable=True)
     listed_price = Column(Float, nullable=True)
 
