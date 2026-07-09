@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import CardForm from '../components/CardForm.jsx'
 import { scanCard, getPricing, createCard, getEbayListingText } from '../api'
@@ -59,6 +59,12 @@ export default function Scanner() {
     localStorage.setItem(SCAN_MODE_KEY, key)
   }
 
+  // Batch mode (2+ files staged at once). Scans run strictly one at a time;
+  // pricing is fetched only when the user opens a card for review.
+  const [queue, setQueue] = useState([])            // [{key, file, status, result, error}]
+  const [activeKey, setActiveKey] = useState(null)  // queue item currently in the form
+  const processingRef = useRef(false)
+
   const [form, setForm] = useState(EMPTY_FORM)
   const [imagePath, setImagePath] = useState('')          // server path once scanned
   const [mock, setMock] = useState(false)
@@ -91,6 +97,44 @@ export default function Scanner() {
     setStagedBackPreview('')
   }
 
+  const stageFiles = (fileList) => {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+    if (files.length === 1) {
+      stageFile(files[0])
+      return
+    }
+    // Batch mode: front images only, no back slot.
+    clearStaged()
+    setActiveKey(null)
+    setQueue(files.map((file, i) => ({
+      key: `${Date.now()}-${i}`, file, status: 'queued', result: null, error: null,
+    })))
+  }
+
+  const fetchPricing = async (next) => {
+    setPricingLoading(true)
+    try {
+      const pricing = await getPricing({
+        player_name: next.player_name,
+        year: next.year,
+        brand: next.brand,
+        set_name: next.set_name,
+        card_number: next.card_number,
+      })
+      setComps(pricing.comps || [])
+      setPricingNote(pricing.note || '')
+      setPricingSource(pricing.source || '')
+      if (pricing.suggested_price) {
+        setForm((prev) => ({ ...prev, suggested_price: pricing.suggested_price }))
+      }
+    } catch {
+      setPricingNote('Pricing lookup failed — set price manually.')
+    } finally {
+      setPricingLoading(false)
+    }
+  }
+
   // --- Actual scan — runs only when user clicks the Scan button ---
   const runScan = async () => {
     if (!stagedFile) return
@@ -111,31 +155,43 @@ export default function Scanner() {
       setForm(next)
       clearStaged()
 
-      setPricingLoading(true)
-      try {
-        const pricing = await getPricing({
-          player_name: next.player_name,
-          year: next.year,
-          brand: next.brand,
-          set_name: next.set_name,
-          card_number: next.card_number,
-        })
-        setComps(pricing.comps || [])
-        setPricingNote(pricing.note || '')
-        setPricingSource(pricing.source || '')
-        if (pricing.suggested_price) {
-          setForm((prev) => ({ ...prev, suggested_price: pricing.suggested_price }))
-        }
-      } catch {
-        setPricingNote('Pricing lookup failed — set price manually.')
-      } finally {
-        setPricingLoading(false)
-      }
+      await fetchPricing(next)
     } catch (e) {
       setError(e.response?.data?.detail || 'Scan failed. Try again.')
     } finally {
       setScanning(false)
     }
+  }
+
+  // Sequential processor (one scan in flight, ever):
+  useEffect(() => {
+    const next = queue.find((q) => q.status === 'queued')
+    if (!next || processingRef.current) return
+    processingRef.current = true
+    const mark = (key, patch) =>
+      setQueue((prev) => prev.map((q) => (q.key === key ? { ...q, ...patch } : q)))
+    mark(next.key, { status: 'scanning' })
+    scanCard(next.file, mode)
+      .then((result) => mark(next.key, { status: 'ready', result }))
+      .catch((e) => mark(next.key, { status: 'error', error: e.response?.data?.detail || 'Scan failed' }))
+      .finally(() => { processingRef.current = false })
+  }, [queue, mode])
+
+  // Review a queue item (loads it into the existing form + fetches pricing):
+  const reviewQueueItem = async (item) => {
+    const result = item.result
+    if (!result) return
+    setError(result.error || '')
+    setImagePath(result.image_path)
+    setMock(!!result.mock)
+    setScanId(result.scan_id ?? null)
+    setComps([])
+    setPricingNote('')
+    setPricingSource('')
+    const next = { ...EMPTY_FORM, ...result.extracted, image_path: result.image_path, back_image_path: result.back_image_path || '' }
+    setForm(next)
+    setActiveKey(item.key)
+    await fetchPricing(next)
   }
 
   // --- Save + copy listing to clipboard + open eBay ---
@@ -167,6 +223,17 @@ export default function Scanner() {
       setPricingNote('')
       setPricingSource('')
 
+      if (activeKey) {
+        let nextReady = null
+        setQueue((prev) => {
+          const updated = prev.map((q) => (q.key === activeKey ? { ...q, status: 'saved' } : q))
+          nextReady = updated.find((q) => q.status === 'ready') || null
+          return updated
+        })
+        setActiveKey(null)
+        if (nextReady) setTimeout(() => reviewQueueItem(nextReady), 0)
+      }
+
       setToast({
         id: created.id,
         message: clipboardOk
@@ -185,8 +252,7 @@ export default function Scanner() {
   const onDrop = (e) => {
     e.preventDefault()
     dropRef.current?.classList.remove('ring-emerald-500')
-    const file = e.dataTransfer.files?.[0]
-    if (file) stageFile(file)
+    stageFiles(e.dataTransfer.files)
   }
 
   // What stage of the workflow are we in?
@@ -242,8 +308,44 @@ export default function Scanner() {
         </div>
       )}
 
+      {queue.length > 0 && (
+        <div className="card-panel">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-bold">Batch queue ({queue.filter((q) => q.status === 'saved').length}/{queue.length} saved)</div>
+            <button
+              type="button"
+              className="text-xs text-gray-400 underline"
+              onClick={() => { setQueue([]); setActiveKey(null) }}
+            >
+              Clear queue
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {queue.map((q) => (
+              <div key={q.key} className="flex items-center gap-3 text-sm">
+                <span className="flex-1 truncate text-gray-300">{q.file.name}</span>
+                {q.status === 'queued' && <span className="text-gray-500 text-xs">waiting…</span>}
+                {q.status === 'scanning' && <span className="text-yellow-400 text-xs">scanning…</span>}
+                {q.status === 'error' && <span className="text-red-400 text-xs">{q.error}</span>}
+                {q.status === 'saved' && <span className="text-emerald-500 text-xs">saved ✓</span>}
+                {q.status === 'ready' && (
+                  <button
+                    type="button"
+                    onClick={() => reviewQueueItem(q)}
+                    className={`text-xs rounded px-2 py-1 ${activeKey === q.key ? 'bg-emerald-600 text-white' : 'bg-ink-700 text-gray-200 hover:bg-ink-600'}`}
+                  >
+                    {activeKey === q.key ? 'Reviewing' : 'Review'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-3">Cards scan one at a time. Back-of-card images aren't supported in batch mode — scan those individually.</p>
+        </div>
+      )}
+
       {/* STAGE 1: nothing uploaded yet — show the drop zone */}
-      {!isStaged && !isScanned && (
+      {!isStaged && !isScanned && queue.length === 0 && (
         <div
           ref={dropRef}
           onDragOver={(e) => {
@@ -259,12 +361,13 @@ export default function Scanner() {
             ref={fileInputRef}
             type="file"
             accept="image/*,application/pdf"
+            multiple
             className="hidden"
-            onChange={(e) => stageFile(e.target.files?.[0])}
+            onChange={(e) => stageFiles(e.target.files)}
           />
           <div className="text-5xl mb-3">📸</div>
           <div className="text-xl font-bold mb-1">Tap to choose a file or drop one here</div>
-          <div className="text-gray-400 text-sm">JPG, PNG, WEBP, or PDF</div>
+          <div className="text-gray-400 text-sm">JPG, PNG, WEBP, or PDF — select multiple files to batch scan</div>
         </div>
       )}
 
@@ -311,8 +414,9 @@ export default function Scanner() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*,application/pdf"
+                multiple
                 className="hidden"
-                onChange={(e) => stageFile(e.target.files?.[0])}
+                onChange={(e) => stageFiles(e.target.files)}
               />
               <input
                 ref={backInputRef}
