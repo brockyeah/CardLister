@@ -19,9 +19,14 @@ def test_unknown_preset_falls_back_to_env_defaults():
     assert resolve_preset(None) == (CLAUDE_MODEL, THINKING_EFFORT, VISION_MAX_IMAGE_PX)
 
 
-def test_encode_honors_max_px_override(tmp_path):
+def test_encode_honors_max_px_override(tmp_path, monkeypatch):
+    from backend.services import claude_vision as cv
+
     p = tmp_path / "big.png"
     Image.new("RGB", (3000, 2000)).save(p)
+    # Pin the module default so a shell-exported VISION_MAX_IMAGE_PX=0 (env
+    # disable is authoritative) can't turn this into a passthrough.
+    monkeypatch.setattr(cv, "VISION_MAX_IMAGE_PX", 1300)
     b64, mt = _encode_for_api(p, "image/png", max_px=2000)
     img = Image.open(io.BytesIO(base64.b64decode(b64)))
     assert max(img.size) == 2000
