@@ -475,6 +475,7 @@ export default function Scanner() {
                   setImagePath('')
                   setComps([])
                   setScanId(null)
+                  setActiveKey(null)
                   setPricingSource('')
                 }}
                 className="btn-secondary w-full"
