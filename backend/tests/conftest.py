@@ -13,11 +13,13 @@ import pytest  # noqa: E402
 
 @pytest.fixture
 def db_session():
-    # NOTE: Correction/Scan models don't exist until Task 4 — this fixture is
-    # upgraded then to also clear those tables. Keep it minimal until then.
     from backend.database import SessionLocal, init_db
+    from backend.models import Correction, Scan  # exists from Task 4 on; see note
 
     init_db()
     db = SessionLocal()
+    db.query(Correction).delete()
+    db.query(Scan).delete()
+    db.commit()
     yield db
     db.close()

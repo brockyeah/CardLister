@@ -40,7 +40,8 @@ class CardBase(BaseModel):
 
 
 class CardCreate(CardBase):
-    pass
+    # Ties the save back to the scan that produced it, for correction capture.
+    scan_id: Optional[int] = None
 
 
 class CardUpdate(BaseModel):
@@ -88,6 +89,7 @@ class ScanResponse(BaseModel):
     mock: bool = False
     # Set when a real extraction was attempted but failed (distinct from mock mode).
     error: Optional[str] = None
+    scan_id: Optional[int] = None
 
 
 # --- Pricing ---
@@ -146,6 +148,7 @@ class AnalyticsTotals(BaseModel):
     input_tokens: int
     output_tokens: int
     est_cost_usd: float
+    corrections: int = 0
 
 
 class AnalyticsReport(BaseModel):

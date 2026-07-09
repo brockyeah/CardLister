@@ -1,4 +1,5 @@
 """Image / PDF upload + Claude vision extraction."""
+import json
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -9,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db, uploads_dir
-from ..models import UsageEvent
+from ..models import Scan, UsageEvent
 from ..schemas import ScanResponse
 from ..services.claude_vision import DEFAULT_PRESET, extract_card_from_image, resolve_preset
+from ..services.learning import apply_exact_match, build_cheatsheet
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -50,11 +52,12 @@ async def scan_card(
 
     model, effort, max_px = resolve_preset(preset)
     back_path = str(uploads / back_name) if back_name else None
+    cheatsheet = build_cheatsheet(db)
     # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
     # thread so it doesn't block the event loop (and every other request) while
     # this async endpoint waits on it.
     extracted, is_mock, error, usage = await run_in_threadpool(
-        extract_card_from_image, str(uploads / front_name), model, effort, back_path, max_px
+        extract_card_from_image, str(uploads / front_name), model, effort, back_path, max_px, cheatsheet or None
     )
 
     # Attribute the API cost to the logged-in user (only real, billed calls have
@@ -69,8 +72,25 @@ async def scan_card(
         ))
         db.commit()
 
-    return ScanResponse(
-        image_path=f"/uploads/{front_name}",
-        back_image_path=f"/uploads/{back_name}" if back_name else None,
-        extracted=extracted, mock=is_mock, error=error,
-    )
+    public_front = f"/uploads/{front_name}"
+    public_back = f"/uploads/{back_name}" if back_name else None
+
+    # Learning: overlay identity fields from past corrections of this exact card,
+    # then persist the extraction (as shown to the user) so the save can be diffed.
+    scan_id = None
+    if not is_mock and not error:
+        extracted = apply_exact_match(db, extracted)
+        scan_row = Scan(
+            username=username,
+            image_path=public_front,
+            back_image_path=public_back,
+            model=(usage or {}).get("model", ""),
+            extracted_json=json.dumps(extracted, default=str),
+        )
+        db.add(scan_row)
+        db.commit()
+        db.refresh(scan_row)
+        scan_id = scan_row.id
+
+    return ScanResponse(image_path=public_front, back_image_path=public_back,
+                        extracted=extracted, mock=is_mock, error=error, scan_id=scan_id)

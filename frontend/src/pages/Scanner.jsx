@@ -62,6 +62,7 @@ export default function Scanner() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [imagePath, setImagePath] = useState('')          // server path once scanned
   const [mock, setMock] = useState(false)
+  const [scanId, setScanId] = useState(null)
 
   const [comps, setComps] = useState([])
   const [pricingNote, setPricingNote] = useState('')
@@ -102,6 +103,7 @@ export default function Scanner() {
       const result = await scanCard(stagedFile, mode, stagedBack)
       setImagePath(result.image_path)
       setMock(!!result.mock)
+      setScanId(result.scan_id ?? null)
       // A real extraction was attempted but failed (distinct from mock mode) —
       // surface it instead of the misleading "set ANTHROPIC_API_KEY" banner.
       if (result.error) setError(result.error)
@@ -141,7 +143,7 @@ export default function Scanner() {
     setSubmitting(true)
     setError('')
     try {
-      const created = await createCard({ ...data, image_path: imagePath })
+      const created = await createCard({ ...data, image_path: imagePath, scan_id: scanId })
 
       // eBay's pre-fill URL params no longer reliably populate the sell form.
       // Workaround: copy a complete title+price+description block to the
@@ -161,6 +163,7 @@ export default function Scanner() {
       setImagePath('')
       setComps([])
       setMock(false)
+      setScanId(null)
       setPricingNote('')
       setPricingSource('')
 
@@ -367,6 +370,7 @@ export default function Scanner() {
                   setForm(EMPTY_FORM)
                   setImagePath('')
                   setComps([])
+                  setScanId(null)
                   setPricingSource('')
                 }}
                 className="btn-secondary w-full"

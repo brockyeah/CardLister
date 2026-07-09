@@ -243,6 +243,7 @@ def extract_card_from_image(
     effort: Optional[str] = None,
     back_image_path: Optional[str] = None,
     max_px: Optional[int] = None,
+    extra_context: Optional[str] = None,
 ) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
     """Returns (extracted_dict, is_mock, error, usage).
 
@@ -281,6 +282,13 @@ def extract_card_from_image(
             instruction = ("The first image is the card FRONT and the second is the card BACK. "
                            "Use the back for the copyright year, full card number, serial numbering, "
                            "and any printed parallel/Refractor text. ") + instruction
+        if extra_context:
+            instruction += (
+                "\n\nThe user has corrected past scans as follows. Use these to learn this "
+                "collection's naming and numbering conventions, but do NOT copy parallel, "
+                "refractor, or serial-number status from them — those vary per physical copy:\n"
+                + extra_context
+            )
         content.append({"type": "text", "text": instruction})
 
         client = anthropic.Anthropic(api_key=api_key)

@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db, SessionLocal
 from ..auth import require_auth
-from ..models import Card
+from ..models import Card, Scan
 from ..schemas import (
     CardCreate, CardUpdate, CardOut,
     EbayListingUpdate, MarkSoldRequest,
 )
 from ..services.google_sheets import sync_card
+from ..services.learning import record_correction
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -67,13 +68,20 @@ def get_card(card_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=CardOut)
-def create_card(payload: CardCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    card = Card(**payload.model_dump())
+def create_card(payload: CardCreate, background_tasks: BackgroundTasks,
+                username: str = Depends(require_auth), db: Session = Depends(get_db)):
+    data = payload.model_dump(exclude={"scan_id"})
+    card = Card(**data)
     # Anything saved here is going on eBay next, so always mark it "active".
     card.status = "active"
     db.add(card)
     db.commit()
     db.refresh(card)
+    # Learning: diff what the model extracted vs. what the user actually saved.
+    if payload.scan_id:
+        scan = db.query(Scan).filter(Scan.id == payload.scan_id).first()
+        if scan is not None:
+            record_correction(db, scan, data, card.id, username)
     background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
 
