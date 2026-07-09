@@ -1,6 +1,7 @@
 """Image / PDF upload + Claude vision extraction."""
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -19,40 +20,41 @@ router = APIRouter(dependencies=[Depends(require_auth)])
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 
 
+async def _save_upload(upload: UploadFile, uploads: Path) -> str:
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        # Unknown extension — coerce to .jpg so downstream stays predictable.
+        suffix = ".jpg"
+    filename = f"{uuid.uuid4().hex}{suffix}"
+    contents = await upload.read()
+    with open(uploads / filename, "wb") as f:
+        f.write(contents)
+    return filename
+
+
 @router.post("", response_model=ScanResponse)
 async def scan_card(
     image: UploadFile = File(...),
+    back: Optional[UploadFile] = File(None),
     preset: str = Form(DEFAULT_PRESET),
     username: str = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    suffix = Path(image.filename or "").suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        # Unknown extension — coerce to .jpg so downstream stays predictable.
-        # (PDFs without a .pdf extension would be wrong here, so we don't auto-PDF.)
-        suffix = ".jpg"
-
     uploads = uploads_dir()
     uploads.mkdir(parents=True, exist_ok=True)
-
-    filename = f"{uuid.uuid4().hex}{suffix}"
-    file_path = uploads / filename
-
     try:
-        contents = await image.read()
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        front_name = await _save_upload(image, uploads)
+        back_name = await _save_upload(back, uploads) if back and back.filename else None
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
 
-    # The user's chosen scan mode (cost / balance / accuracy) → model + effort.
     model, effort = resolve_preset(preset)
-
+    back_path = str(uploads / back_name) if back_name else None
     # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
     # thread so it doesn't block the event loop (and every other request) while
     # this async endpoint waits on it.
     extracted, is_mock, error, usage = await run_in_threadpool(
-        extract_card_from_image, str(file_path), model, effort
+        extract_card_from_image, str(uploads / front_name), model, effort, back_path
     )
 
     # Attribute the API cost to the logged-in user (only real, billed calls have
@@ -67,7 +69,8 @@ async def scan_card(
         ))
         db.commit()
 
-    # The frontend uses this URL path to render the thumbnail.
-    public_path = f"/uploads/{filename}"
-
-    return ScanResponse(image_path=public_path, extracted=extracted, mock=is_mock, error=error)
+    return ScanResponse(
+        image_path=f"/uploads/{front_name}",
+        back_image_path=f"/uploads/{back_name}" if back_name else None,
+        extracted=extracted, mock=is_mock, error=error,
+    )

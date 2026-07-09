@@ -202,6 +202,17 @@ def _guess_media_type(path: Path) -> str:
     }.get(suffix, "image/jpeg")
 
 
+def _file_block(path: Path) -> dict:
+    """Build the API content block for one uploaded file (image or PDF)."""
+    media_type = _guess_media_type(path)
+    data_b64, media_type = _encode_for_api(path, media_type)
+    if media_type == "application/pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data_b64}}
+    return {"type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data_b64}}
+
+
 def _extract_json_from_text(text: str) -> dict:
     """Strip optional markdown fences and parse JSON. Falls back to first {...} block."""
     text = text.strip()
@@ -226,10 +237,15 @@ def extract_card_from_image(
     image_path: str,
     model: Optional[str] = None,
     effort: Optional[str] = None,
+    back_image_path: Optional[str] = None,
 ) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
     """Returns (extracted_dict, is_mock, error, usage).
 
     `model`/`effort` override the env defaults (used by the scan-page presets).
+
+    `back_image_path`, when given, is sent alongside the front image in the same
+    call so Claude can cross-reference both sides (copyright year, full card
+    number, serial numbering, parallel text often only printed on the back).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
     Always returns a dict shaped like the prompt. The three outcomes are distinct:
@@ -251,31 +267,15 @@ def extract_card_from_image(
     try:
         import anthropic
 
-        path = Path(image_path)
-        # Downsamples large images and may switch the media type to image/jpeg.
-        file_b64, media_type = _encode_for_api(path, _guess_media_type(path))
-
-        # PDFs use the "document" content block; images use "image".
-        # Both encode the bytes the same way (base64), so the only difference
-        # is the type discriminator and media_type string.
-        if media_type == "application/pdf":
-            file_block = {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": file_b64,
-                },
-            }
-        else:
-            file_block = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": file_b64,
-                },
-            }
+        content = [_file_block(Path(image_path))]
+        instruction = ("Extract this card's attributes as JSON. Use your knowledge of card sets "
+                       "to fill in fields that aren't 100% visible but can be confidently inferred.")
+        if back_image_path:
+            content.append(_file_block(Path(back_image_path)))
+            instruction = ("The first image is the card FRONT and the second is the card BACK. "
+                           "Use the back for the copyright year, full card number, serial numbering, "
+                           "and any printed parallel/Refractor text. ") + instruction
+        content.append({"type": "text", "text": instruction})
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
@@ -288,18 +288,7 @@ def extract_card_from_image(
             thinking={"type": "adaptive"},
             output_config={"effort": effort},
             system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        file_block,
-                        {
-                            "type": "text",
-                            "text": "Extract this card's attributes as JSON. Use your knowledge of card sets to fill in fields that aren't 100% visible but can be confidently inferred.",
-                        },
-                    ],
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
         )
 
         # When thinking is enabled, response.content contains both thinking blocks

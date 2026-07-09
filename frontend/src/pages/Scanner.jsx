@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   suggested_price: null,
   listed_price: null,
   image_path: '',
+  back_image_path: '',
   notes: '',
 }
 
@@ -42,6 +43,10 @@ export default function Scanner() {
   const [stagedFile, setStagedFile] = useState(null)
   const [stagedPreview, setStagedPreview] = useState('')   // local object URL for preview
   const [stagedIsPdf, setStagedIsPdf] = useState(false)
+
+  const [stagedBack, setStagedBack] = useState(null)
+  const [stagedBackPreview, setStagedBackPreview] = useState('')
+  const backInputRef = useRef(null)
 
   const [scanning, setScanning] = useState(false)
   const [pricingLoading, setPricingLoading] = useState(false)
@@ -80,6 +85,9 @@ export default function Scanner() {
     setStagedFile(null)
     setStagedPreview('')
     setStagedIsPdf(false)
+    if (stagedBackPreview) URL.revokeObjectURL(stagedBackPreview)
+    setStagedBack(null)
+    setStagedBackPreview('')
   }
 
   // --- Actual scan — runs only when user clicks the Scan button ---
@@ -91,13 +99,13 @@ export default function Scanner() {
     setPricingNote('')
     setPricingSource('')
     try {
-      const result = await scanCard(stagedFile, mode)
+      const result = await scanCard(stagedFile, mode, stagedBack)
       setImagePath(result.image_path)
       setMock(!!result.mock)
       // A real extraction was attempted but failed (distinct from mock mode) —
       // surface it instead of the misleading "set ANTHROPIC_API_KEY" banner.
       if (result.error) setError(result.error)
-      const next = { ...EMPTY_FORM, ...result.extracted, image_path: result.image_path }
+      const next = { ...EMPTY_FORM, ...result.extracted, image_path: result.image_path, back_image_path: result.back_image_path || '' }
       setForm(next)
       clearStaged()
 
@@ -303,6 +311,34 @@ export default function Scanner() {
                 className="hidden"
                 onChange={(e) => stageFile(e.target.files?.[0])}
               />
+              <input
+                ref={backInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  if (stagedBackPreview) URL.revokeObjectURL(stagedBackPreview)
+                  setStagedBack(f)
+                  setStagedBackPreview(URL.createObjectURL(f))
+                }}
+              />
+              {stagedBack ? (
+                <div className="flex items-center gap-3 text-sm text-gray-300">
+                  <img src={stagedBackPreview} alt="Back" className="w-12 h-16 object-cover rounded" />
+                  <span className="flex-1 truncate">Back: {stagedBack.name}</span>
+                  <button type="button" className="text-red-400 underline text-xs"
+                          onClick={() => { URL.revokeObjectURL(stagedBackPreview); setStagedBack(null); setStagedBackPreview('') }}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => backInputRef.current?.click()} disabled={scanning}
+                        className="btn-secondary w-full">
+                  + Add Back of Card (optional, improves accuracy)
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -322,6 +358,9 @@ export default function Scanner() {
                 </div>
               ) : (
                 <img src={imagePath} alt="Card" className="w-full rounded-lg mb-3" />
+              )}
+              {form.back_image_path && (
+                <img src={form.back_image_path} alt="Card back" className="w-full rounded-lg mb-3" />
               )}
               <button
                 onClick={() => {

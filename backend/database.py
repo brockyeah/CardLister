@@ -24,6 +24,7 @@ engine = create_engine(
 # table needs a registry entry here; it is added idempotently at startup.
 _COLUMN_MIGRATIONS = [
     ("cards", "quantity", "INTEGER NOT NULL DEFAULT 1"),
+    ("cards", "back_image_path", "VARCHAR"),
 ]
 
 

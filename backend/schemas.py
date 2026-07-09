@@ -35,6 +35,7 @@ class CardBase(BaseModel):
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: str = ""
+    back_image_path: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -61,6 +62,7 @@ class CardUpdate(BaseModel):
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: Optional[str] = None
+    back_image_path: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
 
@@ -81,6 +83,7 @@ class CardOut(CardBase):
 # --- Scan ---
 class ScanResponse(BaseModel):
     image_path: str
+    back_image_path: Optional[str] = None
     extracted: dict
     mock: bool = False
     # Set when a real extraction was attempted but failed (distinct from mock mode).

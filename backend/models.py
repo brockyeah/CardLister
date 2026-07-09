@@ -40,6 +40,7 @@ class Card(Base):
     # Lifecycle
     status = Column(String, default="unlisted", index=True)  # unlisted | active | sold
     image_path = Column(String, default="")
+    back_image_path = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
