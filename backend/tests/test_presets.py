@@ -26,3 +26,15 @@ def test_encode_honors_max_px_override(tmp_path):
     img = Image.open(io.BytesIO(base64.b64decode(b64)))
     assert max(img.size) == 2000
     assert mt == "image/jpeg"
+
+
+def test_env_disable_beats_preset_max_px(tmp_path, monkeypatch):
+    from backend.services import claude_vision as cv
+
+    p = tmp_path / "big.png"
+    Image.new("RGB", (3000, 2000)).save(p)
+    monkeypatch.setattr(cv, "VISION_MAX_IMAGE_PX", 0)  # operator disabled downsampling
+    b64, mt = cv._encode_for_api(p, "image/png", max_px=1300)
+    img = Image.open(io.BytesIO(base64.b64decode(b64)))
+    assert max(img.size) == 3000  # original passes through untouched
+    assert mt == "image/png"

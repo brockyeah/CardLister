@@ -33,11 +33,12 @@ THINKING_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
 # Long-edge pixel cap for images sent to the vision API. Card photos from phones
 # are often 3000px+, which bills up to ~4,784 image tokens on Opus 4.7; ~1300px
 # stays legible for text extraction at a fraction of the token cost. Set to 0 to
-# disable downsampling (send the original). The on-disk upload is never modified.
+# disable downsampling globally (send the original), including preset-driven scans;
+# otherwise per-scan presets override this value. The on-disk upload is never modified.
 VISION_MAX_IMAGE_PX = int(os.getenv("VISION_MAX_IMAGE_PX", "1300"))
 
 # User-selectable scan presets (chosen per-scan on the scan page). Each maps to a
-# (model, effort) pair. All three use models that support adaptive thinking + the
+# (model, effort, max_px) tuple. All three use models that support adaptive thinking + the
 # effort param, so the API call shape is identical regardless of choice.
 # NOTE: keep these keys/labels in sync with the selector in frontend Scanner.jsx.
 PRESETS = {
@@ -168,7 +169,7 @@ def _encode_for_api(path: Path, media_type: str, max_px: Optional[int] = None) -
     def _passthrough() -> Tuple[str, str]:
         return base64.standard_b64encode(raw).decode("utf-8"), media_type
 
-    if media_type == "application/pdf" or cap <= 0:
+    if media_type == "application/pdf" or VISION_MAX_IMAGE_PX <= 0 or cap <= 0:
         return _passthrough()
 
     try:
