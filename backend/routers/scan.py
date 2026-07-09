@@ -48,13 +48,13 @@ async def scan_card(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
 
-    model, effort = resolve_preset(preset)
+    model, effort, max_px = resolve_preset(preset)
     back_path = str(uploads / back_name) if back_name else None
     # The Anthropic call is synchronous and can take 15-30s. Run it in a worker
     # thread so it doesn't block the event loop (and every other request) while
     # this async endpoint waits on it.
     extracted, is_mock, error, usage = await run_in_threadpool(
-        extract_card_from_image, str(uploads / front_name), model, effort, back_path
+        extract_card_from_image, str(uploads / front_name), model, effort, back_path, max_px
     )
 
     # Attribute the API cost to the logged-in user (only real, billed calls have

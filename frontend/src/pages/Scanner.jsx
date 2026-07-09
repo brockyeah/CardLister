@@ -29,9 +29,9 @@ const EBAY_SELL_URL = 'https://www.ebay.com/sl/sell'
 
 // Keep keys in sync with PRESETS in backend/services/claude_vision.py.
 const SCAN_MODES = [
-  { key: 'cost', label: 'Cost', desc: 'Sonnet 4.6 · low thinking — cheapest' },
+  { key: 'cost', label: 'Cost', desc: 'Sonnet 4.6 · low thinking · smaller image — cheapest' },
   { key: 'balance', label: 'Balanced', desc: 'Opus 4.7 · medium thinking' },
-  { key: 'accuracy', label: 'Accuracy', desc: 'Opus 4.7 · high thinking — most thorough' },
+  { key: 'accuracy', label: 'Accuracy', desc: 'Opus 4.7 · high thinking · hi-res image — most thorough' },
 ]
 const SCAN_MODE_KEY = 'cardlister_scan_mode'
 
