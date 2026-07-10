@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_auth
 from ..database import get_db
-from ..models import UsageEvent
+from ..models import Correction, UsageEvent
 from ..schemas import (
     AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow,
 )
@@ -114,6 +114,13 @@ def analytics(
     all_users = [r[0] for r in db.query(UsageEvent.username).distinct().all() if r[0]]
     all_models = [r[0] for r in db.query(UsageEvent.model).distinct().all() if r[0]]
 
+    corr_q = db.query(Correction)
+    if since is not None:
+        corr_q = corr_q.filter(Correction.created_at >= since)
+    if user:
+        corr_q = corr_q.filter(Correction.username == user)
+    corrections_count = corr_q.count()
+
     return AnalyticsReport(
         range=range,
         since=since,
@@ -121,6 +128,7 @@ def analytics(
         totals=AnalyticsTotals(
             scans=tot["scans"], input_tokens=tot["input"],
             output_tokens=tot["output"], est_cost_usd=round(tot["cost"], 2),
+            corrections=corrections_count,
         ),
         by_user=user_rows,
         by_model=model_rows,

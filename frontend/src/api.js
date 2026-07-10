@@ -47,10 +47,11 @@ export const getAnalytics = (params = {}) =>
   api.get('/api/analytics', { params }).then((r) => r.data)
 
 // --- Scan ---
-export const scanCard = (file, preset = 'balance') => {
+export const scanCard = (file, preset = 'balance', backFile = null) => {
   const fd = new FormData()
   fd.append('image', file)
   fd.append('preset', preset)
+  if (backFile) fd.append('back', backFile)
   return api
     .post('/api/scan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     .then((r) => r.data)

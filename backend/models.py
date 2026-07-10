@@ -29,6 +29,7 @@ class Card(Base):
 
     # Condition + pricing
     condition = Column(String, default="NM")
+    quantity = Column(Integer, nullable=False, default=1, server_default="1")
     suggested_price = Column(Float, nullable=True)
     listed_price = Column(Float, nullable=True)
 
@@ -39,6 +40,7 @@ class Card(Base):
     # Lifecycle
     status = Column(String, default="unlisted", index=True)  # unlisted | active | sold
     image_path = Column(String, default="")
+    back_image_path = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -64,4 +66,38 @@ class UsageEvent(Base):
     model = Column(String, default="")
     input_tokens = Column(Integer, default=0)
     output_tokens = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Scan(Base):
+    """One row per real (non-mock) vision extraction — the raw model output as
+    shown to the user, kept so we can diff it against what they actually save."""
+    __tablename__ = "scans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, index=True, nullable=False, default="")
+    image_path = Column(String, default="")
+    back_image_path = Column(String, nullable=True)
+    model = Column(String, default="")
+    extracted_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Correction(Base):
+    """A user's fix to a scan: what the model said vs. what got saved. Feeds the
+    cheat-sheet prompt injection and the exact-card identity override."""
+    __tablename__ = "corrections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_id = Column(Integer, index=True, nullable=True)
+    card_id = Column(Integer, index=True, nullable=True)
+    username = Column(String, index=True, nullable=False, default="")
+    # Corrected identity, denormalized for exact-card matching
+    year = Column(Integer, nullable=True)
+    brand = Column(String, default="")
+    set_name = Column(String, default="")
+    card_number = Column(String, default="")
+    extracted_json = Column(Text, default="{}")
+    corrected_json = Column(Text, default="{}")
+    diff_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

@@ -63,6 +63,8 @@ def build_description(card: Card) -> str:
         f"Team: {card.team or ''}",
         f"Condition: {card.condition or ''}",
     ]
+    if card.quantity and card.quantity > 1:
+        lines.append(f"Quantity available: {card.quantity}")
     if card.is_rookie:
         lines.append("Rookie Card: YES")
     if card.is_autograph:

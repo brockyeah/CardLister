@@ -35,6 +35,7 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
             <th className="px-3 py-3">Set</th>
             <th className="px-3 py-3">Card #</th>
             <th className="px-3 py-3">Cond</th>
+            <th className="px-3 py-3 text-right">Qty</th>
             <th className="px-3 py-3 text-right">Listed</th>
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">eBay</th>
@@ -58,6 +59,7 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
               <td className="px-3 py-2">{c.set_name || '—'}</td>
               <td className="px-3 py-2">{c.card_number || '—'}</td>
               <td className="px-3 py-2">{c.condition || '—'}</td>
+              <td className="px-3 py-2 text-right">{c.quantity ?? 1}</td>
               <td className="px-3 py-2 text-right">{fmtMoney(c.listed_price)}</td>
               <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
               <td className="px-3 py-2">

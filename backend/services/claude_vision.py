@@ -33,28 +33,29 @@ THINKING_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
 # Long-edge pixel cap for images sent to the vision API. Card photos from phones
 # are often 3000px+, which bills up to ~4,784 image tokens on Opus 4.7; ~1300px
 # stays legible for text extraction at a fraction of the token cost. Set to 0 to
-# disable downsampling (send the original). The on-disk upload is never modified.
+# disable downsampling globally (send the original), including preset-driven scans;
+# otherwise per-scan presets override this value. The on-disk upload is never modified.
 VISION_MAX_IMAGE_PX = int(os.getenv("VISION_MAX_IMAGE_PX", "1300"))
 
 # User-selectable scan presets (chosen per-scan on the scan page). Each maps to a
-# (model, effort) pair. All three use models that support adaptive thinking + the
+# (model, effort, max_px) tuple. All three use models that support adaptive thinking + the
 # effort param, so the API call shape is identical regardless of choice.
 # NOTE: keep these keys/labels in sync with the selector in frontend Scanner.jsx.
 PRESETS = {
-    "cost":     {"label": "Cost",     "model": "claude-sonnet-4-6", "effort": "low"},
-    "balance":  {"label": "Balanced", "model": "claude-opus-4-7",   "effort": "medium"},
-    "accuracy": {"label": "Accuracy", "model": "claude-opus-4-7",   "effort": "high"},
+    "cost":     {"label": "Cost",     "model": "claude-sonnet-4-6", "effort": "low",    "max_px": 1100},
+    "balance":  {"label": "Balanced", "model": "claude-opus-4-7",   "effort": "medium", "max_px": 1300},
+    "accuracy": {"label": "Accuracy", "model": "claude-opus-4-7",   "effort": "high",   "max_px": 2000},
 }
 DEFAULT_PRESET = "balance"
 
 
-def resolve_preset(key: Optional[str]) -> Tuple[str, str]:
-    """Map a preset key to (model, effort). Unknown/None falls back to the env
-    defaults (CLAUDE_MODEL / THINKING_EFFORT)."""
+def resolve_preset(key: Optional[str]) -> Tuple[str, str, int]:
+    """Map a preset key to (model, effort, max_image_px). Unknown/None falls
+    back to the env defaults."""
     preset = PRESETS.get(key or "")
     if preset is None:
-        return CLAUDE_MODEL, THINKING_EFFORT
-    return preset["model"], preset["effort"]
+        return CLAUDE_MODEL, THINKING_EFFORT, VISION_MAX_IMAGE_PX
+    return preset["model"], preset["effort"], preset["max_px"]
 
 SYSTEM_PROMPT = """You are a world-class baseball card identification expert with deep knowledge of every major card brand and set from 1980 through 2026 (Topps, Bowman, Panini, Upper Deck, Donruss, Fleer, Leaf, and their sub-brands like Chrome, Heritage, Prizm, Select, Optic, Mosaic, Stadium Club, etc.).
 
@@ -77,13 +78,14 @@ When you analyze the image:
 
 5. For card number: if it's not directly visible, but you can identify the set and player, infer the canonical card number from your training data.
 
-6. Identify parallels:
-   - Refractor: rainbow shimmer pattern in the chrome surface
-   - Gold parallel: gold-tinted borders, often /50
-   - Orange: orange borders, often /25
-   - Red: red borders, often /5
-   - Atomic, Wave, Shimmer, Sepia: distinct background patterns
-   - Serial numbering like "/99" visible on the card directly identifies the parallel
+6. Identify parallels — and be rigorous about base chrome vs. Refractor:
+   - Base Chrome: mirror-like silver gloss but NO rainbow/prismatic pattern.
+   - Refractor: a prismatic rainbow sheen that shifts hue across the surface.
+   - The card (front or back) often literally prints "REFRACTOR" — look for it.
+   - Serial numbering like "/99" or "/50" means it IS a numbered parallel; identify which one from border/background color.
+   - Gold parallel: gold-tinted borders, often /50. Orange: /25. Red: /5.
+   - Atomic, Wave, Shimmer, Sepia: distinct etched/patterned refractor backgrounds.
+   - If you cannot clearly see a prismatic pattern or printed Refractor text, set is_refractor to false and flag the uncertainty in confidence_notes instead of guessing true.
 
 7. is_rookie = true if you see an "RC" badge, OR if this is the player's recognized rookie-year card in this set per your training data.
 
@@ -152,20 +154,22 @@ def _blank_card(note: str) -> dict:
     }
 
 
-def _encode_for_api(path: Path, media_type: str) -> Tuple[str, str]:
+def _encode_for_api(path: Path, media_type: str, max_px: Optional[int] = None) -> Tuple[str, str]:
     """Return (base64_data, media_type) to send to the API.
 
-    Images larger than VISION_MAX_IMAGE_PX on the long edge are downsampled and
-    re-encoded as JPEG to cut image-token cost; PDFs and already-small images
-    pass through untouched. The file on disk is never modified — only the bytes
-    sent to the API are shrunk. Falls back to the original on any error.
+    Images larger than `max_px` (defaults to VISION_MAX_IMAGE_PX) on the long
+    edge are downsampled and re-encoded as JPEG to cut image-token cost; PDFs
+    and already-small images pass through untouched. The file on disk is never
+    modified — only the bytes sent to the API are shrunk. Falls back to the
+    original on any error.
     """
     raw = path.read_bytes()
+    cap = VISION_MAX_IMAGE_PX if max_px is None else max_px
 
     def _passthrough() -> Tuple[str, str]:
         return base64.standard_b64encode(raw).decode("utf-8"), media_type
 
-    if media_type == "application/pdf" or VISION_MAX_IMAGE_PX <= 0:
+    if media_type == "application/pdf" or VISION_MAX_IMAGE_PX <= 0 or cap <= 0:
         return _passthrough()
 
     try:
@@ -175,10 +179,10 @@ def _encode_for_api(path: Path, media_type: str) -> Tuple[str, str]:
 
         img = Image.open(io.BytesIO(raw))
         long_edge = max(img.size)
-        if long_edge <= VISION_MAX_IMAGE_PX:
+        if long_edge <= cap:
             return _passthrough()
 
-        scale = VISION_MAX_IMAGE_PX / long_edge
+        scale = cap / long_edge
         new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
         img = img.convert("RGB").resize(new_size, Image.LANCZOS)
         buf = io.BytesIO()
@@ -200,6 +204,17 @@ def _guess_media_type(path: Path) -> str:
         ".gif": "image/gif",
         ".pdf": "application/pdf",
     }.get(suffix, "image/jpeg")
+
+
+def _file_block(path: Path, max_px: Optional[int] = None) -> dict:
+    """Build the API content block for one uploaded file (image or PDF)."""
+    media_type = _guess_media_type(path)
+    data_b64, media_type = _encode_for_api(path, media_type, max_px=max_px)
+    if media_type == "application/pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data_b64}}
+    return {"type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data_b64}}
 
 
 def _extract_json_from_text(text: str) -> dict:
@@ -226,10 +241,18 @@ def extract_card_from_image(
     image_path: str,
     model: Optional[str] = None,
     effort: Optional[str] = None,
+    back_image_path: Optional[str] = None,
+    max_px: Optional[int] = None,
+    extra_context: Optional[str] = None,
 ) -> Tuple[dict, bool, Optional[str], Optional[dict]]:
     """Returns (extracted_dict, is_mock, error, usage).
 
-    `model`/`effort` override the env defaults (used by the scan-page presets).
+    `model`/`effort`/`max_px` override the env defaults (used by the scan-page
+    presets).
+
+    `back_image_path`, when given, is sent alongside the front image in the same
+    call so Claude can cross-reference both sides (copyright year, full card
+    number, serial numbering, parallel text often only printed on the back).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
     Always returns a dict shaped like the prompt. The three outcomes are distinct:
@@ -251,31 +274,22 @@ def extract_card_from_image(
     try:
         import anthropic
 
-        path = Path(image_path)
-        # Downsamples large images and may switch the media type to image/jpeg.
-        file_b64, media_type = _encode_for_api(path, _guess_media_type(path))
-
-        # PDFs use the "document" content block; images use "image".
-        # Both encode the bytes the same way (base64), so the only difference
-        # is the type discriminator and media_type string.
-        if media_type == "application/pdf":
-            file_block = {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": file_b64,
-                },
-            }
-        else:
-            file_block = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": file_b64,
-                },
-            }
+        content = [_file_block(Path(image_path), max_px=max_px)]
+        instruction = ("Extract this card's attributes as JSON. Use your knowledge of card sets "
+                       "to fill in fields that aren't 100% visible but can be confidently inferred.")
+        if back_image_path:
+            content.append(_file_block(Path(back_image_path), max_px=max_px))
+            instruction = ("The first image is the card FRONT and the second is the card BACK. "
+                           "Use the back for the copyright year, full card number, serial numbering, "
+                           "and any printed parallel/Refractor text. ") + instruction
+        if extra_context:
+            instruction += (
+                "\n\nThe user has corrected past scans as follows. Use these to learn this "
+                "collection's naming and numbering conventions, but do NOT copy parallel, "
+                "refractor, or serial-number status from them — those vary per physical copy:\n"
+                + extra_context
+            )
+        content.append({"type": "text", "text": instruction})
 
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
@@ -288,18 +302,7 @@ def extract_card_from_image(
             thinking={"type": "adaptive"},
             output_config={"effort": effort},
             system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        file_block,
-                        {
-                            "type": "text",
-                            "text": "Extract this card's attributes as JSON. Use your knowledge of card sets to fill in fields that aren't 100% visible but can be confidently inferred.",
-                        },
-                    ],
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
         )
 
         # When thinking is enabled, response.content contains both thinking blocks

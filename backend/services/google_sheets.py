@@ -14,6 +14,7 @@ SHEET_HEADERS = [
     "Player", "Year", "Brand", "Set", "Card #", "Team",
     "RC", "Auto", "Patch", "Condition", "Listed Price",
     "eBay URL", "Status", "Date Listed", "Date Sold", "Sale Price", "Notes",
+    "Quantity",
 ]
 
 SHEET_TAB = "Inventory"
@@ -62,6 +63,7 @@ def _card_to_row(card) -> list:
         card.sold_at.isoformat() if card.sold_at else "",
         card.sold_price if card.sold_price is not None else "",
         card.notes or "",
+        card.quantity if card.quantity is not None else 1,
     ]
 
 
@@ -94,9 +96,10 @@ def _ensure_header(service, sheet_id: str) -> None:
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range=f"{SHEET_TAB}!A1:Q1",
+            range=f"{SHEET_TAB}!A1:R1",
         ).execute()
-        if not result.get("values"):
+        values = result.get("values")
+        if not values or len(values[0]) < len(SHEET_HEADERS):
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
                 range=f"{SHEET_TAB}!A1",
@@ -123,7 +126,7 @@ def sync_card(card) -> Optional[int]:
             # Update in place
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
-                range=f"{SHEET_TAB}!A{card.sheets_row}:Q{card.sheets_row}",
+                range=f"{SHEET_TAB}!A{card.sheets_row}:R{card.sheets_row}",
                 valueInputOption="RAW",
                 body={"values": [row_values]},
             ).execute()

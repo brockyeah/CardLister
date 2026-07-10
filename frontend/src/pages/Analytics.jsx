@@ -90,11 +90,12 @@ export default function Analytics() {
       {report && !loading && (
         <>
           {/* Summary tiles */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Tile label="Est. cost" value={usd(t.est_cost_usd)} />
             <Tile label="Scans" value={fmt(t.scans)} />
             <Tile label="Input tokens" value={fmt(t.input_tokens)} />
             <Tile label="Output tokens" value={fmt(t.output_tokens)} />
+            <Tile label="Corrections" value={fmt(t.corrections)} />
           </div>
 
           {t.scans === 0 ? (

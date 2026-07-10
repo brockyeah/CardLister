@@ -10,6 +10,7 @@ const FIELDS = [
   { key: 'parallel_color', label: 'Parallel Color', type: 'text' },
   { key: 'serial_number', label: 'Serial Number (e.g. /99)', type: 'text' },
   { key: 'condition', label: 'Condition', type: 'text' },
+  { key: 'quantity', label: 'Quantity', type: 'number' },
 ]
 
 const FLAGS = [

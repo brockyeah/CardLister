@@ -31,14 +31,17 @@ class CardBase(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: str = "NM"
+    quantity: int = 1
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: str = ""
+    back_image_path: Optional[str] = None
     notes: Optional[str] = None
 
 
 class CardCreate(CardBase):
-    pass
+    # Ties the save back to the scan that produced it, for correction capture.
+    scan_id: Optional[int] = None
 
 
 class CardUpdate(BaseModel):
@@ -56,9 +59,11 @@ class CardUpdate(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: Optional[str] = None
+    quantity: Optional[int] = None
     suggested_price: Optional[float] = None
     listed_price: Optional[float] = None
     image_path: Optional[str] = None
+    back_image_path: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
 
@@ -79,10 +84,12 @@ class CardOut(CardBase):
 # --- Scan ---
 class ScanResponse(BaseModel):
     image_path: str
+    back_image_path: Optional[str] = None
     extracted: dict
     mock: bool = False
     # Set when a real extraction was attempted but failed (distinct from mock mode).
     error: Optional[str] = None
+    scan_id: Optional[int] = None
 
 
 # --- Pricing ---
@@ -141,6 +148,7 @@ class AnalyticsTotals(BaseModel):
     input_tokens: int
     output_tokens: int
     est_cost_usd: float
+    corrections: int = 0
 
 
 class AnalyticsReport(BaseModel):
