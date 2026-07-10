@@ -15,10 +15,11 @@ import pytest  # noqa: E402
 @pytest.fixture
 def db_session():
     from backend.database import SessionLocal, init_db
-    from backend.models import Correction, Scan, CallupEvent  # noqa: E402
+    from backend.models import Card, Correction, Scan, CallupEvent  # noqa: E402
 
     init_db()
     db = SessionLocal()
+    db.query(Card).delete()
     db.query(Correction).delete()
     db.query(Scan).delete()
     db.query(CallupEvent).delete()

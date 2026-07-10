@@ -94,11 +94,13 @@ ALERT_MAX_AGE_HOURS = 48  # don't email events older than this (bounds retry)
 
 def _compose_digest(events: list) -> tuple[str, str]:
     """(subject, plaintext body) for a batch of alertable CallupEvents.
-    First call-ups (Selected) lead as the bigger headline; inventory matches
-    are the tiebreaker within each group."""
+    Inventory matches lead per spec — the owner's sell signal leads the
+    subject line and body; within the same match status, first call-ups
+    (Selected) come before Recalled, then alphabetical.
+    Requires a non-empty events list (the caller guards with `if pending:`)."""
     ordered = sorted(
         events,
-        key=lambda e: (e.type_desc != "Selected", not e.inventory_match, e.player_name),
+        key=lambda e: (not e.inventory_match, e.type_desc != "Selected", e.player_name),
     )
     lead = ordered[0].player_name
     extra = len(ordered) - 1
