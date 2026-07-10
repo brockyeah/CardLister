@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .database import init_db, uploads_dir
 from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
-from .routers import cards, scan, pricing, ebay, sheets, analytics
+from .routers import cards, scan, pricing, ebay, sheets, analytics, news
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ app.include_router(pricing.router, prefix="/api/pricing", tags=["pricing"])
 app.include_router(ebay.router, prefix="/api/ebay", tags=["ebay"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(news.router, prefix="/api/news", tags=["news"])
 
 
 # --- Uploaded images served back to the browser ---
