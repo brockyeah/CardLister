@@ -15,6 +15,7 @@ const FIELDS = [
 
 const FLAGS = [
   { key: 'is_rookie', label: 'Rookie' },
+  { key: 'is_first_bowman', label: '1st Bowman' },
   { key: 'is_autograph', label: 'Auto' },
   { key: 'is_patch', label: 'Patch' },
   { key: 'is_refractor', label: 'Refractor' },
