@@ -164,3 +164,9 @@ def delete_user_data(username: str, db: Session = Depends(get_db)):
         deleted[model.__tablename__] = n
     db.commit()
     return {"deleted": deleted}
+
+
+@router.get("/users/configured")
+def configured_users():
+    """Usernames from CARDLISTER_USERS — valid merge targets for Manage data."""
+    return {"users": sorted(get_users())}

@@ -50,3 +50,10 @@ def test_delete_user_data(db_session):
     assert r.status_code == 200
     assert r.json()["deleted"]["usage_events"] == 1
     assert db_session.query(UsageEvent).filter_by(username="cardlister-user").count() == 0
+
+
+def test_configured_users_lists_env_users():
+    with TestClient(app) as client:
+        r = client.get("/api/analytics/users/configured", headers=_auth(client))
+    assert r.status_code == 200
+    assert r.json() == {"users": ["tester"]}

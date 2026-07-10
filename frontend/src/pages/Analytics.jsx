@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAnalytics, reassignUser, deleteUserData } from '../api'
+import { getAnalytics, reassignUser, deleteUserData, getConfiguredUsers } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -189,6 +189,11 @@ function ManageData({ users, onDone }) {
   const [to, setTo] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [targets, setTargets] = useState([])
+
+  useEffect(() => {
+    getConfiguredUsers().then((d) => setTargets(d.users || [])).catch(() => setTargets([]))
+  }, [])
 
   const merge = async () => {
     if (!from || !to || from === to) { setMsg('Pick two different users.'); return }
@@ -234,7 +239,7 @@ function ManageData({ users, onDone }) {
           <label className="label">Merge into</label>
           <select value={to} onChange={(e) => setTo(e.target.value)} className="input">
             <option value="">Select…</option>
-            {users.map((u) => <option key={u} value={u}>{u}</option>)}
+            {targets.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
         <button onClick={merge} disabled={busy} className="btn-secondary">Merge</button>
