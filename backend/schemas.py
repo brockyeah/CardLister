@@ -161,3 +161,8 @@ class AnalyticsReport(BaseModel):
     by_day: List[DayRow]
     users: List[str]                   # distinct values for filter dropdowns
     models: List[str]
+
+
+class ReassignRequest(BaseModel):
+    from_user: str
+    to_user: str
