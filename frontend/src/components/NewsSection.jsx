@@ -26,20 +26,20 @@ export default function NewsSection() {
   })
 
   return (
-    <div className="rounded-md shadow-lg border border-[#e0e0e0] bg-[#f9f8f5] p-5 sm:p-6">
+    <div className="card-panel sm:p-6">
       {/* Masthead */}
       <button onClick={toggle} className="w-full text-left block">
-        <div className="border-t border-[#e0e0e0]" />
+        <div className="border-t border-ink-700" />
         <div className="text-center py-2">
-          <span className={`${SERIF} font-bold text-2xl tracking-tight text-[#222]`}>
+          <span className={`${SERIF} font-bold text-2xl tracking-tight text-emerald-400`}>
             PROSPECT WIRE
           </span>
         </div>
-        <div className="border-t-2 border-[#c9a961]" />
-        <div className="border-t border-[#222] mt-[2px]" />
-        <div className="flex items-center justify-between text-xs text-[#666] mt-2">
+        <div className="border-t-2 border-emerald-600" />
+        <div className="border-t border-ink-600 mt-[2px]" />
+        <div className="flex items-center justify-between text-xs text-gray-400 mt-2">
           <span>
-            Call-Ups &amp; Prospect News<span className="mx-1.5 text-[#c9a961]">·</span>{dateline}
+            Call-Ups &amp; Prospect News<span className="mx-1.5 text-emerald-600">·</span>{dateline}
           </span>
           <span className="text-sm">{open ? '▾' : '▸'}</span>
         </div>
@@ -49,34 +49,34 @@ export default function NewsSection() {
       {open && (
         <div className="mt-5 grid grid-cols-1 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-6">
           {/* Left — transactions */}
-          <div className="md:pr-6 md:border-r md:border-[#e0e0e0]">
+          <div className="md:pr-6 md:border-r md:border-ink-700">
             {data.callups.length > 0 && (
               <div>
-                <div className="text-xs font-semibold uppercase tracking-widest text-[#666] pb-1 border-b border-[#c9a961] mb-3">
+                <div className="text-xs font-semibold uppercase tracking-widest text-gray-400 pb-1 border-b border-emerald-600/40 mb-3">
                   Transactions
                 </div>
-                <div className="divide-y divide-[#e0e0e0]">
+                <div className="divide-y divide-ink-700">
                   {data.callups.map((c, i) => {
                     const isCallup = c.type_desc === 'Selected'
                     return (
                       <div key={i} className={`py-2 text-[13px] ${SERIF} leading-snug`}>
                         <div className="flex items-baseline gap-1.5 flex-wrap">
-                          <span className="text-[#888] tabular-nums text-xs">{c.date}</span>
-                          <span className={`font-bold ${c.inventory_match ? 'text-[#c9a961]' : 'text-[#222]'}`}>
+                          <span className="text-gray-500 tabular-nums text-xs">{c.date}</span>
+                          <span className={`font-bold ${c.inventory_match ? 'text-emerald-300' : 'text-gray-100'}`}>
                             {c.player_name}
                           </span>
-                          <span className="text-[#666]">— {c.to_team}</span>
+                          <span className="text-gray-400">— {c.to_team}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           {isCallup ? (
-                            <span className="text-[10px] font-sans uppercase tracking-wide text-[#c9a961] border border-[#c9a961] rounded-sm px-1 py-0.5">
+                            <span className="text-[10px] font-sans uppercase tracking-wide text-emerald-300 border border-emerald-700/60 rounded-sm px-1 py-0.5">
                               Call-Up
                             </span>
                           ) : (
-                            <span className="text-[10px] font-sans text-[#888]">recalled</span>
+                            <span className="text-[10px] font-sans text-gray-400 bg-ink-700 rounded-sm px-1 py-0.5">recalled</span>
                           )}
                           {c.inventory_match && (
-                            <span className="text-[10px] font-sans font-bold uppercase tracking-wide bg-[#c9a961] text-[#222] rounded-sm px-1.5 py-0.5">
+                            <span className="text-[10px] font-sans font-bold uppercase tracking-wide bg-emerald-600 text-white rounded-sm px-1.5 py-0.5">
                               You Own {c.matched_card_count}
                             </span>
                           )}
@@ -93,27 +93,27 @@ export default function NewsSection() {
           <div>
             {data.articles.length > 0 && (
               <div>
-                <div className="text-xs font-semibold uppercase tracking-widest text-[#666] pb-1 border-b border-[#c9a961] mb-3">
+                <div className="text-xs font-semibold uppercase tracking-widest text-gray-400 pb-1 border-b border-emerald-600/40 mb-3">
                   The Headlines
                 </div>
-                <div className="divide-y divide-[#e0e0e0]">
+                <div className="divide-y divide-ink-700">
                   {data.articles.map((a, i) => (
                     <div key={i} className={i === 0 ? 'pb-3' : 'py-3'}>
-                      <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-[#c9a961] mb-1">
+                      <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-emerald-400 mb-1">
                         {a.source}
                       </div>
                       <a
                         href={a.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`${SERIF} font-semibold text-base text-[#222] hover:text-[#0274b6] hover:underline`}
+                        className={`${SERIF} font-semibold text-base text-gray-100 hover:text-emerald-300 hover:underline`}
                       >
                         {a.title}
                       </a>
                       {a.summary && (
-                        <p className="font-sans text-sm text-[#555] mt-1 line-clamp-2">{a.summary}</p>
+                        <p className="font-sans text-sm text-gray-400 mt-1 line-clamp-2">{a.summary}</p>
                       )}
-                      <div className="font-sans text-xs text-[#888] mt-1">
+                      <div className="font-sans text-xs text-gray-500 mt-1">
                         {a.source}
                         {a.age_days === 0 ? ' · today' : a.age_days ? ` · ${a.age_days}d ago` : ''}
                       </div>
