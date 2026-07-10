@@ -59,6 +59,12 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 
 # --- Uploaded images served back to the browser ---
 # Mounted lazily (after dir is ensured) via a small wrapper so startup order is safe.
+
+# Suffixes safe to render inline; anything else (PDFs, coerced unknowns) is
+# forced to download so a crafted file can't execute in the app's origin.
+INLINE_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
 @app.get("/uploads/{filename}")
 def serve_upload(filename: str):
     # Strip any path traversal attempts; only allow the bare filename.
@@ -66,7 +72,13 @@ def serve_upload(filename: str):
     file_path = uploads_dir() / safe_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(str(file_path))
+    # nosniff stops browsers second-guessing the declared content type.
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if file_path.suffix.lower() not in INLINE_IMAGE_SUFFIXES:
+        # Stored names are uuid-hex + allowlisted suffix, so safe_name is
+        # header-safe (no quotes/CR/LF can reach an existing file).
+        headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+    return FileResponse(str(file_path), headers=headers)
 
 
 # --- Static frontend (built Vite output) ---
