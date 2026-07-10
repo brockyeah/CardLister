@@ -70,18 +70,21 @@ def fetch_callup_transactions(start_date: str, end_date: str) -> list[dict]:
     return rows
 
 
-def count_inventory_matches(db: Session, player_name: str) -> int:
-    """Sum of Card.quantity for cards whose normalized name matches. Normalizes
-    in Python (SQLite lacks accent folding), so scans all cards — fine at this
-    scale (hundreds of rows)."""
+def count_inventory_matches(db: Session, player_name: str) -> tuple[int, int]:
+    """(total_qty, first_bowman_qty) of cards whose normalized name matches.
+    Normalizes in Python (SQLite lacks accent folding), so scans all cards —
+    fine at this scale (hundreds of rows)."""
     target = normalize_name(player_name)
     if not target:
-        return 0
-    total = 0
-    for name, qty in db.query(Card.player_name, Card.quantity).all():
+        return 0, 0
+    total = first_bowman = 0
+    rows = db.query(Card.player_name, Card.quantity, Card.is_first_bowman).all()
+    for name, qty, is_fb in rows:
         if normalize_name(name) == target:
             total += qty or 0
-    return total
+            if is_fb:
+                first_bowman += qty or 0
+    return total, first_bowman
 
 
 def is_alertable(type_desc: str, inventory_match: bool) -> bool:
@@ -100,7 +103,12 @@ def _compose_digest(events: list) -> tuple[str, str]:
     Requires a non-empty events list (the caller guards with `if pending:`)."""
     ordered = sorted(
         events,
-        key=lambda e: (not e.inventory_match, e.type_desc != "Selected", e.player_name),
+        key=lambda e: (
+            not e.inventory_match,
+            not (e.first_bowman_count or 0),
+            e.type_desc != "Selected",
+            e.player_name,
+        ),
     )
     lead = ordered[0].player_name
     extra = len(ordered) - 1
@@ -111,7 +119,12 @@ def _compose_digest(events: list) -> tuple[str, str]:
         kind = "FIRST CALL-UP" if e.type_desc == "Selected" else "recalled"
         lines.append(f"• {e.player_name} — {e.to_team} ({kind})")
         if e.inventory_match:
-            lines.append(f"    ⭐ You own {e.matched_card_count} card(s) of this player.")
+            note = f"    ⭐ You own {e.matched_card_count} card(s) of this player"
+            if e.first_bowman_count:
+                note += f" — including his 1st Bowman ({e.first_bowman_count})!"
+            else:
+                note += "."
+            lines.append(note)
         if e.description:
             lines.append(f"    {e.description}")
         lines.append("")
@@ -132,12 +145,13 @@ def run_poll_cycle(db: Session) -> dict:
     for tx in txs:
         if tx["tx_id"] in existing:
             continue
-        matches = count_inventory_matches(db, tx["player_name"])
+        matches, first_bowman = count_inventory_matches(db, tx["player_name"])
         db.add(CallupEvent(
             tx_id=tx["tx_id"], date=tx["date"], type_desc=tx["type_desc"],
             player_name=tx["player_name"], person_id=tx["person_id"],
             to_team=tx["to_team"], description=tx["description"],
             inventory_match=matches > 0, matched_card_count=matches,
+            first_bowman_count=first_bowman,
         ))
         new_count += 1
     if new_count:

@@ -15,7 +15,7 @@ TX = [
 
 
 def test_poll_cycle_records_and_emails(db_session):
-    db_session.add(Card(player_name="Owned Guy", quantity=2))
+    db_session.add(Card(player_name="Owned Guy", quantity=2, is_first_bowman=True))
     db_session.commit()
 
     with patch.object(callups, "fetch_callup_transactions", return_value=TX), \
@@ -28,11 +28,13 @@ def test_poll_cycle_records_and_emails(db_session):
     assert "Owned Guy" in subject                       # inventory match leads per spec
     assert subject.endswith("(+1 more)")
     assert "You own 2" in body                          # inventory match surfaced
+    assert "1st Bowman" in body                         # 1st Bowman ownership called out
     assert body.index("Owned Guy") < body.index("Jackson Holliday")
     # emailed rows stamped; skipped row not
     rows = {e.tx_id: e for e in db_session.query(CallupEvent).all()}
     assert rows[2001].emailed_at is not None and rows[2003].emailed_at is None
     assert rows[2002].inventory_match is True and rows[2002].matched_card_count == 2
+    assert rows[2002].first_bowman_count == 2 and rows[2001].first_bowman_count == 0
 
 
 def test_poll_cycle_dedups_second_run(db_session):

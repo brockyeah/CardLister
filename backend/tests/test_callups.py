@@ -30,13 +30,13 @@ def test_fetch_returns_empty_on_network_failure():
 
 def test_count_inventory_matches(db_session):
     db_session.add_all([
-        Card(player_name="Jackson Holliday", quantity=2),
-        Card(player_name="jackson  holliday", quantity=1),  # normalized dup
-        Card(player_name="Someone Else", quantity=5),
+        Card(player_name="Jackson Holliday", quantity=2, is_first_bowman=True),
+        Card(player_name="jackson  holliday", quantity=1),  # normalized dup, not 1st Bowman
+        Card(player_name="Someone Else", quantity=5, is_first_bowman=True),
     ])
     db_session.commit()
-    assert callups.count_inventory_matches(db_session, "Jackson Holliday") == 3
-    assert callups.count_inventory_matches(db_session, "Nobody") == 0
+    assert callups.count_inventory_matches(db_session, "Jackson Holliday") == (3, 2)
+    assert callups.count_inventory_matches(db_session, "Nobody") == (0, 0)
 
 
 def test_is_alertable_rule():

@@ -47,3 +47,11 @@ def test_listing_text_includes_first_bowman():
     assert "1ST BOWMAN" in title
     assert len(title) <= 80
     assert "1st Bowman: YES" in build_description(card)
+
+
+def test_migration_adds_first_bowman_count_to_callup_events(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE callup_events (id INTEGER PRIMARY KEY, tx_id INTEGER)"))
+    ensure_columns(engine)
+    assert "first_bowman_count" in _cols(engine, "callup_events")
