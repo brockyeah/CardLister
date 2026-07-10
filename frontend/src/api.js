@@ -46,6 +46,9 @@ export const login = (username, password) =>
 export const getAnalytics = (params = {}) =>
   api.get('/api/analytics', { params }).then((r) => r.data)
 
+// --- News / call-up ticker ---
+export const getNews = () => api.get('/api/news').then((r) => r.data)
+
 // --- Scan ---
 export const scanCard = (file, preset = 'balance', backFile = null) => {
   const fd = new FormData()

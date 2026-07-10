@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import CardForm from '../components/CardForm.jsx'
+import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, getEbayListingText } from '../api'
 
 const EMPTY_FORM = {
@@ -292,6 +293,8 @@ export default function Scanner() {
           })}
         </div>
       </div>
+
+      <NewsSection />
 
       {toast && (
         <div className="bg-emerald-900/40 border border-emerald-600 text-emerald-100 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
