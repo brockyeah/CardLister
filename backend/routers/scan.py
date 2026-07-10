@@ -1,5 +1,6 @@
 """Image / PDF upload + Claude vision extraction."""
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,8 @@ from ..models import Scan, UsageEvent
 from ..schemas import ScanResponse
 from ..services.claude_vision import DEFAULT_PRESET, extract_card_from_image, resolve_preset
 from ..services.learning import apply_exact_match, build_cheatsheet
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -47,8 +50,11 @@ async def scan_card(
     try:
         front_name = await _save_upload(image, uploads)
         back_name = await _save_upload(back, uploads) if back and back.filename else None
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
+    except Exception:
+        # Full detail goes to the server log only — raw exception text can leak
+        # filesystem paths and internals to the client.
+        logger.exception("Failed to save upload")
+        raise HTTPException(status_code=500, detail="Failed to save upload.")
 
     model, effort, max_px = resolve_preset(preset)
     back_path = str(uploads / back_name) if back_name else None
