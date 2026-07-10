@@ -5,13 +5,14 @@ Every network call degrades to [] on failure so the poller never crashes.
 """
 import logging
 import unicodedata
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..models import Card
+from ..models import Card, CallupEvent
+from . import mailer
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +87,75 @@ def count_inventory_matches(db: Session, player_name: str) -> int:
 def is_alertable(type_desc: str, inventory_match: bool) -> bool:
     """Email-worthy = a first call-up (Selected), or any call-up of an owned player."""
     return type_desc == "Selected" or inventory_match
+
+
+ALERT_MAX_AGE_HOURS = 48  # don't email events older than this (bounds retry)
+
+
+def _compose_digest(events: list) -> tuple[str, str]:
+    """(subject, plaintext body) for a batch of alertable CallupEvents.
+    First call-ups (Selected) lead as the bigger headline; inventory matches
+    are the tiebreaker within each group."""
+    ordered = sorted(
+        events,
+        key=lambda e: (e.type_desc != "Selected", not e.inventory_match, e.player_name),
+    )
+    lead = ordered[0].player_name
+    extra = len(ordered) - 1
+    subject = f"🚨 Call-up alert: {lead}" + (f" (+{extra} more)" if extra else "")
+
+    lines = ["Prospect call-ups just posted:\n"]
+    for e in ordered:
+        kind = "FIRST CALL-UP" if e.type_desc == "Selected" else "recalled"
+        lines.append(f"• {e.player_name} — {e.to_team} ({kind})")
+        if e.inventory_match:
+            lines.append(f"    ⭐ You own {e.matched_card_count} card(s) of this player.")
+        if e.description:
+            lines.append(f"    {e.description}")
+        lines.append("")
+    lines.append("— CardLister")
+    return subject, "\n".join(lines)
+
+
+def run_poll_cycle(db: Session) -> dict:
+    """One poll: fetch trailing 2-day window, record new call-ups, email the
+    alertable un-emailed ones as a single digest. Returns {new, emailed}."""
+    today = datetime.utcnow().date()
+    start = (today - timedelta(days=2)).isoformat()
+    end = today.isoformat()
+
+    txs = fetch_callup_transactions(start, end)
+    existing = {tx for (tx,) in db.query(CallupEvent.tx_id).all()}
+    new_count = 0
+    for tx in txs:
+        if tx["tx_id"] in existing:
+            continue
+        matches = count_inventory_matches(db, tx["player_name"])
+        db.add(CallupEvent(
+            tx_id=tx["tx_id"], date=tx["date"], type_desc=tx["type_desc"],
+            player_name=tx["player_name"], person_id=tx["person_id"],
+            to_team=tx["to_team"], description=tx["description"],
+            inventory_match=matches > 0, matched_card_count=matches,
+        ))
+        new_count += 1
+    if new_count:
+        db.commit()
+
+    # Collect alertable, un-emailed, recent events.
+    cutoff = datetime.utcnow() - timedelta(hours=ALERT_MAX_AGE_HOURS)
+    pending = [
+        e for e in db.query(CallupEvent).filter(
+            CallupEvent.emailed_at.is_(None), CallupEvent.created_at >= cutoff
+        ).all()
+        if is_alertable(e.type_desc, e.inventory_match)
+    ]
+    emailed = 0
+    if pending:
+        subject, body = _compose_digest(pending)
+        if mailer.send_email(subject, body):
+            now = datetime.utcnow()
+            for e in pending:
+                e.emailed_at = now
+            db.commit()
+            emailed = len(pending)
+    return {"new": new_count, "emailed": emailed}
