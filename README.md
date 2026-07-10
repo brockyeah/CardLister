@@ -92,6 +92,8 @@ docker run --rm -p 8000:8000 \
 | `EBAY_ENV` | optional | `production` (default) or `sandbox`. |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | optional | Gmail address + App Password for call-up alert emails. Without them the call-up ticker still works; only emails are skipped. |
 | `ALERT_EMAILS` | optional | Comma-separated alert recipients. |
+| `SENDGRID_API_KEY` | optional | SendGrid API key — the preferred email path on Railway (SMTP is blocked there). Takes precedence over SMTP when set. |
+| `ALERT_FROM` | optional | Verified SendGrid single-sender address. Defaults to `SMTP_USERNAME`. |
 | `CALLUP_POLL_MINUTES` | optional | Minutes between MLB call-up polls. Default `15`. |
 | `NEWS_FEEDS` | optional | Comma-separated RSS feed URLs for the news section (defaults to MLB.com feeds). |
 | `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** |
