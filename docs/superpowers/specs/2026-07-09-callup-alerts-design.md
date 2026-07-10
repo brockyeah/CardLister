@@ -18,7 +18,7 @@ A small unrelated fix rides along: Analytics shows a ghost username `cardlister-
 - **Inventory matching:** `normalize_name(s)` (casefold, strip accents via `unicodedata`, collapse punctuation/whitespace) compares transaction player names against `Card.player_name`. Match ⇒ sell signal; count matched cards (sum of `quantity`).
 - **Alert rule (decided):** email-worthy = inventory match (either type) **or** `Selected` league-wide. `Recalled` without inventory match is recorded for the ticker but not emailed.
 - `run_poll_cycle(db) -> dict`: fetch trailing 2-day window → dedup against `callup_events.tx_id` → insert new rows (with `inventory_match`, `matched_card_count`) → collect alertable rows with `emailed_at IS NULL` and age < 48h → send ONE digest email per cycle → stamp `emailed_at` on success. Email failure leaves `emailed_at` null so the next cycle retries (bounded by the 48h age check). Returns counts for logging/tests.
-- **Scheduler:** asyncio background task created on FastAPI startup; loops `run_poll_cycle` every `CALLUP_POLL_MINUTES` (default 60). Skipped entirely when `DISABLE_CALLUP_POLLER=1` (tests). Railway keeps the process alive, so an in-process loop suffices; off-season cycles are cheap no-ops.
+- **Scheduler:** asyncio background task created on FastAPI startup; loops `run_poll_cycle` every `CALLUP_POLL_MINUTES` (default 15). Skipped entirely when `DISABLE_CALLUP_POLLER=1` (tests). Railway keeps the process alive, so an in-process loop suffices; off-season cycles are cheap no-ops.
 
 ## Component 2 — Mailer (`backend/services/mailer.py`)
 
@@ -51,7 +51,7 @@ A small unrelated fix rides along: Analytics shows a ghost username `cardlister-
 | `SMTP_HOST` / `SMTP_PORT` | `smtp.gmail.com` / `587` | Mail relay |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | — | Gmail address + App Password |
 | `ALERT_EMAILS` | — | Comma-separated recipients |
-| `CALLUP_POLL_MINUTES` | `60` | Poll cadence |
+| `CALLUP_POLL_MINUTES` | `15` | Poll cadence |
 | `DISABLE_CALLUP_POLLER` | unset | `1` disables scheduler (tests/dev) |
 | `NEWS_FEEDS` | built-in list | Override RSS feed URLs |
 

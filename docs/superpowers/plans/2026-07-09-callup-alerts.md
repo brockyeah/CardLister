@@ -563,7 +563,7 @@ async def _callup_poller():
     from .services.callups import run_poll_cycle
     from .database import SessionLocal
 
-    minutes = int(os.getenv("CALLUP_POLL_MINUTES", "60"))
+    minutes = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
     while True:
         try:
             db = SessionLocal()
@@ -797,6 +797,28 @@ def news(db: Session = Depends(get_db)):
     } for e in events]
     # Attribute access (not a bound import) so patch.object(prospect_news, "fetch_articles") works.
     return {"callups": callups, "articles": prospect_news.fetch_articles()}
+```
+
+Also append a manual poll trigger to `backend/routers/news.py` (validation tool: fire one poll cycle on demand instead of waiting out the interval; also how we live-test email delivery):
+
+```python
+@router.post("/poll-now")
+def poll_now(db: Session = Depends(get_db)):
+    """Run one call-up poll cycle immediately. Returns {"new": int, "emailed": int}."""
+    from ..services.callups import run_poll_cycle
+    return run_poll_cycle(db)
+```
+
+Add this test to `backend/tests/test_news.py`:
+
+```python
+def test_poll_now_runs_a_cycle(db_session):
+    from backend.services import callups
+    with TestClient(app) as client:
+        with patch.object(callups, "fetch_callup_transactions", return_value=[]):
+            r = client.post("/api/news/poll-now", headers=_auth(client))
+    assert r.status_code == 200
+    assert r.json() == {"new": 0, "emailed": 0}
 ```
 
 In `backend/main.py`, add `news` to the routers import and include it:
