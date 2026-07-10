@@ -294,8 +294,6 @@ export default function Scanner() {
         </div>
       </div>
 
-      <NewsSection />
-
       {toast && (
         <div className="bg-emerald-900/40 border border-emerald-600 text-emerald-100 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
           <span>{toast.message}</span>
@@ -509,6 +507,8 @@ export default function Scanner() {
           </div>
         </div>
       )}
+
+      <NewsSection />
     </div>
   )
 }

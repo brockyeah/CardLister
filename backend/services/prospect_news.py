@@ -1,7 +1,9 @@
 """Prospect-news RSS aggregation (ported from Daryls-Digest). Fetches MLB feeds,
 scores by call-up keywords + recency, caches in-process for 15 minutes."""
+import html
 import logging
 import os
+import re
 import time
 from datetime import datetime
 
@@ -23,6 +25,13 @@ _cache = {"at": 0.0, "articles": []}
 def _feeds() -> list[str]:
     raw = os.getenv("NEWS_FEEDS", "").strip()
     return [u.strip() for u in raw.split(",") if u.strip()] or DEFAULT_FEEDS
+
+
+def _clean_summary(raw: str, limit: int = 220) -> str:
+    """Feed summaries arrive as HTML — strip tags/entities, collapse whitespace, truncate."""
+    text = html.unescape(re.sub(r"<[^>]+>", " ", raw or ""))
+    text = " ".join(text.split())
+    return text[:limit].rsplit(" ", 1)[0] + "…" if len(text) > limit else text
 
 
 def score_article(article: dict) -> int:
@@ -73,7 +82,8 @@ def fetch_articles(limit: int = 8) -> list[dict]:
         all_articles.extend(_fetch_feed(url))
     scored = sorted(all_articles, key=score_article, reverse=True)
     top = [{"title": a["title"], "link": a["link"], "source": a["source"],
-            "published_iso": a["published_iso"], "age_days": a["age_days"]}
+            "published_iso": a["published_iso"], "age_days": a["age_days"],
+            "summary": _clean_summary(a.get("summary", ""))}
            for a in scored[:limit] if score_article(a) > 0]
     _cache.update(at=now, articles=top)
     return top
