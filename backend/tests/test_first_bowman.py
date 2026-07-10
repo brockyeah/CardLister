@@ -55,3 +55,14 @@ def test_migration_adds_first_bowman_count_to_callup_events(tmp_path):
         conn.execute(text("CREATE TABLE callup_events (id INTEGER PRIMARY KEY, tx_id INTEGER)"))
     ensure_columns(engine)
     assert "first_bowman_count" in _cols(engine, "callup_events")
+
+
+def test_sheets_bounded_ranges_span_all_headers():
+    # The A1 end column must track the row layout — a 19-column row written
+    # to an A:R (18-col) range is rejected by the Sheets API and swallowed.
+    from backend.services import google_sheets as gs
+
+    assert gs._col_letter(1) == "A"
+    assert gs._col_letter(19) == "S"
+    assert gs._col_letter(27) == "AA"
+    assert gs.END_COL == gs._col_letter(len(gs.SHEET_HEADERS))

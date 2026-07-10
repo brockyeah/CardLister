@@ -98,8 +98,10 @@ ALERT_MAX_AGE_HOURS = 48  # don't email events older than this (bounds retry)
 def _compose_digest(events: list) -> tuple[str, str]:
     """(subject, plaintext body) for a batch of alertable CallupEvents.
     Inventory matches lead per spec — the owner's sell signal leads the
-    subject line and body; within the same match status, first call-ups
-    (Selected) come before Recalled, then alphabetical.
+    subject line and body. Sort order is four tiers: inventory matches
+    before non-matches; within matches, those including a 1st Bowman card
+    lead ahead of plain matches; then first call-ups (Selected) come before
+    Recalled; then alphabetical by player name.
     Requires a non-empty events list (the caller guards with `if pending:`)."""
     ordered = sorted(
         events,
