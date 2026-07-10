@@ -46,6 +46,11 @@ export const login = (username, password) =>
 export const getAnalytics = (params = {}) =>
   api.get('/api/analytics', { params }).then((r) => r.data)
 
+export const reassignUser = (from_user, to_user) =>
+  api.post('/api/analytics/users/reassign', { from_user, to_user }).then((r) => r.data)
+export const deleteUserData = (username) =>
+  api.delete(`/api/analytics/users/${encodeURIComponent(username)}/data`).then((r) => r.data)
+
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)
 

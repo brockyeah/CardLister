@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAnalytics } from '../api'
+import { getAnalytics, reassignUser, deleteUserData } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -176,8 +176,74 @@ export default function Analytics() {
             Costs are estimated from Anthropic's per-token prices (output includes thinking tokens) and may differ
             slightly from your actual invoice. Scans only — eBay comp lookups don't use the API.
           </p>
+
+          <ManageData users={report.users} onDone={() => window.location.reload()} />
         </>
       )}
+    </div>
+  )
+}
+
+function ManageData({ users, onDone }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const merge = async () => {
+    if (!from || !to || from === to) { setMsg('Pick two different users.'); return }
+    setBusy(true); setMsg('')
+    try {
+      const r = await reassignUser(from, to)
+      const n = r.moved.usage_events + r.moved.scans + r.moved.corrections
+      setMsg(`Moved ${n} rows from ${from} to ${to}.`)
+      setTimeout(onDone, 1200)
+    } catch (e) {
+      setMsg(e.response?.data?.detail || 'Merge failed.')
+    } finally { setBusy(false) }
+  }
+
+  const remove = async () => {
+    if (!from) { setMsg('Pick a user to delete.'); return }
+    if (!window.confirm(`Delete all analytics data for "${from}"? This cannot be undone.`)) return
+    setBusy(true); setMsg('')
+    try {
+      await deleteUserData(from)
+      setMsg(`Deleted ${from}'s data.`)
+      setTimeout(onDone, 1200)
+    } catch (e) {
+      setMsg(e.response?.data?.detail || 'Delete failed.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card-panel">
+      <div className="font-bold mb-1">Manage data</div>
+      <p className="text-xs text-gray-500 mb-3">
+        Merge a stale/renamed username into a real user (keeps its cost history), or delete it.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="label">User</label>
+          <select value={from} onChange={(e) => setFrom(e.target.value)} className="input">
+            <option value="">Select…</option>
+            {users.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Merge into</label>
+          <select value={to} onChange={(e) => setTo(e.target.value)} className="input">
+            <option value="">Select…</option>
+            {users.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <button onClick={merge} disabled={busy} className="btn-secondary">Merge</button>
+        <button onClick={remove} disabled={busy}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-red-900/40 border border-red-700 text-red-200 hover:bg-red-900/60">
+          Delete
+        </button>
+      </div>
+      {msg && <div className="text-xs text-gray-400 mt-2">{msg}</div>}
     </div>
   )
 }
