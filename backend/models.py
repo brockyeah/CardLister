@@ -19,6 +19,7 @@ class Card(Base):
 
     # Flags
     is_rookie = Column(Boolean, default=False)
+    is_first_bowman = Column(Boolean, default=False)  # printed "1st" logo (Bowman prospects)
     is_autograph = Column(Boolean, default=False)
     is_patch = Column(Boolean, default=False)
     is_refractor = Column(Boolean, default=False)

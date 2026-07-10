@@ -25,6 +25,7 @@ engine = create_engine(
 _COLUMN_MIGRATIONS = [
     ("cards", "quantity", "INTEGER NOT NULL DEFAULT 1"),
     ("cards", "back_image_path", "VARCHAR"),
+    ("cards", "is_first_bowman", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 
