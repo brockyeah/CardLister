@@ -101,3 +101,22 @@ class Correction(Base):
     corrected_json = Column(Text, default="{}")
     diff_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CallupEvent(Base):
+    """One MLB roster transaction we care about (a call-up). Doubles as the
+    dedup ledger (unique tx_id) and the data behind the news ticker."""
+    __tablename__ = "callup_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tx_id = Column(Integer, unique=True, index=True, nullable=False)  # MLB transaction id
+    date = Column(String, default="")           # YYYY-MM-DD
+    type_desc = Column(String, default="")      # "Selected" | "Recalled"
+    player_name = Column(String, default="")
+    person_id = Column(Integer, nullable=True)
+    to_team = Column(String, default="")
+    description = Column(Text, default="")
+    inventory_match = Column(Boolean, default=False)
+    matched_card_count = Column(Integer, default=0)
+    emailed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

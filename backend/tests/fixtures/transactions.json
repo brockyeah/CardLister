@@ -1,0 +1,7 @@
+{
+  "transactions": [
+    {"id": 1001, "date": "2026-07-08", "typeDesc": "Selected", "description": "Baltimore Orioles selected the contract of SS Jackson Holliday from Norfolk Tides.", "person": {"id": 700001, "fullName": "Jackson Holliday"}, "toTeam": {"name": "Baltimore Orioles"}},
+    {"id": 1002, "date": "2026-07-08", "typeDesc": "Recalled", "description": "Tampa Bay Rays recalled RHP Mason Englert from Durham Bulls.", "person": {"id": 700002, "fullName": "Mason Englert"}, "toTeam": {"name": "Tampa Bay Rays"}},
+    {"id": 1003, "date": "2026-07-08", "typeDesc": "Optioned", "description": "Some team optioned a player.", "person": {"id": 700003, "fullName": "Bench Guy"}, "toTeam": {"name": "Whoever"}}
+  ]
+}

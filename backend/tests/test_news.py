@@ -1,0 +1,51 @@
+from datetime import datetime
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from backend.main import app
+from backend.services import prospect_news
+from backend.models import CallupEvent
+
+
+def _auth(client):
+    tok = client.post("/api/auth/login", json={"username": "tester", "password": "pw"}).json()["token"]
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def test_score_article_rewards_keywords_and_recency():
+    hit = {"title": "Top prospect called up to the Majors", "summary": "", "published_parsed": datetime.utcnow().timetuple()}
+    miss = {"title": "Team wins game", "summary": "", "published_parsed": datetime.utcnow().timetuple()}
+    assert prospect_news.score_article(hit) > prospect_news.score_article(miss)
+
+
+def test_news_endpoint_returns_callups_and_articles(db_session):
+    db_session.add(CallupEvent(tx_id=9001, date="2026-07-08", type_desc="Selected",
+                               player_name="Jackson Holliday", to_team="Baltimore Orioles",
+                               inventory_match=True, matched_card_count=3,
+                               created_at=datetime.utcnow()))
+    db_session.commit()
+
+    fake_articles = [{"title": "Jackson Holliday called up", "link": "http://x/1",
+                      "source": "MLB.com", "published_iso": "2026-07-08T12:00:00", "age_days": 0}]
+    with TestClient(app) as client:
+        with patch.object(prospect_news, "fetch_articles", return_value=fake_articles):
+            r = client.get("/api/news", headers=_auth(client))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["articles"] == fake_articles
+    assert any(c["player_name"] == "Jackson Holliday" and c["inventory_match"] for c in body["callups"])
+
+
+def test_news_requires_auth():
+    with TestClient(app) as client:
+        assert client.get("/api/news").status_code == 401
+
+
+def test_poll_now_runs_a_cycle(db_session):
+    from backend.services import callups
+    with TestClient(app) as client:
+        with patch.object(callups, "fetch_callup_transactions", return_value=[]):
+            r = client.post("/api/news/poll-now", headers=_auth(client))
+    assert r.status_code == 200
+    assert r.json() == {"new": 0, "emailed": 0}

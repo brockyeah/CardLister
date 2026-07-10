@@ -90,6 +90,10 @@ docker run --rm -p 8000:8000 \
 | `EBAY_CERT_ID` | optional | eBay Cert ID (OAuth client_secret), paired with `EBAY_APP_ID`. |
 | `EBAY_MARKETPLACE_ID` | optional | eBay marketplace, default `EBAY_US`. |
 | `EBAY_ENV` | optional | `production` (default) or `sandbox`. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | optional | Gmail address + App Password for call-up alert emails. Without them the call-up ticker still works; only emails are skipped. |
+| `ALERT_EMAILS` | optional | Comma-separated alert recipients. |
+| `CALLUP_POLL_MINUTES` | optional | Minutes between MLB call-up polls. Default `15`. |
+| `NEWS_FEEDS` | optional | Comma-separated RSS feed URLs for the news section (defaults to MLB.com feeds). |
 | `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** |
 
 ---

@@ -1,4 +1,7 @@
 """FastAPI app entrypoint. Wires up routers, static files, uploads, and auth login."""
+import asyncio
+import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,7 +12,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from .database import init_db, uploads_dir
 from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
-from .routers import cards, scan, pricing, ebay, sheets, analytics
+from .routers import cards, scan, pricing, ebay, sheets, analytics, news
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="CardLister", version="1.0.0")
 
@@ -24,6 +29,26 @@ app.add_middleware(
 )
 
 
+async def _callup_poller():
+    """Poll for MLB call-ups on a cadence. In-process; Railway keeps us alive."""
+    from .services.callups import run_poll_cycle
+    from .database import SessionLocal
+
+    minutes = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                result = run_poll_cycle(db)
+                if result["new"] or result["emailed"]:
+                    logger.info("Call-up poll: %s", result)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Call-up poll cycle errored")
+        await asyncio.sleep(minutes * 60)
+
+
 @app.on_event("startup")
 def on_startup():
     # Refuse to boot a production deploy with default/insecure secrets.
@@ -32,6 +57,10 @@ def on_startup():
     # Make sure the uploads directory exists. On Railway this should resolve to /data/uploads
     # via the DB_PATH-derived parent, but locally it just sits next to the project.
     uploads_dir().mkdir(parents=True, exist_ok=True)
+
+    # Background call-up poller — skip in tests/dev via env.
+    if os.getenv("DISABLE_CALLUP_POLLER") != "1":
+        asyncio.create_task(_callup_poller())
 
 
 # --- Auth route ---
@@ -55,6 +84,7 @@ app.include_router(pricing.router, prefix="/api/pricing", tags=["pricing"])
 app.include_router(ebay.router, prefix="/api/ebay", tags=["ebay"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(news.router, prefix="/api/news", tags=["news"])
 
 
 # --- Uploaded images served back to the browser ---

@@ -8,14 +8,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import require_auth
+from ..auth import require_auth, get_users
 from ..database import get_db
-from ..models import Correction, UsageEvent
+from ..models import Correction, Scan, UsageEvent
 from ..schemas import (
-    AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow,
+    AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow, ReassignRequest,
 )
 
 router = APIRouter(dependencies=[Depends(require_auth)])
@@ -136,3 +136,37 @@ def analytics(
         users=sorted(all_users),
         models=sorted(all_models),
     )
+
+
+_USER_TABLES = (UsageEvent, Scan, Correction)
+
+
+@router.post("/users/reassign")
+def reassign_user(payload: ReassignRequest, db: Session = Depends(get_db)):
+    if payload.to_user not in get_users():
+        raise HTTPException(status_code=400, detail="Target user is not configured")
+    if payload.from_user == payload.to_user:
+        raise HTTPException(status_code=400, detail="from_user and to_user are the same")
+    moved = {}
+    for model in _USER_TABLES:
+        n = (db.query(model).filter(model.username == payload.from_user)
+             .update({model.username: payload.to_user}))
+        moved[model.__tablename__] = n
+    db.commit()
+    return {"moved": moved}
+
+
+@router.delete("/users/{username}/data")
+def delete_user_data(username: str, db: Session = Depends(get_db)):
+    deleted = {}
+    for model in _USER_TABLES:
+        n = db.query(model).filter(model.username == username).delete()
+        deleted[model.__tablename__] = n
+    db.commit()
+    return {"deleted": deleted}
+
+
+@router.get("/users/configured")
+def configured_users():
+    """Usernames from CARDLISTER_USERS — valid merge targets for Manage data."""
+    return {"users": sorted(get_users())}
