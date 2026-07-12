@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..models import Correction, Scan
 
 # Safe to overlay on an exact card match — facts tied to the card's identity.
-IDENTITY_FIELDS = ["player_name", "year", "brand", "set_name", "card_number", "team", "is_rookie"]
+IDENTITY_FIELDS = ["player_name", "year", "brand", "set_name", "card_number", "team", "is_rookie", "is_first_bowman"]
 # Recorded in corrections but never overridden (vary per physical copy).
 COPY_SPECIFIC_FIELDS = ["is_autograph", "is_patch", "is_refractor", "parallel_color", "serial_number"]
 TRACKED_FIELDS = IDENTITY_FIELDS + COPY_SPECIFIC_FIELDS

@@ -12,6 +12,7 @@ const EMPTY_FORM = {
   card_number: '',
   team: '',
   is_rookie: false,
+  is_first_bowman: false,
   is_autograph: false,
   is_patch: false,
   is_refractor: false,

@@ -14,10 +14,22 @@ SHEET_HEADERS = [
     "Player", "Year", "Brand", "Set", "Card #", "Team",
     "RC", "Auto", "Patch", "Condition", "Listed Price",
     "eBay URL", "Status", "Date Listed", "Date Sold", "Sale Price", "Notes",
-    "Quantity",
+    "Quantity", "1st Bowman",
 ]
 
 SHEET_TAB = "Inventory"
+
+
+def _col_letter(n: int) -> str:
+    """1-indexed column number -> A1 letter(s): 1->A, 19->S, 27->AA."""
+    letters = ""
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return letters
+
+
+END_COL = _col_letter(len(SHEET_HEADERS))  # keeps bounded ranges in sync with the row layout
 
 
 def _get_service():
@@ -64,6 +76,7 @@ def _card_to_row(card) -> list:
         card.sold_price if card.sold_price is not None else "",
         card.notes or "",
         card.quantity if card.quantity is not None else 1,
+        "Y" if card.is_first_bowman else "",
     ]
 
 
@@ -96,7 +109,7 @@ def _ensure_header(service, sheet_id: str) -> None:
     try:
         result = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range=f"{SHEET_TAB}!A1:R1",
+            range=f"{SHEET_TAB}!A1:{END_COL}1",
         ).execute()
         values = result.get("values")
         if not values or len(values[0]) < len(SHEET_HEADERS):
@@ -126,7 +139,7 @@ def sync_card(card) -> Optional[int]:
             # Update in place
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
-                range=f"{SHEET_TAB}!A{card.sheets_row}:R{card.sheets_row}",
+                range=f"{SHEET_TAB}!A{card.sheets_row}:{END_COL}{card.sheets_row}",
                 valueInputOption="RAW",
                 body={"values": [row_values]},
             ).execute()
@@ -141,7 +154,7 @@ def sync_card(card) -> Optional[int]:
                 body={"values": [row_values]},
             ).execute()
             updated_range = resp.get("updates", {}).get("updatedRange", "")
-            # updatedRange looks like "Inventory!A5:Q5" — pull the row number
+            # updatedRange looks like "Inventory!A5:S5" — pull the row number
             try:
                 row_part = updated_range.split("!")[1]
                 row_num = int("".join(ch for ch in row_part.split(":")[0] if ch.isdigit()))

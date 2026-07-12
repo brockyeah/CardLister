@@ -89,9 +89,11 @@ When you analyze the image:
 
 7. is_rookie = true if you see an "RC" badge, OR if this is the player's recognized rookie-year card in this set per your training data.
 
-8. is_autograph = true only if you can see an actual signature on the card surface (not just a printed name).
+8. is_first_bowman = true ONLY if the card front visibly shows Bowman's printed "1st" logo/stamp (the small badge on Bowman prospect cards since 2016). Do NOT infer it from training data or from the card being a prospect card — if you cannot see the logo, set false and note the uncertainty in confidence_notes.
 
-9. is_refractor = true for any refractor parallel including base Refractor, Atomic, Wave, Shimmer, etc.
+9. is_autograph = true only if you can see an actual signature on the card surface (not just a printed name).
+
+10. is_refractor = true for any refractor parallel including base Refractor, Atomic, Wave, Shimmer, etc.
 
 Return ONLY a valid JSON object. No markdown fences, no explanation, just the JSON. Use this exact shape:
 
@@ -103,6 +105,7 @@ Return ONLY a valid JSON object. No markdown fences, no explanation, just the JS
   "card_number": "",
   "team": "",
   "is_rookie": false,
+  "is_first_bowman": false,
   "is_autograph": false,
   "is_patch": false,
   "is_refractor": false,
@@ -123,6 +126,7 @@ MOCK_RESPONSE = {
     "card_number": "BCP-100",
     "team": "Tampa Bay Rays",
     "is_rookie": True,
+    "is_first_bowman": True,
     "is_autograph": False,
     "is_patch": False,
     "is_refractor": True,
@@ -144,6 +148,7 @@ def _blank_card(note: str) -> dict:
         "card_number": "",
         "team": "",
         "is_rookie": False,
+        "is_first_bowman": False,
         "is_autograph": False,
         "is_patch": False,
         "is_refractor": False,

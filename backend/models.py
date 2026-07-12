@@ -19,6 +19,7 @@ class Card(Base):
 
     # Flags
     is_rookie = Column(Boolean, default=False)
+    is_first_bowman = Column(Boolean, default=False)  # printed "1st" logo (Bowman prospects)
     is_autograph = Column(Boolean, default=False)
     is_patch = Column(Boolean, default=False)
     is_refractor = Column(Boolean, default=False)
@@ -118,5 +119,6 @@ class CallupEvent(Base):
     description = Column(Text, default="")
     inventory_match = Column(Boolean, default=False)
     matched_card_count = Column(Integer, default=0)
+    first_bowman_count = Column(Integer, default=0)  # of the matches, how many are 1st Bowmans
     emailed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

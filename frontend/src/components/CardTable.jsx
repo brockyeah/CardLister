@@ -53,7 +53,14 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
                   <div className="w-10 h-14 bg-ink-700 rounded" />
                 )}
               </td>
-              <td className="px-3 py-2 font-semibold text-gray-100">{c.player_name || '—'}</td>
+              <td className="px-3 py-2 font-semibold text-gray-100">
+                {c.player_name || '—'}
+                {c.is_first_bowman && (
+                  <span className="ml-2 align-middle text-[10px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/40 rounded px-1.5 py-0.5">
+                    1st
+                  </span>
+                )}
+              </td>
               <td className="px-3 py-2">{c.year || '—'}</td>
               <td className="px-3 py-2">{c.brand || '—'}</td>
               <td className="px-3 py-2">{c.set_name || '—'}</td>

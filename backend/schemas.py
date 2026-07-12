@@ -25,6 +25,7 @@ class CardBase(BaseModel):
     card_number: str = ""
     team: str = ""
     is_rookie: bool = False
+    is_first_bowman: bool = False
     is_autograph: bool = False
     is_patch: bool = False
     is_refractor: bool = False
@@ -53,6 +54,7 @@ class CardUpdate(BaseModel):
     card_number: Optional[str] = None
     team: Optional[str] = None
     is_rookie: Optional[bool] = None
+    is_first_bowman: Optional[bool] = None
     is_autograph: Optional[bool] = None
     is_patch: Optional[bool] = None
     is_refractor: Optional[bool] = None

@@ -13,8 +13,8 @@ def _card(**kw):
 def test_sheet_row_matches_header_length_and_includes_quantity():
     row = _card_to_row(_card(quantity=3))
     assert len(row) == len(SHEET_HEADERS)
-    assert SHEET_HEADERS[-1] == "Quantity"
-    assert row[-1] == 3
+    assert SHEET_HEADERS[-2] == "Quantity"
+    assert row[-2] == 3
 
 
 def test_description_mentions_quantity_only_above_one():
