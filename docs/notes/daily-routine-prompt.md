@@ -42,11 +42,20 @@ PHASE 3 — Build (standing authorization):
 7. Use Claude skills where they apply — /security-review after auth/upload/query changes,
    /simplify after large diffs, dataviz before building any chart or dashboard UI.
    On Mondays, run a deeper pass: dependency updates + /security-review of the full app.
+8. Open a PR automatically: if the branch has shipped work and no open PR, open one
+   against main whose body summarizes the [Unreleased] changelog entries, then
+   subscribe to its activity and drive it to green — fix CI failures and address
+   review comments in follow-up wakes. Never merge it yourself; merging is the
+   owner's call.
+9. Changelog housekeeping: if the previous run's PR has merged since last run,
+   restart the branch from origin/main, then move the merged [Unreleased] entries
+   under a dated heading with the PR number (this lands in the next PR).
 
 PHASE 4 — Report (always):
-8. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
-9. Send exactly one notification: lead with what shipped or broke, then top picks.
-   If truly nothing changed and nothing shipped, stay silent.
+10. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
+11. Send exactly one notification: lead with what shipped or broke, then top picks —
+    include the PR link if one was opened. If truly nothing changed and nothing
+    shipped, stay silent.
 ```
 
 ## Rationale for the changes
@@ -71,11 +80,15 @@ PHASE 4 — Report (always):
 - **Top picks + notification discipline.** Always end with ranked recommendations, and
   cap it at one notification so the routine stays worth subscribing to.
 
+- **Auto-PR with a hard stop at merge.** Each run's shipped work gets a PR opened and
+  babysat automatically (CI green, review comments addressed), but merging stays a
+  human decision — that's the gate that keeps main (and therefore the prod changelog)
+  trustworthy. The post-merge housekeeping step keeps branch and changelog cycling
+  cleanly run over run.
+
 ## Possible future upgrades
 
 - Split cadences: daily light run (phases 1, 3, 4) vs weekly deep run (adds ideation,
   dependency updates, full security pass) to keep daily token cost down.
-- Have the routine open a PR per shipped feature instead of pushing to one branch, so
-  each change gets CI + review in isolation.
 - Track a simple metric in the backlog (cards listed/week from the DB if reachable) so
   ideas can be prioritized against actual usage instead of intuition.
