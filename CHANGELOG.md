@@ -26,6 +26,19 @@ only in `[Unreleased]` on a branch is not in prod yet.
   the app installs to a phone home screen.
 - `docs/BACKLOG.md` idea ledger, production/monetization strategy notes, and
   the daily-routine prompt doc.
+- Subscription-billed scan fallback: when `ANTHROPIC_API_KEY` is missing or out
+  of credits, scans run headlessly through the Claude Code CLI
+  (`CLAUDE_CODE_OAUTH_TOKEN`) and bill the owner's Claude plan instead of
+  failing; analytics prices those scans at $0. The Docker image now bundles the
+  Claude Code CLI.
+- Credits-exhausted alerts: out-of-credit API errors page the owner by email
+  (existing mailer) and phone push (ntfy topic via `NTFY_TOPIC`), throttled to
+  one alert per 6h.
+
+### Changed
+- GitHub Actions workflows (@claude assistant + auto-review) authenticate with
+  `CLAUDE_CODE_OAUTH_TOKEN` (owner's Claude subscription) instead of
+  `ANTHROPIC_API_KEY` pay-as-you-go credits.
 
 ## 2026-07-12 — 1st Bowman flag (PR #13)
 

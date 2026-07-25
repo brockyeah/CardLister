@@ -9,6 +9,10 @@ Revised 2026-07-25 based on what the first runs were missing.
 
 ```
 Daily project review + build session. Work through these phases in order.
+If any step needs more detail or context on WHY it exists, read
+docs/notes/daily-routine-prompt.md in the repo — it holds the canonical version
+of this prompt plus the rationale, and it should be updated whenever this
+prompt changes.
 
 PHASE 1 — Health check (always):
 1. Check repo state: open PRs (drive any of ours toward green), open issues, CI status
@@ -47,15 +51,10 @@ PHASE 3 — Build (standing authorization):
    subscribe to its activity and drive it to green — fix CI failures and address
    review comments in follow-up wakes. Never merge it yourself; merging is the
    owner's call.
-   After opening (or when new commits land on an open PR), get a second-opinion code
-   review — but NOT from this session's own context. Spawn a fresh subagent that
-   receives ONLY the repo path and PR number (no conversation history, no knowledge
-   of why the code was written), instruct it to review the diff adversarially as if
-   a colleague authored it, and post surviving findings on the PR. The clean context
-   is what makes it a genuine second opinion: the author-session knows its own
-   intentions and will read the code as what it meant, not what it says. Billing
-   still draws from the Claude subscription — this replaces the retired API-credit
-   auto-review workflow.
+   Do NOT review your own PR: the Claude Auto Review GitHub Action (subscription-
+   authenticated via CLAUDE_CODE_OAUTH_TOKEN) provides the second opinion from a
+   clean cloud context. Your job is to RESPOND to its findings when review events
+   arrive — fix what's real, reply with reasoning where you disagree.
 9. Changelog housekeeping: if the previous run's PR has merged since last run,
    restart the branch from origin/main, then move the merged [Unreleased] entries
    under a dated heading with the PR number (this lands in the next PR).
@@ -94,6 +93,12 @@ PHASE 4 — Report (always):
   human decision — that's the gate that keeps main (and therefore the prod changelog)
   trustworthy. The post-merge housekeeping step keeps branch and changelog cycling
   cleanly run over run.
+- **Second opinion lives in the cloud, once.** The Auto Review Action authenticates
+  with the owner's subscription (CLAUDE_CODE_OAUTH_TOKEN), so it costs no API
+  credits, and it reviews from a context that never saw the code being written —
+  the genuine fresh-eyes property. The routine deliberately does NOT also review
+  in-session: two subscription-billed reviews per PR would double usage for little
+  marginal signal. Author fixes, Action reviews, owner merges.
 
 ## Possible future upgrades
 

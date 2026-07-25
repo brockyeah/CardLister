@@ -15,7 +15,14 @@ FROM python:3.11-slim
 # System deps for httpx + lxml-style parsing (we use stdlib html.parser, but keep build essentials available).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI (native binary, no Node needed) — powers the subscription-billed
+# scan fallback when CLAUDE_CODE_OAUTH_TOKEN is set. Harmless if unused.
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app
 

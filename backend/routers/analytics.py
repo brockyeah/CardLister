@@ -34,6 +34,10 @@ _DEFAULT_PRICE = (5.0, 25.0)
 
 
 def _cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    # Scans billed to the owner's Claude subscription (vision fallback) cost no
+    # API dollars — tokens are recorded for visibility but priced at zero.
+    if model.endswith("(subscription)"):
+        return 0.0
     in_price, out_price = MODEL_PRICES.get(model, _DEFAULT_PRICE)
     return (input_tokens / 1_000_000) * in_price + (output_tokens / 1_000_000) * out_price
 

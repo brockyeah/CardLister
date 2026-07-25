@@ -1,7 +1,7 @@
 # Design note: Claude-subscription fallback for scan billing
 
-*Status: planned, not implemented. Touches billing/auth, so per the routine's rules it
-gets this design doc + owner sign-off before code.*
+*Status: IMPLEMENTED 2026-07-25 (owner approved in session). Kept for the rationale and
+caveats; see `backend/services/claude_vision.py` + `billing_alerts.py` for the code.*
 
 ## The ask
 
