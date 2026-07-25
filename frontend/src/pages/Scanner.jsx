@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import CardForm from '../components/CardForm.jsx'
 import NewsSection from '../components/NewsSection.jsx'
-import { scanCard, getPricing, createCard, getEbayListingText } from '../api'
+import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -78,6 +78,11 @@ export default function Scanner() {
 
   const [toast, setToast] = useState(null)
   const [error, setError] = useState('')
+
+  // Duplicate prompt: { data, existing } while asking the user whether to
+  // bump the existing card's count instead of saving a new row.
+  const [dupPrompt, setDupPrompt] = useState(null)
+  const cameraInputRef = useRef(null)
 
   // --- Staging (no upload yet — just shows what's about to be scanned) ---
   const stageFile = (file) => {
@@ -196,8 +201,28 @@ export default function Scanner() {
     await fetchPricing(next)
   }
 
+  // Reset the form + advance the batch queue, shared by every save outcome.
+  const resetAfterSave = () => {
+    setForm(EMPTY_FORM)
+    setImagePath('')
+    setComps([])
+    setMock(false)
+    setScanId(null)
+    setPricingNote('')
+    setPricingSource('')
+
+    if (activeKey) {
+      // Compute from the render snapshot — reading state back out of a
+      // setQueue updater is deferred by React and never runs in time here.
+      const nextReady = queue.find((q) => q.key !== activeKey && q.status === 'ready') || null
+      setQueue((prev) => prev.map((q) => (q.key === activeKey ? { ...q, status: 'saved' } : q)))
+      setActiveKey(null)
+      if (nextReady) setTimeout(() => reviewQueueItem(nextReady), 0)
+    }
+  }
+
   // --- Save + copy listing to clipboard + open eBay ---
-  const handleSubmit = async (data) => {
+  const doSave = async (data) => {
     setSubmitting(true)
     setError('')
     try {
@@ -216,23 +241,7 @@ export default function Scanner() {
       }
       window.open(EBAY_SELL_URL, '_blank', 'noopener')
 
-      // Reset for next card
-      setForm(EMPTY_FORM)
-      setImagePath('')
-      setComps([])
-      setMock(false)
-      setScanId(null)
-      setPricingNote('')
-      setPricingSource('')
-
-      if (activeKey) {
-        // Compute from the render snapshot — reading state back out of a
-        // setQueue updater is deferred by React and never runs in time here.
-        const nextReady = queue.find((q) => q.key !== activeKey && q.status === 'ready') || null
-        setQueue((prev) => prev.map((q) => (q.key === activeKey ? { ...q, status: 'saved' } : q)))
-        setActiveKey(null)
-        if (nextReady) setTimeout(() => reviewQueueItem(nextReady), 0)
-      }
+      resetAfterSave()
 
       setToast({
         id: created.id,
@@ -243,6 +252,40 @@ export default function Scanner() {
       setTimeout(() => setToast(null), 8000)
     } catch (e) {
       setError(e.response?.data?.detail || 'Save failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Duplicate gate: ask before creating a second row for a card already owned.
+  const handleSubmit = async (data) => {
+    try {
+      const { duplicate } = await checkDuplicate(data)
+      if (duplicate) {
+        setDupPrompt({ data, existing: duplicate })
+        return
+      }
+    } catch {
+      // Never block a save on the dup check — fall through and save normally.
+    }
+    await doSave(data)
+  }
+
+  const increaseCount = async () => {
+    const { existing } = dupPrompt
+    setDupPrompt(null)
+    setSubmitting(true)
+    setError('')
+    try {
+      const updated = await updateCard(existing.id, { quantity: (existing.quantity || 1) + 1 })
+      resetAfterSave()
+      setToast({
+        id: updated.id,
+        message: `Card count increased — you now have ${updated.quantity} copies of ${updated.player_name}.`,
+      })
+      setTimeout(() => setToast(null), 8000)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Failed to update card count.')
     } finally {
       setSubmitting(false)
     }
@@ -365,9 +408,27 @@ export default function Scanner() {
             className="hidden"
             onChange={(e) => stageFiles(e.target.files)}
           />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => stageFiles(e.target.files)}
+          />
           <div className="text-5xl mb-3">📸</div>
           <div className="text-xl font-bold mb-1">Tap to choose a file or drop one here</div>
           <div className="text-gray-400 text-sm">JPG, PNG, WEBP, or PDF — select multiple files to batch scan</div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              cameraInputRef.current?.click()
+            }}
+            className="btn-secondary mt-5"
+          >
+            📷 Take a Photo
+          </button>
         </div>
       )}
 
@@ -508,6 +569,61 @@ export default function Scanner() {
           </div>
         </div>
       )}
+
+      {dupPrompt && (() => {
+        const c = dupPrompt.existing
+        const label = [c.year, c.brand, c.set_name, c.player_name, c.card_number && `#${c.card_number}`]
+          .filter(Boolean).join(' ')
+        const qty = c.quantity || 1
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20 px-4">
+            <div className="card-panel w-full max-w-md">
+              <h2 className="text-xl font-bold mb-2">Looks like you already own this card!</h2>
+              <div className="flex items-center gap-3 bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 mb-3">
+                {c.image_path ? (
+                  <img src={c.image_path} alt="" className="w-10 h-14 object-cover rounded" />
+                ) : (
+                  <div className="w-10 h-14 bg-ink-700 rounded" />
+                )}
+                <div className="text-sm">
+                  <div className="font-semibold text-gray-100">{label}</div>
+                  <div className="text-gray-400">
+                    {qty === 1 ? '1 copy' : `${qty} copies`} in inventory
+                    {c.listed_price != null && ` · listed at $${Number(c.listed_price).toFixed(2)}`}
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-gray-400 mb-4">
+                Would you like to increase your card count instead of creating a new entry?
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={increaseCount} disabled={submitting} className="btn-primary flex-1">
+                  Yes, Increase Count to {qty + 1}
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => {
+                    const { data } = dupPrompt
+                    setDupPrompt(null)
+                    doSave(data)
+                  }}
+                  className="btn-secondary flex-1"
+                >
+                  No, Save as New Card
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDupPrompt(null)}
+                className="text-xs text-gray-400 underline mt-3 mx-auto block"
+              >
+                Cancel — keep editing
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       <NewsSection />
     </div>
