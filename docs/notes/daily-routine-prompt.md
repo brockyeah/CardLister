@@ -47,6 +47,10 @@ PHASE 3 — Build (standing authorization):
    subscribe to its activity and drive it to green — fix CI failures and address
    review comments in follow-up wakes. Never merge it yourself; merging is the
    owner's call.
+   After opening (or when new commits land on an open PR), run the /review skill on
+   it as a second-opinion code review and post the findings on the PR. This runs
+   inside this session, so it draws from the Claude subscription — it replaces the
+   retired API-credit auto-review workflow.
 9. Changelog housekeeping: if the previous run's PR has merged since last run,
    restart the branch from origin/main, then move the merged [Unreleased] entries
    under a dated heading with the PR number (this lands in the next PR).
