@@ -14,7 +14,7 @@ function fmtDate(v) {
   }
 }
 
-export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete }) {
+export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps }) {
   if (!cards.length) {
     return (
       <div className="card-panel text-center text-gray-400 py-12">
@@ -90,6 +90,15 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
               </td>
               <td className="px-3 py-2 text-gray-400">{fmtDate(c.created_at)}</td>
               <td className="px-3 py-2 whitespace-nowrap">
+                {c.status !== 'sold' && (
+                  <button
+                    onClick={() => onCheckComps?.(c)}
+                    className="text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded px-2 py-1 mr-1"
+                    title="Look up current sold comps for this card"
+                  >
+                    Comps
+                  </button>
+                )}
                 {c.status !== 'sold' && (
                   <button
                     onClick={() => onMarkSold?.(c)}
