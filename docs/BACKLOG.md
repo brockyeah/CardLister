@@ -12,6 +12,8 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Subscription-billed scan fallback (Claude Code OAuth via `claude -p` when API credits run out) — plan approved by owner? see `docs/notes/2026-07-25-subscription-vision-fallback.md`
+
 - [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see monetization notes Phase A)
 - [ ] PSA/BGS grade slab detection in vision + grade-aware pricing queries
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
