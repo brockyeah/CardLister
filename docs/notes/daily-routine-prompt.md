@@ -13,11 +13,16 @@ Daily project review + build session. Work through these phases in order.
 PHASE 1 — Health check (always):
 1. Check repo state: open PRs (drive any of ours toward green), open issues, CI status
    on main, and security/dependency alerts. If production is reachable, hit /api/health.
-2. Read docs/BACKLOG.md — it is the persistent ledger between runs. Never re-propose
-   anything in its Shipped section.
+2. Read the changelog AS IT EXISTS ON MAIN (`git show origin/main:CHANGELOG.md`) — main
+   is what production runs, so its changelog is the ground truth of what has actually
+   shipped; nothing half-baked appears there. Compare against the working branch's
+   [Unreleased] section to see what's built but not yet merged, and treat unmerged
+   work as "get it reviewed/merged" before piling more on top.
+3. Read docs/BACKLOG.md — it is the persistent ledger between runs. Never re-propose
+   anything in its Shipped section or already recorded in the changelog.
 
 PHASE 2 — Ideas (always):
-3. Propose 3–5 new feature/implementation ideas not already in the backlog, grounded in
+4. Propose 3–5 new feature/implementation ideas not already in the backlog, grounded in
    the current code. For EVERY idea, you must decide and state:
    - effort: quick win (≤ half day) / medium / long-term
    - planning: implement directly, or write a plan/spec doc first (anything touching
@@ -25,19 +30,22 @@ PHASE 2 — Ideas (always):
    - execution: inline, or delegated to subagents (delegate only when work items don't
      touch overlapping files; otherwise stay inline)
    These decisions are required output, not optional commentary.
-4. Merge the surviving ideas into docs/BACKLOG.md.
+5. Merge the surviving ideas into docs/BACKLOG.md.
 
 PHASE 3 — Build (standing authorization):
-5. Implement the top 1–2 quick wins from the backlog without asking. Gates: full backend
+6. Implement the top 1–2 quick wins from the backlog without asking. Gates: full backend
    test suite green, frontend build green, then commit per feature and push to the
-   designated branch. Update the backlog's Shipped section in the same push.
-6. Use Claude skills where they apply — /security-review after auth/upload/query changes,
+   designated branch. In the same push: update the backlog's Shipped section AND add a
+   CHANGELOG.md entry under [Unreleased] for every shipped feature — a feature without
+   a changelog entry is not done. Never edit dated (merged) changelog sections; those
+   only change when a PR merges to main.
+7. Use Claude skills where they apply — /security-review after auth/upload/query changes,
    /simplify after large diffs, dataviz before building any chart or dashboard UI.
    On Mondays, run a deeper pass: dependency updates + /security-review of the full app.
 
 PHASE 4 — Report (always):
-7. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
-8. Send exactly one notification: lead with what shipped or broke, then top picks.
+8. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
+9. Send exactly one notification: lead with what shipped or broke, then top picks.
    If truly nothing changed and nothing shipped, stay silent.
 ```
 
@@ -48,6 +56,11 @@ PHASE 4 — Report (always):
   after the fact. Now every idea carries an effort/planning/execution verdict.
 - **Persistent state.** Without `docs/BACKLOG.md`, each run re-derives the project state
   from scratch and can re-pitch already-shipped ideas. The backlog is the memory.
+- **Changelog as prod ground truth.** `main` is continuously deployed, so the changelog
+  as it reads on `origin/main` describes exactly what production runs — bad or unmerged
+  implementations never appear there. Reading it first (instead of raw git log) gives
+  the run an instant, curated picture of recent shipped work, and the branch's
+  [Unreleased] diff against it shows what's still awaiting review/merge.
 - **Standing build authorization.** The review-only loop wastes the run; pre-approving
   gated quick wins (tests + build + push) turns the routine from a reporter into a
   contributor while keeping risky work behind plan docs.
