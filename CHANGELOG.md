@@ -33,7 +33,8 @@ only in `[Unreleased]` on a branch is not in prod yet.
   Claude Code CLI.
 - Credits-exhausted alerts: out-of-credit API errors page the owner by email
   (existing mailer) and phone push (ntfy topic via `NTFY_TOPIC`), throttled to
-  one alert per 6h.
+  one alert per 6h. `POST /api/analytics/alerts/test` fires both channels on
+  demand (no throttle) to verify the wiring.
 
 ### Changed
 - GitHub Actions workflows (@claude assistant + auto-review) authenticate with

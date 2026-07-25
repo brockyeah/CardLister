@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_auth, get_users
 from ..database import get_db
 from ..models import Correction, Scan, UsageEvent
+from ..services.billing_alerts import send_test_alert
 from ..schemas import (
     AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow, ReassignRequest,
 )
@@ -174,3 +175,10 @@ def delete_user_data(username: str, db: Session = Depends(get_db)):
 def configured_users():
     """Usernames from CARDLISTER_USERS — valid merge targets for Manage data."""
     return {"users": sorted(get_users())}
+
+
+@router.post("/alerts/test")
+def test_alerts():
+    """Fire the credits-exhausted alert channels (email + ntfy push) right now,
+    bypassing the throttle, so the owner can verify the wiring end to end."""
+    return send_test_alert()

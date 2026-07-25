@@ -111,6 +111,25 @@ def test_non_billing_errors_do_not_alert(monkeypatch, tmp_path):
     assert error and "Vision extraction failed" in error
 
 
+def test_alerts_test_endpoint_reports_channel_status(monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    monkeypatch.setattr(billing_alerts, "send_email", lambda s, b: True)
+    monkeypatch.setenv("NTFY_TOPIC", "cardlister-test-topic")
+    monkeypatch.setattr(billing_alerts.httpx, "post",
+                        lambda url, **kw: types.SimpleNamespace(status_code=200, text=""))
+
+    with TestClient(app) as client:
+        assert client.post("/api/analytics/alerts/test").status_code == 401
+        tok = client.post("/api/auth/login", json={"username": "tester", "password": "pw"}).json()["token"]
+        r = client.post("/api/analytics/alerts/test", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["push_configured"] is True and body["push_sent"] is True
+        assert body["email_sent"] is True
+
+
 def test_alert_throttles_and_hits_both_channels(monkeypatch):
     sent, pushed = [], []
     monkeypatch.setattr(billing_alerts, "send_email", lambda s, b: sent.append(s) or True)

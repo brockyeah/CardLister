@@ -43,6 +43,22 @@ def _push_via_ntfy(title: str, body: str) -> bool:
         return False
 
 
+def send_test_alert() -> dict:
+    """Fire both alert channels immediately (no throttle) so the owner can
+    verify the ntfy topic + email recipients are wired up correctly."""
+    title = "CardLister: test alert"
+    body = (
+        "This is a test of the credits-exhausted alert channels. "
+        "If you can read this, the channel works. No action needed."
+    )
+    return {
+        "email_configured": bool(os.getenv("SENDGRID_API_KEY") or os.getenv("SMTP_USERNAME")),
+        "push_configured": bool(os.getenv("NTFY_TOPIC", "").strip()),
+        "email_sent": send_email(title, body),
+        "push_sent": _push_via_ntfy(title, body),
+    }
+
+
 def notify_credits_exhausted(detail: str) -> bool:
     """Tell the owner the pay-as-you-go API key is out of credits.
 
