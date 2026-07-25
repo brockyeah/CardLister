@@ -1,0 +1,68 @@
+# Daily Review Routine — Improved Prompt
+
+Drop-in replacement for the scheduled prompt that drives the daily project review.
+Revised 2026-07-25 based on what the first runs were missing.
+
+---
+
+## The prompt
+
+```
+Daily project review + build session. Work through these phases in order.
+
+PHASE 1 — Health check (always):
+1. Check repo state: open PRs (drive any of ours toward green), open issues, CI status
+   on main, and security/dependency alerts. If production is reachable, hit /api/health.
+2. Read docs/BACKLOG.md — it is the persistent ledger between runs. Never re-propose
+   anything in its Shipped section.
+
+PHASE 2 — Ideas (always):
+3. Propose 3–5 new feature/implementation ideas not already in the backlog, grounded in
+   the current code. For EVERY idea, you must decide and state:
+   - effort: quick win (≤ half day) / medium / long-term
+   - planning: implement directly, or write a plan/spec doc first (anything touching
+     schema, auth, money, or 3+ subsystems requires a plan doc)
+   - execution: inline, or delegated to subagents (delegate only when work items don't
+     touch overlapping files; otherwise stay inline)
+   These decisions are required output, not optional commentary.
+4. Merge the surviving ideas into docs/BACKLOG.md.
+
+PHASE 3 — Build (standing authorization):
+5. Implement the top 1–2 quick wins from the backlog without asking. Gates: full backend
+   test suite green, frontend build green, then commit per feature and push to the
+   designated branch. Update the backlog's Shipped section in the same push.
+6. Use Claude skills where they apply — /security-review after auth/upload/query changes,
+   /simplify after large diffs, dataviz before building any chart or dashboard UI.
+   On Mondays, run a deeper pass: dependency updates + /security-review of the full app.
+
+PHASE 4 — Report (always):
+7. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
+8. Send exactly one notification: lead with what shipped or broke, then top picks.
+   If truly nothing changed and nothing shipped, stay silent.
+```
+
+## Rationale for the changes
+
+- **Decisions are required output.** The original prompt asked only for ideas; whether an
+  item needs planning first, and whether it should be delegated, had to be requested
+  after the fact. Now every idea carries an effort/planning/execution verdict.
+- **Persistent state.** Without `docs/BACKLOG.md`, each run re-derives the project state
+  from scratch and can re-pitch already-shipped ideas. The backlog is the memory.
+- **Standing build authorization.** The review-only loop wastes the run; pre-approving
+  gated quick wins (tests + build + push) turns the routine from a reporter into a
+  contributor while keeping risky work behind plan docs.
+- **Skills are named, not implied.** `/security-review`, `/simplify`, and `dataviz` only
+  get used if the prompt tells the run when they apply.
+- **Health check first.** A red CI run or a down production instance matters more than
+  brainstorming; check it before spending the run on ideas.
+- **Top picks + notification discipline.** Always end with ranked recommendations, and
+  cap it at one notification so the routine stays worth subscribing to.
+
+## Possible future upgrades
+
+- Split cadences: daily light run (phases 1, 3, 4) vs weekly deep run (adds ideation,
+  dependency updates, full security pass) to keep daily token cost down.
+- Have the routine open a PR per shipped feature instead of pushing to one branch, so
+  each change gets CI + review in isolation.
+- Track a simple metric in the backlog (cards listed/week from the DB if reachable) so
+  ideas can be prioritized against actual usage instead of intuition.
