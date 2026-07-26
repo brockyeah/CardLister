@@ -24,6 +24,10 @@ only in `[Unreleased]` on a branch is not in prod yet.
   this one file on a single Railway volume, which previously had no backup
   story at all.
 
+### Fixed
+- A whitespace-only serial number no longer renders a bare `/` flag in the
+  eBay title (backend now matches the preview mirror's behavior).
+
 ## 2026-07-26 — 1st Bowman follow-ups (PR #15)
 
 ### Added

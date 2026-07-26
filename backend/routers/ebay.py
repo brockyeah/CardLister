@@ -32,7 +32,8 @@ def build_title(card: Card) -> str:
     if card.serial_number:
         # Normalise so '/99' or '99' both render as '/99'
         sn = card.serial_number.strip()
-        flags.append(sn if sn.startswith("/") else f"/{sn}")
+        if sn:
+            flags.append(sn if sn.startswith("/") else f"/{sn}")
     if card.parallel_color:
         flags.append(card.parallel_color.upper())
 

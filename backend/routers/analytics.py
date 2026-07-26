@@ -193,7 +193,9 @@ def download_backup():
     os.close(fd)
     os.unlink(tmp_path)  # VACUUM INTO refuses to overwrite an existing file
     try:
-        src = sqlite3.connect(DB_PATH)
+        # timeout=5.0 is Python's default; explicit so it's clear a snapshot
+        # landing in a writer's brief EXCLUSIVE window waits instead of 500ing.
+        src = sqlite3.connect(DB_PATH, timeout=5.0)
         try:
             src.execute("VACUUM INTO ?", (tmp_path,))
         finally:

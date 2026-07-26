@@ -83,3 +83,10 @@ def test_sheets_bounded_ranges_span_all_headers():
     assert gs._col_letter(19) == "S"
     assert gs._col_letter(27) == "AA"
     assert gs.END_COL == gs._col_letter(len(gs.SHEET_HEADERS))
+
+
+def test_whitespace_only_serial_adds_no_flag():
+    # Matches the frontend title-preview mirror (frontend/src/lib/ebayTitle.js):
+    # a serial of only spaces must not render a bare "/" flag.
+    card = Card(player_name="Holliday", year=2023, brand="Bowman", serial_number="  ")
+    assert "/" not in build_title(card)
