@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
-import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText } from '../api'
+import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value }) {
   return (
@@ -107,6 +107,100 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
   )
 }
 
+function CompsModal({ card, onClose, onApplyPrice }) {
+  const [loading, setLoading] = useState(true)
+  const [result, setResult] = useState(null)
+  const [applying, setApplying] = useState(false)
+
+  useEffect(() => {
+    getPricing({
+      player_name: card.player_name,
+      year: card.year,
+      brand: card.brand,
+      set_name: card.set_name,
+      card_number: card.card_number,
+    })
+      .then(setResult)
+      .catch(() => setResult({ comps: [], suggested_price: null, source: 'mock', note: 'Pricing lookup failed.' }))
+      .finally(() => setLoading(false))
+  }, [card])
+
+  const suggested = result?.source !== 'mock' ? result?.suggested_price : null
+  const delta = suggested != null && card.listed_price != null ? suggested - card.listed_price : null
+
+  const apply = async () => {
+    setApplying(true)
+    try {
+      await onApplyPrice(suggested)
+      onClose()
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20 px-4">
+      <div className="card-panel w-full max-w-md">
+        <h2 className="text-xl font-bold mb-1">Current Comps</h2>
+        <p className="text-sm text-gray-400 mb-4">
+          {[card.year, card.brand, card.set_name, card.player_name, card.card_number && `#${card.card_number}`]
+            .filter(Boolean).join(' ')}
+        </p>
+
+        {loading ? (
+          <div className="text-center text-gray-400 py-8">Looking up sold comps…</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-ink-900 border border-ink-700 rounded-lg px-3 py-2">
+                <div className="text-xs uppercase tracking-wide text-gray-400">Listed at</div>
+                <div className="text-lg font-black text-gray-100">
+                  {card.listed_price != null ? `$${Number(card.listed_price).toFixed(2)}` : '—'}
+                </div>
+              </div>
+              <div className="bg-ink-900 border border-ink-700 rounded-lg px-3 py-2">
+                <div className="text-xs uppercase tracking-wide text-gray-400">Comps say</div>
+                <div className="text-lg font-black text-gray-100">
+                  {suggested != null ? `$${suggested.toFixed(2)}` : '—'}
+                  {delta != null && delta !== 0 && (
+                    <span className={`ml-2 text-sm font-bold ${delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {delta > 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {result.comps?.length > 0 && (
+              <div className="bg-ink-900 border border-ink-700 rounded-lg max-h-40 overflow-y-auto mb-3">
+                {result.comps.slice(0, 8).map((c, idx) => (
+                  <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
+                    <span className="text-gray-300 truncate">{c.title}</span>
+                    <span className="text-emerald-400 font-bold whitespace-nowrap">${Number(c.price).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.source && result.source !== 'mock' && (
+              <div className="text-xs text-emerald-400 mb-1">Source: {result.source === 'ebay_sold' ? 'eBay sold listings' : result.source}</div>
+            )}
+            {result.note && <div className="text-xs text-yellow-400 mb-3">{result.note}</div>}
+
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={onClose} className="btn-secondary flex-1">Close</button>
+              {suggested != null && suggested !== card.listed_price && (
+                <button type="button" onClick={apply} disabled={applying} className="btn-primary flex-1">
+                  {applying ? 'Saving…' : `Set Price to $${suggested.toFixed(2)}`}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Inventory() {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
@@ -114,6 +208,7 @@ export default function Inventory() {
   const [statusFilter, setStatusFilter] = useState('')
   const [soldModalCard, setSoldModalCard] = useState(null)
   const [attachModalCard, setAttachModalCard] = useState(null)
+  const [compsModalCard, setCompsModalCard] = useState(null)
 
   const reload = async () => {
     setLoading(true)
@@ -212,6 +307,12 @@ export default function Inventory() {
           <option value="sold">Sold</option>
         </select>
         <button onClick={reload} className="btn-secondary md:ml-auto">Refresh</button>
+        <button
+          onClick={() => downloadInventoryCsv().catch(() => alert('Export failed — try again.'))}
+          className="btn-secondary"
+        >
+          Export CSV
+        </button>
       </div>
 
       {loading ? (
@@ -223,6 +324,18 @@ export default function Inventory() {
           onAttachEbay={onAttachEbay}
           onOpenEbay={onOpenEbay}
           onDelete={onDelete}
+          onCheckComps={setCompsModalCard}
+        />
+      )}
+
+      {compsModalCard && (
+        <CompsModal
+          card={compsModalCard}
+          onClose={() => setCompsModalCard(null)}
+          onApplyPrice={async (price) => {
+            await updateCard(compsModalCard.id, { listed_price: price })
+            await reload()
+          }}
         />
       )}
 

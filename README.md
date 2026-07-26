@@ -80,7 +80,9 @@ docker run --rm -p 8000:8000 \
 | `CARDLISTER_PASSWORD` | yes* | Password for the fallback single `owner` user when `CARDLISTER_USERS` is not set (log in with a blank username). Defaults to `changeme`; in production (`APP_ENV=production` or a Railway deploy) the app refuses to start if left at the default. |
 | `JWT_SECRET` | yes | Long random string used to sign session tokens. Use `openssl rand -hex 32`. Same production fail-fast as above. |
 | `APP_ENV` | optional | Set to `production` to enforce the secret checks above. Auto-detected on Railway; defaults to development locally. |
-| `ANTHROPIC_API_KEY` | recommended | From <https://console.anthropic.com>. If missing, `/api/scan` returns mock data so the UI still works end-to-end. |
+| `ANTHROPIC_API_KEY` | recommended | From <https://console.anthropic.com>. If missing, `/api/scan` uses the subscription fallback (below) if configured, else returns mock data so the UI still works end-to-end. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | optional | From `claude setup-token` (Claude Pro/Max plan; expires ~yearly). Scan fallback: when the API key is missing **or out of credits**, scans run headlessly through the Claude Code CLI and bill the subscription instead of failing. Personal-use setups only. |
+| `NTFY_TOPIC` | optional | [ntfy.sh](https://ntfy.sh) topic for phone-push alerts when API credits run out (email also goes to `ALERT_EMAILS`). Pick a long random topic name and subscribe to it in the ntfy app. `BILLING_ALERT_THROTTLE_SECONDS` spaces repeats (default 6h). |
 | `CLAUDE_MODEL` | optional | Fallback vision model id (default `claude-opus-4-7`). Per-scan choice is normally driven by the **Scan mode** selector (Cost / Balanced / Accuracy); this is the fallback when no preset is sent. |
 | `CLAUDE_EFFORT` | optional | Fallback thinking depth: `low` \| `medium` \| `high` (default `medium`). Also superseded per-scan by the Scan mode selector. |
 | `VISION_MAX_IMAGE_PX` | optional | Long-edge pixel cap applied to images before they're sent to the vision API (the on-disk upload is untouched). Defaults to `1300`; set `0` to disable downsampling. |
