@@ -5,9 +5,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
-- [ ] Live eBay title preview in the card form: client-side mirror of `build_title`
-      with an 80-char counter so truncation surprises (see PR #15) are visible before
-      saving (quick win; implement directly; inline)
 - [ ] One-click SQLite backup download: `GET /api/analytics/backup.db` via
       `VACUUM INTO` + button on the Analytics manage-data panel — inventory currently
       lives in one file on one Railway volume with no backup story (quick win;
@@ -35,6 +32,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-07-26 — Live eBay title preview with 80-char truncation warning in the card form
 - [x] 2026-07-25 — Subscription-billed scan fallback + credits-exhausted alerts (email + ntfy phone push); Actions workflows moved to subscription auth
 - [x] 2026-07-25 — Duplicate detection at save time with "increase count" confirm pop-up
 - [x] 2026-07-25 — Inventory CSV export (Sheets column layout)

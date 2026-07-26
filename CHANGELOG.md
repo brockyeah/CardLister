@@ -12,7 +12,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased] — branch `claude/happy-ramanujan-ilzfp3`
 
-_Nothing yet._
+### Added
+- Live eBay title preview in the card form: shows the exact title the listing
+  flow will generate (client-side mirror of `build_title`) with an 80-character
+  counter; anything past the cap renders struck-through in red so truncation is
+  visible before saving instead of after pasting into eBay.
 
 ## 2026-07-26 — 1st Bowman follow-ups (PR #15)
 

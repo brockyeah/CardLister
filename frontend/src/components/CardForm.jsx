@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { buildEbayTitle, EBAY_TITLE_MAX } from '../lib/ebayTitle.js'
 
 const FIELDS = [
   { key: 'player_name', label: 'Player', type: 'text', wide: true },
@@ -49,6 +50,8 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
     onSubmit?.(data)
   }
 
+  const preview = buildEbayTitle(data)
+
   return (
     <form onSubmit={handleSubmit} className="card-panel space-y-5">
       {mock && (
@@ -93,6 +96,32 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
           })}
         </div>
       </div>
+
+      {preview.full && (
+        <div>
+          <div className="flex items-baseline justify-between">
+            <label className="label">eBay Title Preview</label>
+            <span
+              className={`text-xs font-mono ${preview.truncated ? 'text-red-400 font-bold' : 'text-emerald-400'}`}
+            >
+              {preview.length}/{EBAY_TITLE_MAX}
+            </span>
+          </div>
+          <div className="bg-ink-900 border border-ink-700 rounded-lg px-3 py-2 text-sm font-mono text-gray-200 break-words">
+            <span>{preview.title}</span>
+            {preview.truncated && (
+              <span className="text-red-400 line-through opacity-70">
+                {preview.full.slice(preview.title.length)}
+              </span>
+            )}
+          </div>
+          {preview.truncated && (
+            <p className="text-xs text-red-400 mt-1">
+              Over eBay's {EBAY_TITLE_MAX}-character limit — the struck-through part will be cut off.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
