@@ -10,7 +10,23 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/fervent-hamilton-49mms5`
+## [Unreleased] — branch `claude/happy-ramanujan-ilzfp3`
+
+_Nothing yet._
+
+## 2026-07-26 — 1st Bowman follow-ups (PR #15)
+
+### Added
+- Call-up ticker shows a "1st Bowman ×N" badge when a call-up matches owned
+  1st Bowman cards (`first_bowman_count` now included in `/api/news`), matching
+  the email digest's behavior.
+
+### Fixed
+- eBay title flag order: `RC` now renders ahead of `1ST BOWMAN` in
+  `build_title`, so the rookie flag is less likely to be dropped by the
+  80-character title truncation.
+
+## 2026-07-26 — Duplicate detection, CSV export, comps, PWA, billing fallback (PR #14)
 
 ### Added
 - Duplicate detection on save: the Scanner checks for an owned (non-sold) copy of
