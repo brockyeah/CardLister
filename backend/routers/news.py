@@ -22,6 +22,7 @@ def news(db: Session = Depends(get_db)):
         "date": e.date, "player_name": e.player_name, "to_team": e.to_team,
         "type_desc": e.type_desc, "inventory_match": e.inventory_match,
         "matched_card_count": e.matched_card_count,
+        "first_bowman_count": e.first_bowman_count,
     } for e in events]
     # Attribute access (not a bound import) so patch.object(prospect_news, "fetch_articles") works.
     return {"callups": callups, "articles": prospect_news.fetch_articles()}

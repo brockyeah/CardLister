@@ -80,6 +80,11 @@ export default function NewsSection() {
                               You Own {c.matched_card_count}
                             </span>
                           )}
+                          {c.first_bowman_count > 0 && (
+                            <span className="text-[10px] font-sans font-bold uppercase tracking-wide bg-amber-500 text-ink-900 rounded-sm px-1.5 py-0.5">
+                              1st Bowman ×{c.first_bowman_count}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )
