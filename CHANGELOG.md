@@ -10,7 +10,11 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/fervent-hamilton-49mms5`
+## [Unreleased]
+
+Nothing yet.
+
+## 2026-07-26 — Quick wins, subscription billing & docs (PR #14)
 
 ### Added
 - Duplicate detection on save: the Scanner checks for an owned (non-sold) copy of
