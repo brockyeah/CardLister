@@ -52,6 +52,16 @@ export const deleteUserData = (username) =>
   api.delete(`/api/analytics/users/${encodeURIComponent(username)}/data`).then((r) => r.data)
 export const getConfiguredUsers = () =>
   api.get('/api/analytics/users/configured').then((r) => r.data)
+// Blob download — a plain <a href> can't carry the Bearer token.
+export const downloadBackup = () =>
+  api.get('/api/analytics/backup.db', { responseType: 'blob' }).then((r) => {
+    const url = URL.createObjectURL(r.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `cardlister-backup-${new Date().toISOString().slice(0, 10)}.db`
+    a.click()
+    URL.revokeObjectURL(url)
+  })
 
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)

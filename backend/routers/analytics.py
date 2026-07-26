@@ -4,15 +4,20 @@ Aggregates usage_events with filters (time range, user, model) and returns
 totals plus breakdowns by user, model, and day. Costs are estimated from
 per-model token prices; settlement happens offline.
 """
+import os
+import sqlite3
+import tempfile
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from ..auth import require_auth, get_users
-from ..database import get_db
+from ..database import DB_PATH, get_db
 from ..models import Correction, Scan, UsageEvent
 from ..services.billing_alerts import send_test_alert
 from ..schemas import (
@@ -175,6 +180,37 @@ def delete_user_data(username: str, db: Session = Depends(get_db)):
 def configured_users():
     """Usernames from CARDLISTER_USERS — valid merge targets for Manage data."""
     return {"users": sorted(get_users())}
+
+
+@router.get("/backup.db")
+def download_backup():
+    """Consistent point-in-time snapshot of the SQLite DB, streamed as a download.
+
+    VACUUM INTO takes a transactional copy, so it's safe against concurrent
+    writes — unlike copying the file, which can capture a torn state mid-write.
+    """
+    fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="cardlister-backup-")
+    os.close(fd)
+    os.unlink(tmp_path)  # VACUUM INTO refuses to overwrite an existing file
+    try:
+        # timeout=5.0 is Python's default; explicit so it's clear a snapshot
+        # landing in a writer's brief EXCLUSIVE window waits instead of 500ing.
+        src = sqlite3.connect(DB_PATH, timeout=5.0)
+        try:
+            src.execute("VACUUM INTO ?", (tmp_path,))
+        finally:
+            src.close()
+    except sqlite3.Error:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise HTTPException(status_code=500, detail="Backup snapshot failed")
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return FileResponse(
+        tmp_path,
+        media_type="application/octet-stream",
+        filename=f"cardlister-backup-{stamp}.db",
+        background=BackgroundTask(os.unlink, tmp_path),
+    )
 
 
 @router.post("/alerts/test")

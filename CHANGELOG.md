@@ -10,7 +10,37 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/fervent-hamilton-49mms5`
+## [Unreleased] — branch `claude/happy-ramanujan-ilzfp3`
+
+### Added
+- Live eBay title preview in the card form: shows the exact title the listing
+  flow will generate (client-side mirror of `build_title`) with an 80-character
+  counter; anything past the cap renders struck-through in red so truncation is
+  visible before saving instead of after pasting into eBay.
+- One-click database backup: `GET /api/analytics/backup.db` streams a
+  consistent point-in-time SQLite snapshot (`VACUUM INTO`, safe against
+  concurrent writes), with a "Download database backup" button on the
+  Analytics manage-data panel. Inventory, scans, and usage history all live in
+  this one file on a single Railway volume, which previously had no backup
+  story at all.
+
+### Fixed
+- A whitespace-only serial number no longer renders a bare `/` flag in the
+  eBay title (backend now matches the preview mirror's behavior).
+
+## 2026-07-26 — 1st Bowman follow-ups (PR #15)
+
+### Added
+- Call-up ticker shows a "1st Bowman ×N" badge when a call-up matches owned
+  1st Bowman cards (`first_bowman_count` now included in `/api/news`), matching
+  the email digest's behavior.
+
+### Fixed
+- eBay title flag order: `RC` now renders ahead of `1ST BOWMAN` in
+  `build_title`, so the rookie flag is less likely to be dropped by the
+  80-character title truncation.
+
+## 2026-07-26 — Duplicate detection, CSV export, comps, PWA, billing fallback (PR #14)
 
 ### Added
 - Duplicate detection on save: the Scanner checks for an owned (non-sold) copy of
