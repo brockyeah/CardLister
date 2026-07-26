@@ -49,6 +49,23 @@ def test_listing_text_includes_first_bowman():
     assert "1st Bowman: YES" in build_description(card)
 
 
+def test_rc_flag_precedes_first_bowman_and_survives_truncation():
+    # RC is appended before 1ST BOWMAN so it's more likely to survive the
+    # 80-char title truncation. Padding set_name pushes the flags right up
+    # against the truncation boundary, cutting off 1ST BOWMAN but not RC.
+    card = Card(
+        player_name="Holliday", year=2023, brand="Bowman", card_number="1", team="Orioles",
+        set_name="Chrome " + " ".join(["X"] * 19),
+        is_first_bowman=True, is_rookie=True, is_autograph=True, is_refractor=True,
+        serial_number="99", parallel_color="Gold",
+    )
+    title = build_title(card)
+    assert len(title) == 80
+    assert "RC" in title
+    assert "1ST BOWMAN" not in title  # truncated away, proving RC comes first
+    assert title.index("RC") < title.index("1ST BOWM")
+
+
 def test_migration_adds_first_bowman_count_to_callup_events(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
     with engine.begin() as conn:

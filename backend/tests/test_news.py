@@ -35,6 +35,7 @@ def test_news_endpoint_returns_callups_and_articles(db_session):
     db_session.add(CallupEvent(tx_id=9001, date="2026-07-08", type_desc="Selected",
                                player_name="Jackson Holliday", to_team="Baltimore Orioles",
                                inventory_match=True, matched_card_count=3,
+                               first_bowman_count=1,
                                created_at=datetime.utcnow()))
     db_session.commit()
 
@@ -47,7 +48,9 @@ def test_news_endpoint_returns_callups_and_articles(db_session):
     assert r.status_code == 200
     body = r.json()
     assert body["articles"] == fake_articles
-    assert any(c["player_name"] == "Jackson Holliday" and c["inventory_match"] for c in body["callups"])
+    holliday = next(c for c in body["callups"] if c["player_name"] == "Jackson Holliday")
+    assert holliday["inventory_match"]
+    assert holliday["first_bowman_count"] == 1
 
 
 def test_news_requires_auth():
