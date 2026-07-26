@@ -17,6 +17,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Frontend test runner (vitest) + shared JSON case table asserting the JS
+      eBay-title mirror stays identical to backend `build_title` (quick win;
+      implement directly; inline — from PR #16 review)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
