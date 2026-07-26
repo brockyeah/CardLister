@@ -19,10 +19,10 @@ EBAY_TITLE_MAX = 80
 def build_title(card: Card) -> str:
     """{year} {brand} {set_name} {player_name} #{card_number} {flags} {team} — capped at 80 chars."""
     flags = []
-    if card.is_first_bowman:
-        flags.append("1ST BOWMAN")
     if card.is_rookie:
         flags.append("RC")
+    if card.is_first_bowman:
+        flags.append("1ST BOWMAN")
     if card.is_autograph:
         flags.append("AUTO")
     if card.is_patch:
