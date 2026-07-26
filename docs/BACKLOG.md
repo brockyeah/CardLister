@@ -5,6 +5,18 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Live eBay title preview in the card form: client-side mirror of `build_title`
+      with an 80-char counter so truncation surprises (see PR #15) are visible before
+      saving (quick win; implement directly; inline)
+- [ ] One-click SQLite backup download: `GET /api/analytics/backup.db` via
+      `VACUUM INTO` + button on the Analytics manage-data panel — inventory currently
+      lives in one file on one Railway volume with no backup story (quick win;
+      implement directly; inline; run /security-review after)
+- [ ] Inventory image lightbox: thumbnails exist but can't be enlarged; click →
+      front/back full-size overlay (quick win; implement directly; inline)
+- [ ] Scan-accuracy report on Analytics: Corrections table already stores
+      extracted-vs-corrected diffs — chart correction rate over time and
+      most-corrected fields (medium; implement directly; inline; dataviz skill first)
 - [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler pattern; Phase 2 stub in `backend/routers/ebay.py`)
 - [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
 - [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
@@ -12,6 +24,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
+      currently unlimited attempts (quick win–medium; **plan doc first** — touches
+      auth; inline)
 - [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see monetization notes Phase A)
 - [ ] PSA/BGS grade slab detection in vision + grade-aware pricing queries
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
