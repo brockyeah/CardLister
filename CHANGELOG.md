@@ -17,6 +17,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   flow will generate (client-side mirror of `build_title`) with an 80-character
   counter; anything past the cap renders struck-through in red so truncation is
   visible before saving instead of after pasting into eBay.
+- One-click database backup: `GET /api/analytics/backup.db` streams a
+  consistent point-in-time SQLite snapshot (`VACUUM INTO`, safe against
+  concurrent writes), with a "Download database backup" button on the
+  Analytics manage-data panel. Inventory, scans, and usage history all live in
+  this one file on a single Railway volume, which previously had no backup
+  story at all.
 
 ## 2026-07-26 — 1st Bowman follow-ups (PR #15)
 

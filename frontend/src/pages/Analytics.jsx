@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAnalytics, reassignUser, deleteUserData, getConfiguredUsers } from '../api'
+import { getAnalytics, reassignUser, deleteUserData, getConfiguredUsers, downloadBackup } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -221,12 +221,28 @@ function ManageData({ users, onDone }) {
     } finally { setBusy(false) }
   }
 
+  const backup = async () => {
+    setBusy(true); setMsg('')
+    try {
+      await downloadBackup()
+      setMsg('Backup downloaded.')
+    } catch {
+      setMsg('Backup failed.')
+    } finally { setBusy(false) }
+  }
+
   return (
     <div className="card-panel">
       <div className="font-bold mb-1">Manage data</div>
       <p className="text-xs text-gray-500 mb-3">
         Merge a stale/renamed username into a real user (keeps its cost history), or delete it.
+        Download a database backup regularly — inventory, scans, and usage history all live in it.
       </p>
+      <div className="mb-3">
+        <button onClick={backup} disabled={busy} className="btn-secondary">
+          Download database backup
+        </button>
+      </div>
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="label">User</label>
