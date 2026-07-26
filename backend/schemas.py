@@ -83,6 +83,25 @@ class CardOut(CardBase):
     sheets_row: Optional[int] = None
 
 
+# --- Duplicate check ---
+class DuplicateCheckRequest(BaseModel):
+    player_name: str = ""
+    year: Optional[int] = None
+    brand: str = ""
+    set_name: str = ""
+    card_number: str = ""
+    parallel_color: Optional[str] = None
+    serial_number: Optional[str] = None
+    is_autograph: bool = False
+    is_patch: bool = False
+    is_refractor: bool = False
+    is_first_bowman: bool = False
+
+
+class DuplicateCheckResponse(BaseModel):
+    duplicate: Optional[CardOut] = None
+
+
 # --- Scan ---
 class ScanResponse(BaseModel):
     image_path: str

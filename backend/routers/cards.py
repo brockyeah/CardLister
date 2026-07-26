@@ -1,8 +1,12 @@
 """Card CRUD endpoints. All routes require auth."""
+import csv
+import io
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db, SessionLocal
@@ -10,9 +14,10 @@ from ..auth import require_auth
 from ..models import Card, Scan
 from ..schemas import (
     CardCreate, CardUpdate, CardOut,
+    DuplicateCheckRequest, DuplicateCheckResponse,
     EbayListingUpdate, MarkSoldRequest,
 )
-from ..services.google_sheets import sync_card
+from ..services.google_sheets import SHEET_HEADERS, _card_to_row, sync_card
 from ..services.learning import record_correction
 
 router = APIRouter(dependencies=[Depends(require_auth)])
@@ -57,6 +62,59 @@ def list_cards(
     if player_name:
         q = q.filter(Card.player_name.ilike(f"%{player_name}%"))
     return q.order_by(Card.created_at.desc()).all()
+
+
+# Must be declared before GET /{card_id} — "export.csv" would otherwise 422
+# against the int path param.
+@router.get("/export.csv")
+def export_csv(db: Session = Depends(get_db)):
+    """Full inventory as CSV, same column layout as the Sheets mirror."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(SHEET_HEADERS)
+    for card in db.query(Card).order_by(Card.created_at.asc()).all():
+        writer.writerow(_card_to_row(card))
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="cardlister-inventory.csv"'},
+    )
+
+
+def _norm(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
+@router.post("/check-duplicate", response_model=DuplicateCheckResponse)
+def check_duplicate(payload: DuplicateCheckRequest, db: Session = Depends(get_db)):
+    """Find an owned (non-sold) copy of the same physical card.
+
+    Identity fields match case/whitespace-insensitively; parallel, serial, and
+    print flags must also agree so a Gold /50 never merges with the base card.
+    Condition is deliberately NOT matched — vision-extracted condition is too
+    noisy to gate on, and the user confirms in the UI before anything merges.
+    """
+    if not _norm(payload.player_name):
+        return DuplicateCheckResponse(duplicate=None)
+    q = db.query(Card).filter(
+        Card.status != "sold",
+        func.lower(func.trim(Card.player_name)) == _norm(payload.player_name),
+        func.lower(func.trim(Card.brand)) == _norm(payload.brand),
+        func.lower(func.trim(Card.set_name)) == _norm(payload.set_name),
+        func.lower(func.trim(Card.card_number)) == _norm(payload.card_number),
+        Card.year == payload.year,
+        Card.is_autograph == payload.is_autograph,
+        Card.is_patch == payload.is_patch,
+        Card.is_refractor == payload.is_refractor,
+        Card.is_first_bowman == payload.is_first_bowman,
+    )
+    # Parallel/serial live in nullable text columns where "" and NULL are
+    # interchangeable — normalize in Python rather than fighting SQL nulls.
+    for card in q.order_by(Card.created_at.desc()).all():
+        if (_norm(card.parallel_color) == _norm(payload.parallel_color)
+                and _norm(card.serial_number) == _norm(payload.serial_number)):
+            return DuplicateCheckResponse(duplicate=card)
+    return DuplicateCheckResponse(duplicate=None)
 
 
 @router.get("/{card_id}", response_model=CardOut)

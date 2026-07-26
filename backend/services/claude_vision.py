@@ -5,15 +5,25 @@ was leaving year / card # / parallel blank on real photos. Opus + thinking gives
 the model more room to reason about partial evidence and use its training data
 to fill in fields a single glance would miss.
 
-If ANTHROPIC_API_KEY is not set, a hardcoded mock response is returned so the
-frontend can be exercised end-to-end without a live API key.
+Billing ladder:
+  1. ANTHROPIC_API_KEY → direct Messages API call (pay-as-you-go credits).
+  2. CLAUDE_CODE_OAUTH_TOKEN + the `claude` CLI on PATH → headless `claude -p`
+     call billed to the owner's Claude subscription. Used when the API key is
+     missing or returns a credits-exhausted error (which also fires an owner
+     alert via billing_alerts).
+  3. Neither → hardcoded mock response so the frontend can be exercised
+     end-to-end without any credentials.
 """
 import os
 import json
 import base64
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
+
+from .billing_alerts import notify_credits_exhausted
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +252,84 @@ def _extract_json_from_text(text: str) -> dict:
         raise
 
 
+# --- Subscription fallback (Claude Code CLI, billed to the owner's Max plan) ---
+
+# How long a headless `claude -p` vision call may run. Slower than the direct
+# API (the CLI spins up an agent loop), hence the generous cap.
+SUBSCRIPTION_TIMEOUT_SECONDS = int(os.getenv("SUBSCRIPTION_SCAN_TIMEOUT", "150"))
+
+# Substrings that identify an out-of-credits API error (Anthropic returns these
+# as 400 invalid_request_error messages). Deliberately narrow: transient 429s or
+# auth errors should NOT flip billing or page the owner.
+_BILLING_ERROR_MARKERS = ("credit balance is too low", "insufficient credit", "purchase credits")
+
+
+def _is_billing_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _BILLING_ERROR_MARKERS)
+
+
+def _subscription_available() -> bool:
+    return bool(os.getenv("CLAUDE_CODE_OAUTH_TOKEN")) and shutil.which("claude") is not None
+
+
+def _extract_via_subscription(
+    image_path: str,
+    model: str,
+    back_image_path: Optional[str] = None,
+    extra_context: Optional[str] = None,
+) -> Tuple[dict, dict]:
+    """Run the extraction through `claude -p` on the owner's subscription.
+
+    Returns (extracted_dict, usage). Raises on any failure — the caller owns
+    the ladder down to mock/blank. The model is tagged "(subscription)" in
+    usage so analytics prices it at $0 instead of phantom API dollars.
+    """
+    instruction = (
+        f"Read the card image file at {Path(image_path).resolve()} (card FRONT)."
+    )
+    if back_image_path:
+        instruction += (
+            f" Also read {Path(back_image_path).resolve()} (card BACK) and use it for the "
+            "copyright year, full card number, serial numbering, and printed parallel text."
+        )
+    instruction += (
+        " Then extract the card's attributes. Use your knowledge of card sets to fill in "
+        "fields that aren't 100% visible but can be confidently inferred."
+    )
+    if extra_context:
+        instruction += (
+            "\n\nThe user has corrected past scans as follows. Use these to learn this "
+            "collection's naming and numbering conventions, but do NOT copy parallel, "
+            "refractor, or serial-number status from them — those vary per physical copy:\n"
+            + extra_context
+        )
+    prompt = f"{SYSTEM_PROMPT}\n\n{instruction}"
+
+    # Drop the (exhausted) API key so the CLI authenticates with the OAuth
+    # token and bills the subscription — not the dead key.
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    result = subprocess.run(
+        [shutil.which("claude"), "-p", prompt,
+         "--output-format", "json", "--model", model, "--allowedTools", "Read"],
+        capture_output=True, text=True, env=env, timeout=SUBSCRIPTION_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude CLI exited {result.returncode}: {result.stderr.strip()[:300]}")
+
+    envelope = json.loads(result.stdout)
+    if envelope.get("is_error"):
+        raise RuntimeError(f"claude CLI reported an error: {str(envelope.get('result'))[:300]}")
+    data = _extract_json_from_text(str(envelope.get("result", "")))
+    cli_usage = envelope.get("usage") or {}
+    usage = {
+        "model": f"{model} (subscription)",
+        "input_tokens": int(cli_usage.get("input_tokens") or 0),
+        "output_tokens": int(cli_usage.get("output_tokens") or 0),
+    }
+    return data, usage
+
+
 def extract_card_from_image(
     image_path: str,
     model: Optional[str] = None,
@@ -260,8 +348,11 @@ def extract_card_from_image(
     number, serial numbering, parallel text often only printed on the back).
 
     Accepts JPG/PNG/WEBP/GIF images and PDF documents (single or multi-page).
-    Always returns a dict shaped like the prompt. The three outcomes are distinct:
-      - no API key  → (mock data, True, None, None)        intentional dev mode
+    Always returns a dict shaped like the prompt. The outcomes are distinct:
+      - no API key  → subscription fallback if configured, else
+                      (mock data, True, None, None)         intentional dev mode
+      - credits exhausted → owner alerted; subscription fallback if configured,
+                      else a blank card with a top-up error
       - success     → (extracted, False, None, usage)       usage = token counts
       - call failed → (blank card, False, error_msg, None)  so the caller can show
                        a real error, not a misleading "set ANTHROPIC_API_KEY" banner.
@@ -270,11 +361,19 @@ def extract_card_from_image(
     caller can attribute the API cost to the current user.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return MOCK_RESPONSE.copy(), True, None, None
-
     model = model or CLAUDE_MODEL
     effort = effort or THINKING_EFFORT
+
+    if not api_key:
+        # No API key: prefer the subscription path over mock when it's set up.
+        if _subscription_available():
+            try:
+                data, usage = _extract_via_subscription(
+                    image_path, model, back_image_path=back_image_path, extra_context=extra_context)
+                return data, False, None, usage
+            except Exception:
+                logger.exception("Subscription-billed extraction failed; falling back to mock")
+        return MOCK_RESPONSE.copy(), True, None, None
 
     try:
         import anthropic
@@ -331,6 +430,25 @@ def extract_card_from_image(
     except Exception as e:
         # Log to terminal too so failures aren't invisible in the backend logs.
         logger.exception("Claude vision extraction failed")
+
+        if _is_billing_error(e):
+            # Page the owner (email + phone push, throttled) and try to keep
+            # scanning alive on the subscription.
+            notify_credits_exhausted(str(e))
+            if _subscription_available():
+                try:
+                    data, usage = _extract_via_subscription(
+                        image_path, model, back_image_path=back_image_path, extra_context=extra_context)
+                    note = data.get("confidence_notes") or ""
+                    data["confidence_notes"] = (note + " " if note else "") + \
+                        "(API credits exhausted — this scan was billed to the Claude subscription.)"
+                    return data, False, None, usage
+                except Exception:
+                    logger.exception("Subscription-billed fallback also failed")
+            error = ("Anthropic API credits are exhausted and the subscription fallback is "
+                     "unavailable. Top up credits at console.anthropic.com.")
+            return _blank_card(f"{error} Please fill in manually."), False, error, None
+
         error = f"Vision extraction failed: {e}"
         blank = _blank_card(f"{error}. Please fill in manually.")
         # is_mock=False: a real key is set, this is an error — not mock mode.

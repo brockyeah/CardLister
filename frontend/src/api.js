@@ -78,6 +78,20 @@ export const listCards = (params = {}) =>
 export const createCard = (payload) =>
   api.post('/api/cards', payload).then((r) => r.data)
 
+export const checkDuplicate = (payload) =>
+  api.post('/api/cards/check-duplicate', payload).then((r) => r.data)
+
+// Blob download — a plain <a href> can't carry the Bearer token.
+export const downloadInventoryCsv = () =>
+  api.get('/api/cards/export.csv', { responseType: 'blob' }).then((r) => {
+    const url = URL.createObjectURL(r.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'cardlister-inventory.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  })
+
 export const updateCard = (id, payload) =>
   api.patch(`/api/cards/${id}`, payload).then((r) => r.data)
 

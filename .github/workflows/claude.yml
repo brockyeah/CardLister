@@ -1,6 +1,8 @@
 # @claude mention assistant: comment "@claude <ask>" on any PR or issue and
 # Claude wakes up on a runner, answers or implements, and replies/pushes.
-# Auth: ANTHROPIC_API_KEY repo secret + the Claude GitHub App (github.com/apps/claude).
+# Auth: CLAUDE_CODE_OAUTH_TOKEN repo secret (from `claude setup-token`) — bills the
+# owner's Claude subscription, not API credits — + the Claude GitHub App
+# (github.com/apps/claude).
 name: Claude Assistant
 on:
   issue_comment:
@@ -23,4 +25,4 @@ jobs:
     steps:
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

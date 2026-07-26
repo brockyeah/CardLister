@@ -1,6 +1,7 @@
 # Automatic agentic review: every PR gets a Claude review on open / new commits.
-# Costs API tokens from the ANTHROPIC_API_KEY secret on each run (roughly cents
-# per review, scaling with diff size).
+# Auth: CLAUDE_CODE_OAUTH_TOKEN repo secret (from `claude setup-token`) — draws
+# from the owner's Claude subscription limits instead of pay-as-you-go API
+# credits. Rotate the token yearly (it expires).
 name: Claude Auto Review
 on:
   pull_request:
@@ -20,7 +21,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
