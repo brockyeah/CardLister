@@ -26,6 +26,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
+- [ ] React Router v6 → v7 migration: clears the two remaining moderate npm audit
+      advisories (open redirect via backslash paths; SSR hydration — neither has a
+      v6 fix). Low actual exposure: no SSR, no user-controlled link targets
+      (medium; implement directly; inline)
 - [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see monetization notes Phase A)
 - [ ] PSA/BGS grade slab detection in vision + grade-aware pricing queries
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups

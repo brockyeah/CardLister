@@ -22,6 +22,16 @@ only in `[Unreleased]` on a branch is not in prod yet.
   so the live preview can no longer silently drift from the real listing
   title. CI now runs the frontend unit tests before the build.
 
+### Changed
+- Dependency refresh (Monday deep pass): all backend pins brought current —
+  notably python-jose 3.5.0 and python-multipart 0.0.32 (both clear known
+  CVEs), fastapi 0.140, pydantic 2.13, SQLAlchemy 2.0.51, httpx 0.28,
+  Pillow 12, anthropic 0.120, pytest 9 — plus frontend vite 8 / vitest 4 /
+  plugin-react 6 (clears the esbuild/vite/vitest dev-server advisories) and
+  in-range minors. Remaining: two moderate react-router advisories whose only
+  fix is the v7 major, deferred to the backlog (no SSR, no user-controlled
+  link targets here).
+
 ## 2026-07-26 — Title preview & database backup (PR #16)
 
 ### Added
