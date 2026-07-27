@@ -1,0 +1,233 @@
+{
+  "_comment": "Shared eBay-title parity cases. Consumed by backend/tests/test_ebay_title_parity.py and frontend/src/lib/ebayTitle.test.js. Expected values are authoritative from backend build_title \u2014 regenerate ONLY when the title format intentionally changes, and keep both implementations in sync.",
+  "cases": [
+    {
+      "name": "basic full card",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome",
+        "player_name": "Jackson Holliday",
+        "card_number": "150",
+        "team": "Orioles",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Chrome Jackson Holliday #150 Orioles"
+    },
+    {
+      "name": "rc before 1st bowman",
+      "card": {
+        "year": 2023,
+        "brand": "Bowman",
+        "set_name": null,
+        "player_name": "Test Player",
+        "card_number": null,
+        "team": null,
+        "is_rookie": true,
+        "is_first_bowman": true,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2023 Bowman Test Player RC 1ST BOWMAN"
+    },
+    {
+      "name": "all flags with bare serial and lowercase parallel",
+      "card": {
+        "year": 2023,
+        "brand": "Bowman",
+        "set_name": "Chrome",
+        "player_name": "Roman Anthony",
+        "card_number": "BCP-100",
+        "team": "Red Sox",
+        "is_rookie": true,
+        "is_first_bowman": true,
+        "is_autograph": true,
+        "is_patch": true,
+        "is_refractor": true,
+        "serial_number": "99",
+        "parallel_color": "gold"
+      },
+      "expected": "2023 Bowman Chrome Roman Anthony #BCP-100 RC 1ST BOWMAN AUTO PATCH REFRACTOR /99"
+    },
+    {
+      "name": "serial already slashed",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Player",
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": "/25",
+        "parallel_color": null
+      },
+      "expected": "Player /25"
+    },
+    {
+      "name": "whitespace-only serial adds no flag",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Player",
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": "   ",
+        "parallel_color": null
+      },
+      "expected": "Player"
+    },
+    {
+      "name": "player name only",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Shohei Ohtani",
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "Shohei Ohtani"
+    },
+    {
+      "name": "empty card",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": null,
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": ""
+    },
+    {
+      "name": "internal whitespace collapsed",
+      "card": {
+        "year": 2024,
+        "brand": " Topps ",
+        "set_name": null,
+        "player_name": "  Bobby   Witt   Jr.  ",
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Bobby Witt Jr."
+    },
+    {
+      "name": "truncated at 80 chars",
+      "card": {
+        "year": 2023,
+        "brand": "Panini",
+        "set_name": "Donruss Optic Rated Rookies Signatures",
+        "player_name": "Somebody With A Really Long Name",
+        "card_number": "RRS-LONGCODE",
+        "team": "Diamondbacks",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": true,
+        "is_patch": false,
+        "is_refractor": true,
+        "serial_number": null,
+        "parallel_color": "holo purple"
+      },
+      "expected": "2023 Panini Donruss Optic Rated Rookies Signatures Somebody With A Really Long N"
+    },
+    {
+      "name": "truncation strips trailing space",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "player_name": null,
+        "card_number": null,
+        "team": "Guardians",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    },
+    {
+      "name": "parallel only uppercased",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Player",
+        "card_number": null,
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": "Sapphire Blue"
+      },
+      "expected": "Player SAPPHIRE BLUE"
+    },
+    {
+      "name": "numeric card number and no team",
+      "card": {
+        "year": 2022,
+        "brand": "Topps",
+        "set_name": "Update",
+        "player_name": "Julio Rodriguez",
+        "card_number": "US44",
+        "team": null,
+        "is_rookie": true,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2022 Topps Update Julio Rodriguez #US44 RC"
+    }
+  ]
+}
