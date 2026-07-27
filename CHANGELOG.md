@@ -10,7 +10,9 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-ilzfp3`
+## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
+
+## 2026-07-26 — Title preview & database backup (PR #16)
 
 ### Added
 - Live eBay title preview in the card form: shows the exact title the listing
