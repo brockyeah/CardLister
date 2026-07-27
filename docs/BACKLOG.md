@@ -14,6 +14,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
 - [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
 - [ ] Bulk CSV **import** (Phase 2 stub; export shipped 2026-07-25)
+- [ ] Sortable columns + multi-field search in Inventory: search currently matches
+      player name only; no column sorting anywhere (quick win; implement directly; inline)
+- [ ] Edit saved cards from Inventory: after save the only mutable field is price via
+      the Comps modal — typos require delete + rescan; reuse CardForm in a modal
+      (medium; implement directly; inline)
+- [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
+      row sold; should decrement quantity and record a sold row (medium; implement
+      directly — no schema change, split logic in mark_sold; inline)
 
 ## Later
 
@@ -28,6 +36,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
 - [ ] Sold-comp price history per card (store lookups over time, sparkline in inventory)
 - [ ] Production/multi-tenant track — see `docs/notes/2026-07-25-production-monetization.md`
+- [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
+      `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
+      schema change; inline)
+- [ ] Deep health endpoint + record prod URL: `/api/health` returns `{"ok": true}`
+      without touching the DB; extend to report DB reachability, version, and poller
+      heartbeat, and record the Railway production URL in docs so the daily routine
+      can actually ping prod (quick win; implement directly; inline)
 
 ## Shipped
 
