@@ -1,4 +1,42 @@
+import { useEffect, useState } from 'react'
 import StatusBadge from './StatusBadge.jsx'
+
+function ImageLightbox({ card, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const images = [
+    { src: card.image_path, label: 'Front' },
+    { src: card.back_image_path, label: 'Back' },
+  ].filter((img) => img.src)
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 flex items-center justify-center z-30 px-4 cursor-zoom-out"
+      onClick={onClose}
+    >
+      <div className="flex flex-col md:flex-row gap-4 max-h-[90vh] overflow-auto">
+        {images.map((img) => (
+          <figure key={img.label} className="text-center">
+            <img
+              src={img.src}
+              alt={`${card.player_name || 'Card'} — ${img.label.toLowerCase()}`}
+              className="max-h-[80vh] max-w-full object-contain rounded-lg"
+            />
+            {images.length > 1 && (
+              <figcaption className="text-xs text-gray-400 mt-2">{img.label}</figcaption>
+            )}
+          </figure>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function fmtMoney(v) {
   if (v === null || v === undefined || v === '') return '—'
@@ -15,6 +53,8 @@ function fmtDate(v) {
 }
 
 export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps }) {
+  const [lightboxCard, setLightboxCard] = useState(null)
+
   if (!cards.length) {
     return (
       <div className="card-panel text-center text-gray-400 py-12">
@@ -48,7 +88,13 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
             <tr key={c.id} className="border-t border-ink-700 hover:bg-ink-700/40">
               <td className="px-3 py-2">
                 {c.image_path ? (
-                  <img src={c.image_path} alt="" className="w-10 h-14 object-cover rounded" />
+                  <button
+                    onClick={() => setLightboxCard(c)}
+                    className="cursor-zoom-in"
+                    title="View full-size photo"
+                  >
+                    <img src={c.image_path} alt="" className="w-10 h-14 object-cover rounded" />
+                  </button>
                 ) : (
                   <div className="w-10 h-14 bg-ink-700 rounded" />
                 )}
@@ -127,6 +173,9 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
           ))}
         </tbody>
       </table>
+      {lightboxCard && (
+        <ImageLightbox card={lightboxCard} onClose={() => setLightboxCard(null)} />
+      )}
     </div>
   )
 }
