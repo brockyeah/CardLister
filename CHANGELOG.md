@@ -12,6 +12,16 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
 
+### Added
+- Inventory image lightbox: clicking a card's thumbnail opens a full-size
+  overlay showing the front (and back, when one was scanned); Esc or a click
+  anywhere closes it.
+- Frontend test runner (vitest) with a shared parity table: 12 cases in
+  `backend/tests/fixtures/ebay_title_cases.json` are asserted by both the
+  backend (`build_title`) and the client-side title mirror (`ebayTitle.js`),
+  so the live preview can no longer silently drift from the real listing
+  title. CI now runs the frontend unit tests before the build.
+
 ## 2026-07-26 — Title preview & database backup (PR #16)
 
 ### Added

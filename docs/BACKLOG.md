@@ -5,8 +5,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
-- [ ] Inventory image lightbox: thumbnails exist but can't be enlarged; click →
-      front/back full-size overlay (quick win; implement directly; inline)
 - [ ] Scan-accuracy report on Analytics: Corrections table already stores
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
@@ -25,9 +23,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
-- [ ] Frontend test runner (vitest) + shared JSON case table asserting the JS
-      eBay-title mirror stays identical to backend `build_title` (quick win;
-      implement directly; inline — from PR #16 review)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -45,6 +40,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       can actually ping prod (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
+- [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 
 - [x] 2026-07-26 — One-click SQLite backup download (VACUUM INTO snapshot) on Analytics
 - [x] 2026-07-26 — Live eBay title preview with 80-char truncation warning in the card form
