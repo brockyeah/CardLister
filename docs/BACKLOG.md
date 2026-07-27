@@ -23,6 +23,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Validate `ebay_listing_url` server-side (require `https://` prefix) — hardening
+      note from 2026-07-27 security review, below exploit threshold (quick win;
+      implement directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
