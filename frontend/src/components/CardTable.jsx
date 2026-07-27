@@ -89,6 +89,7 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
               <td className="px-3 py-2">
                 {c.image_path ? (
                   <button
+                    type="button"
                     onClick={() => setLightboxCard(c)}
                     className="cursor-zoom-in"
                     title="View full-size photo"
