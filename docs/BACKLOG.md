@@ -31,9 +31,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
-- [ ] Validate `ebay_listing_url` server-side (require `https://` prefix) — hardening
-      note from 2026-07-27 security review, below exploit threshold (quick win;
-      implement directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -64,6 +61,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 ## Shipped
 
 - [x] 2026-07-28 — Sortable inventory columns + multi-field search (player, team, brand, set, card #, parallel, notes, year)
+- [x] 2026-07-28 — Server-side https-only validation of `ebay_listing_url` (2026-07-27 security-review hardening note)
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 

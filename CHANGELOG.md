@@ -20,6 +20,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
 - Inventory search now matches across player, team, brand, set, card number,
   parallel color, notes, and year — previously player name only.
 
+### Changed
+- `ebay_listing_url` is now validated server-side: the attach-listing endpoint
+  rejects anything that doesn't start with `https://` (hardening item from the
+  2026-07-27 security review — the value is rendered as a clickable link).
+
 ## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
 ### Added
