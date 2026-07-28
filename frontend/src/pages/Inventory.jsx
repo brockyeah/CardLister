@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
+import { cardMatchesSearch, sortCards } from '../lib/sortCards'
 import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value }) {
@@ -206,6 +207,7 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' })
   const [soldModalCard, setSoldModalCard] = useState(null)
   const [attachModalCard, setAttachModalCard] = useState(null)
   const [compsModalCard, setCompsModalCard] = useState(null)
@@ -225,13 +227,20 @@ export default function Inventory() {
   }, [])
 
   const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase()
-    return cards.filter((c) => {
+    const visible = cards.filter((c) => {
       if (statusFilter && c.status !== statusFilter) return false
-      if (s && !(c.player_name || '').toLowerCase().includes(s)) return false
-      return true
+      return cardMatchesSearch(c, search)
     })
-  }, [cards, search, statusFilter])
+    return sortCards(visible, sort.key, sort.dir)
+  }, [cards, search, statusFilter, sort])
+
+  const onSort = (key) => {
+    setSort((prev) => (
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    ))
+  }
 
   const stats = useMemo(() => {
     const total = cards.length
@@ -293,7 +302,7 @@ export default function Inventory() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by player name…"
+          placeholder="Search player, team, brand, set, card #…"
           className="input md:max-w-md"
         />
         <select
@@ -325,6 +334,8 @@ export default function Inventory() {
           onOpenEbay={onOpenEbay}
           onDelete={onDelete}
           onCheckComps={setCompsModalCard}
+          sort={sort}
+          onSort={onSort}
         />
       )}
 

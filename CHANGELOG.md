@@ -12,7 +12,13 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased] — branch `claude/happy-ramanujan-po6ral`
 
-_Nothing yet._
+### Added
+- Sortable inventory columns: every data column header (player, year, brand,
+  set, card #, condition, qty, listed price, status, added) is clickable to
+  sort ascending/descending, with blanks always sorted last and card numbers
+  compared numerically ("BCP-9" before "BCP-100").
+- Inventory search now matches across player, team, brand, set, card number,
+  parallel color, notes, and year — previously player name only.
 
 ## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 

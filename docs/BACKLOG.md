@@ -12,8 +12,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
 - [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
 - [ ] Bulk CSV **import** (Phase 2 stub; export shipped 2026-07-25)
-- [ ] Sortable columns + multi-field search in Inventory: search currently matches
-      player name only; no column sorting anywhere (quick win; implement directly; inline)
 - [ ] Edit saved cards from Inventory: after save the only mutable field is price via
       the Comps modal — typos require delete + rescan; reuse CardForm in a modal
       (medium; implement directly; inline)
@@ -65,6 +63,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-07-28 — Sortable inventory columns + multi-field search (player, team, brand, set, card #, parallel, notes, year)
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 

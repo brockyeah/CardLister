@@ -52,7 +52,23 @@ function fmtDate(v) {
   }
 }
 
-export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps }) {
+const COLUMNS = [
+  { label: '', key: null },
+  { label: 'Player', key: 'player_name' },
+  { label: 'Year', key: 'year' },
+  { label: 'Brand', key: 'brand' },
+  { label: 'Set', key: 'set_name' },
+  { label: 'Card #', key: 'card_number' },
+  { label: 'Cond', key: 'condition' },
+  { label: 'Qty', key: 'quantity', right: true },
+  { label: 'Listed', key: 'listed_price', right: true },
+  { label: 'Status', key: 'status' },
+  { label: 'eBay', key: null },
+  { label: 'Added', key: 'created_at' },
+  { label: '', key: null },
+]
+
+export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps, sort, onSort }) {
   const [lightboxCard, setLightboxCard] = useState(null)
 
   if (!cards.length) {
@@ -68,19 +84,25 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
       <table className="min-w-full text-sm">
         <thead className="bg-ink-700 text-gray-300 text-left">
           <tr>
-            <th className="px-3 py-3"></th>
-            <th className="px-3 py-3">Player</th>
-            <th className="px-3 py-3">Year</th>
-            <th className="px-3 py-3">Brand</th>
-            <th className="px-3 py-3">Set</th>
-            <th className="px-3 py-3">Card #</th>
-            <th className="px-3 py-3">Cond</th>
-            <th className="px-3 py-3 text-right">Qty</th>
-            <th className="px-3 py-3 text-right">Listed</th>
-            <th className="px-3 py-3">Status</th>
-            <th className="px-3 py-3">eBay</th>
-            <th className="px-3 py-3">Added</th>
-            <th className="px-3 py-3"></th>
+            {COLUMNS.map((col, idx) => (
+              <th key={idx} className={`px-3 py-3 ${col.right ? 'text-right' : ''}`}>
+                {col.key && onSort ? (
+                  <button
+                    type="button"
+                    onClick={() => onSort(col.key)}
+                    className="font-semibold hover:text-gray-100 whitespace-nowrap"
+                    title={`Sort by ${col.label}`}
+                  >
+                    {col.label}
+                    {sort?.key === col.key && (
+                      <span className="ml-1 text-emerald-400">{sort.dir === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </button>
+                ) : (
+                  col.label
+                )}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
