@@ -72,13 +72,18 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
   const [id, setId] = useState('')
   const [url, setUrl] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
 
   const submit = async (e) => {
     e.preventDefault()
     setSaving(true)
+    setError(null)
     try {
       await onConfirm({ ebay_listing_id: id, ebay_listing_url: url })
       onClose()
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      setError(Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : (detail || err.message))
     } finally {
       setSaving(false)
     }
@@ -95,8 +100,18 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
         </div>
         <div className="mb-5">
           <label className="label">Listing URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} className="input" required />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="input"
+            placeholder="https://www.ebay.com/itm/…"
+            pattern="https://.*"
+            title="Must start with https://"
+            required
+          />
         </div>
+        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
         <div className="flex gap-2">
           <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
           <button type="submit" disabled={saving} className="btn-primary flex-1">

@@ -23,7 +23,9 @@ only in `[Unreleased]` on a branch is not in prod yet.
 ### Changed
 - `ebay_listing_url` is now validated server-side: the attach-listing endpoint
   rejects anything that doesn't start with `https://` (hardening item from the
-  2026-07-27 security review — the value is rendered as a clickable link).
+  2026-07-27 security review — the value is rendered as a clickable link). The
+  Attach eBay modal validates the prefix client-side too and surfaces server
+  rejections instead of failing silently (auto-review follow-up).
 
 ## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
