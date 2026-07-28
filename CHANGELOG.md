@@ -10,7 +10,11 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
+## [Unreleased] — branch `claude/happy-ramanujan-po6ral`
+
+_Nothing yet._
+
+## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
 ### Added
 - Inventory image lightbox: clicking a card's thumbnail opens a full-size
