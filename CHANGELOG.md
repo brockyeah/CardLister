@@ -10,7 +10,25 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
+## [Unreleased] — branch `claude/happy-ramanujan-834x4w`
+
+### Added
+- Deep health endpoint: `GET /api/health` now pings the database, reports the
+  deployed revision (Railway commit SHA), and exposes a call-up poller
+  heartbeat (enabled / interval / last cycle / stale after 3 missed
+  intervals). Returns 503 when the database is unreachable so plain HTTP
+  uptime monitors can alert on status code alone. README gains a placeholder
+  for recording the production URL so tooling can actually ping prod.
+
+### Changed
+- Card photos are downscaled in the browser before scan upload: at most
+  2000px on the long side (matching the largest server-side vision preset, so
+  no scan mode loses input quality), JPEG-encoded at q0.85 with EXIF rotation
+  baked in. Cuts multi-MB phone photos to a few hundred KB — faster mobile
+  scans and far less Railway volume growth — with automatic fallback to the
+  original file if in-browser decoding fails. PDFs pass through untouched.
+
+## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
 ### Added
 - Inventory image lightbox: clicking a card's thumbnail opens a full-size
