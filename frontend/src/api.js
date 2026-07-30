@@ -102,6 +102,14 @@ export const downloadInventoryCsv = () =>
     URL.revokeObjectURL(url)
   })
 
+export const importInventoryCsv = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api
+    .post('/api/cards/import.csv', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    .then((r) => r.data)
+}
+
 export const updateCard = (id, payload) =>
   api.patch(`/api/cards/${id}`, payload).then((r) => r.data)
 

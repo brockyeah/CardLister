@@ -4,7 +4,7 @@ import io
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -79,6 +79,128 @@ def export_csv(db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="cardlister-inventory.csv"'},
     )
+
+
+MAX_IMPORT_ROWS = 5000
+_TRUTHY = {"y", "yes", "true", "1"}
+_VALID_STATUSES = {"unlisted", "active", "sold"}
+
+# Header name (lowercased) -> Card field, for columns that need no conversion.
+# Includes aliases beyond the canonical export layout so hand-edited sheets
+# with e.g. a "Parallel" column import without renaming.
+_IMPORT_STR_FIELDS = {
+    "brand": "brand", "set": "set_name", "card #": "card_number",
+    "team": "team", "notes": "notes",
+    "parallel": "parallel_color", "parallel color": "parallel_color",
+    "serial": "serial_number", "serial #": "serial_number",
+    "serial number": "serial_number",
+}
+_IMPORT_FLAG_FIELDS = {
+    "rc": "is_rookie", "auto": "is_autograph", "patch": "is_patch",
+    "1st bowman": "is_first_bowman", "refractor": "is_refractor",
+}
+
+
+def _parse_date(raw: str) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _parse_money(raw: str) -> float:
+    return float(raw.replace("$", "").replace(",", ""))
+
+
+@router.post("/import.csv")
+async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Bulk-create cards from a CSV in the export/Sheets column layout.
+
+    Columns are matched by header name (case-insensitive), so column order
+    doesn't matter and unknown columns are ignored. A bad row is skipped and
+    reported with its line number; it never aborts the rest of the file.
+    The Sheets mirror is NOT touched here — bulk-appending hundreds of rows
+    through the per-card sync would hammer the Sheets API; imported cards
+    sync individually on their next edit.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")  # -sig: tolerate Excel's BOM
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="File is not UTF-8 text — export a plain CSV and retry")
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        raise HTTPException(status_code=422, detail="Empty file")
+    idx = {name.strip().lower(): i for i, name in enumerate(rows[0])}
+    if "player" not in idx:
+        raise HTTPException(
+            status_code=422,
+            detail="First row must be a header row including a 'Player' column (use the CSV export as a template)",
+        )
+    if len(rows) - 1 > MAX_IMPORT_ROWS:
+        raise HTTPException(status_code=422, detail=f"Too many rows (max {MAX_IMPORT_ROWS})")
+
+    created = 0
+    skipped: list[dict] = []
+    warnings: list[str] = []
+
+    for line_no, row in enumerate(rows[1:], start=2):
+        if not any(cell.strip() for cell in row):
+            continue  # blank line
+
+        def val(name: str) -> str:
+            i = idx.get(name)
+            return row[i].strip() if i is not None and i < len(row) else ""
+
+        player = val("player")
+        if not player:
+            skipped.append({"row": line_no, "reason": "missing player name"})
+            continue
+
+        fields = {"player_name": player, "condition": val("condition") or "NM"}
+        try:
+            fields["year"] = int(val("year")) if val("year") else None
+            fields["listed_price"] = _parse_money(val("listed price")) if val("listed price") else None
+            fields["sold_price"] = _parse_money(val("sale price")) if val("sale price") else None
+            fields["quantity"] = max(1, int(val("quantity"))) if val("quantity") else 1
+        except ValueError as e:
+            skipped.append({"row": line_no, "reason": f"bad number: {e}"})
+            continue
+
+        status = val("status").lower() or "unlisted"
+        if status not in _VALID_STATUSES:
+            skipped.append({"row": line_no, "reason": f"invalid status {val('status')!r}"})
+            continue
+        fields["status"] = status
+
+        for col, field in _IMPORT_STR_FIELDS.items():
+            if val(col):
+                fields[field] = val(col)
+        for col, field in _IMPORT_FLAG_FIELDS.items():
+            fields[field] = val(col).lower() in _TRUTHY
+
+        # Same policy as the attach-listing endpoint: the URL is rendered as a
+        # clickable link, so only https:// values are allowed through.
+        url = val("ebay url")
+        if url and not url.startswith("https://"):
+            warnings.append(f"row {line_no}: non-https eBay URL dropped")
+            url = ""
+        if url:
+            fields["ebay_listing_url"] = url
+
+        for col, field in (("date listed", "created_at"), ("date sold", "sold_at")):
+            if val(col):
+                parsed = _parse_date(val(col))
+                if parsed is None:
+                    warnings.append(f"row {line_no}: unparseable {col} ignored")
+                else:
+                    fields[field] = parsed
+
+        db.add(Card(**fields))
+        created += 1
+
+    db.commit()
+    return {"created": created, "skipped": skipped, "warnings": warnings}
 
 
 def _norm(value: Optional[str]) -> str:
