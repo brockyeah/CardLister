@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { getAnalytics, reassignUser, deleteUserData, getConfiguredUsers, downloadBackup, importInventoryCsv } from '../api'
+import {
+  getAnalytics, reassignUser, deleteUserData, getConfiguredUsers,
+  downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
+} from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -255,6 +258,27 @@ function ManageData({ users, onDone }) {
     } finally { setBusy(false) }
   }
 
+  const cleanupPhotos = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const o = await getUploadOrphans()
+      if (!o.count) {
+        setMsg('No orphaned photos to clean up.')
+        return
+      }
+      const mb = (o.bytes / (1024 * 1024)).toFixed(1)
+      const ok = window.confirm(
+        `Delete ${o.count} orphaned photo${o.count === 1 ? '' : 's'} (${mb} MB)? ` +
+        `Photos attached to saved cards or scanned in the last ${o.grace_hours}h are kept.`,
+      )
+      if (!ok) return
+      const r = await cleanupUploadOrphans()
+      setMsg(`Deleted ${r.deleted} photo${r.deleted === 1 ? '' : 's'}, freed ${(r.freed_bytes / (1024 * 1024)).toFixed(1)} MB.`)
+    } catch (e) {
+      setMsg(e.response?.data?.detail || 'Cleanup failed.')
+    } finally { setBusy(false) }
+  }
+
   return (
     <div className="card-panel">
       <div className="font-bold mb-1">Manage data</div>
@@ -270,6 +294,9 @@ function ManageData({ users, onDone }) {
           Import inventory CSV
         </button>
         <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importCsv} className="hidden" />
+        <button onClick={cleanupPhotos} disabled={busy} className="btn-secondary">
+          Clean up orphaned photos
+        </button>
       </div>
       <p className="text-xs text-gray-500 mb-3">
         Import expects the CSV export's column layout (columns matched by header name — extra

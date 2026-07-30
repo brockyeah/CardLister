@@ -63,6 +63,11 @@ export const downloadBackup = () =>
     URL.revokeObjectURL(url)
   })
 
+export const getUploadOrphans = () =>
+  api.get('/api/analytics/uploads/orphans').then((r) => r.data)
+export const cleanupUploadOrphans = () =>
+  api.post('/api/analytics/uploads/cleanup').then((r) => r.data)
+
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)
 
