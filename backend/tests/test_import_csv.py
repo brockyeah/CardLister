@@ -146,6 +146,29 @@ def test_import_parses_sold_fields_and_dates(db_session):
         assert sold.sold_at.isoformat() == "2026-02-01T00:00:00"
 
 
+def test_import_skips_out_of_range_numbers_without_losing_batch(db_session):
+    """A value that parses as a Python int but overflows SQLite's 64-bit
+    INTEGER binding (e.g. a serial number pasted into the Year column) must be
+    skipped per-row, not abort the whole import at commit time."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        csv_text = (
+            "Player,Year,Quantity,Listed Price\n"
+            f"Overflow Year,{'9' * 25},1,\n"
+            f"Overflow Qty,2021,{'9' * 25},\n"
+            "Infinite Price,2021,1,1e999\n"
+            "Fine,2021,2,9.99\n"
+        )
+        r = _post_csv(client, headers, csv_text)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["created"] == 1
+        assert {s["row"] for s in body["skipped"]} == {2, 3, 4}
+        assert all("number" in s["reason"] for s in body["skipped"])
+        card = db_session.query(Card).one()
+        assert card.player_name == "Fine"
+
+
 def test_import_rejects_non_utf8(db_session):
     with TestClient(app) as client:
         r = client.post(

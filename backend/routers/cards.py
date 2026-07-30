@@ -1,6 +1,7 @@
 """Card CRUD endpoints. All routes require auth."""
 import csv
 import io
+import math
 from datetime import datetime
 from typing import List, Optional
 
@@ -108,8 +109,22 @@ def _parse_date(raw: str) -> Optional[datetime]:
         return None
 
 
+def _parse_int(raw: str) -> int:
+    # Python ints are unbounded but SQLite's INTEGER binding is 64-bit; an
+    # out-of-range value (say, a serial number pasted into the Year column)
+    # would otherwise blow up as OverflowError at commit, aborting the whole
+    # batch instead of skipping the one row.
+    value = int(raw)
+    if not -(2**63) <= value < 2**63:
+        raise ValueError("value out of range")
+    return value
+
+
 def _parse_money(raw: str) -> float:
-    return float(raw.replace("$", "").replace(",", ""))
+    value = float(raw.replace("$", "").replace(",", ""))
+    if not math.isfinite(value):
+        raise ValueError("value must be a finite number")
+    return value
 
 
 @router.post("/import.csv")
@@ -159,10 +174,10 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
 
         fields = {"player_name": player, "condition": val("condition") or "NM"}
         try:
-            fields["year"] = int(val("year")) if val("year") else None
+            fields["year"] = _parse_int(val("year")) if val("year") else None
             fields["listed_price"] = _parse_money(val("listed price")) if val("listed price") else None
             fields["sold_price"] = _parse_money(val("sale price")) if val("sale price") else None
-            fields["quantity"] = max(1, int(val("quantity"))) if val("quantity") else 1
+            fields["quantity"] = max(1, _parse_int(val("quantity"))) if val("quantity") else 1
         except ValueError as e:
             skipped.append({"row": line_no, "reason": f"bad number: {e}"})
             continue
