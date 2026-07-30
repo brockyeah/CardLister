@@ -11,21 +11,54 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler pattern; Phase 2 stub in `backend/routers/ebay.py`)
 - [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
 - [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
-- [ ] Bulk CSV **import** (Phase 2 stub; export shipped 2026-07-25)
-- [ ] Sortable columns + multi-field search in Inventory: search currently matches
-      player name only; no column sorting anywhere (quick win; implement directly; inline)
 - [ ] Edit saved cards from Inventory: after save the only mutable field is price via
       the Comps modal — typos require delete + rescan; reuse CardForm in a modal
       (medium; implement directly; inline)
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
+- [ ] Row-level "Copy listing text" button: today clipboard text only comes via the
+      Open eBay flow, which also opens a tab and fires an alert; add a quiet
+      copy-only action reusing `getEbayListingText` (quick win; implement directly;
+      inline)
+- [ ] Unmark-sold (undo): mark-sold is irreversible in the UI — a misclick needs a
+      manual PATCH; add an action that restores status and clears sold_price/sold_at
+      (quick win; implement directly; inline)
+- [ ] Re-scan in a higher mode without re-upload: extraction misses currently mean
+      re-staging the photo; the file and Scan row are already on the server, so add
+      `POST /api/scan/{scan_id}/rescan` with a preset param + a "Re-scan in
+      Accuracy" button on the review form (medium; implement directly; inline)
+- [ ] Storage usage panel on Analytics manage-data: DB file size + uploads
+      count/size so Railway volume pressure is visible; pairs with orphan cleanup
+      (quick win; implement directly; inline; dataviz skill first for stat tiles)
+- [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
+      those individually"); add a per-item back slot before scanning starts
+      (medium; implement directly; inline)
+- [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
+      sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
+      (quick win; implement directly; inline)
+- [ ] Parallel / Serial # / Refractor columns in CSV export + Sheets mirror: the
+      row layout omits all three, so a Gold /50 is indistinguishable from base in
+      the export — the 2026-07-30 importer already reads these columns when present
+      (quick win; implement directly; inline — touches `google_sheets.py` row layout)
+- [ ] CSV import dry-run preview: run the 2026-07-30 import parser without
+      committing and show would-be created/skipped counts before the real import
+      (quick win; implement directly; inline)
+- [ ] Duplicate sweep over existing inventory: check-duplicate only fires at save
+      time; add a "Find duplicates" tool that applies the same identity rules
+      across all non-sold rows and offers merge (sum quantities, keep earliest row)
+      (medium; implement directly — no schema change; inline)
+- [ ] Scan history browser: the Scans table keeps every real extraction + photos,
+      but nothing surfaces them — list past scans and allow saving one that was
+      never saved as a card (medium; implement directly; inline; UI as its own
+      panel so it doesn't collide with Scanner.jsx changes in PR #19)
+- [ ] Weekly inventory digest email: Sunday summary via the existing mailer —
+      cards added, scans + est. API cost, actives missing a listing URL, stale
+      actives (medium; **plan doc first** — touches 3 subsystems: scheduler,
+      mailer, analytics queries; inline)
 
 ## Later
 
-- [ ] Validate `ebay_listing_url` server-side (require `https://` prefix) — hardening
-      note from 2026-07-27 security review, below exploit threshold (quick win;
-      implement directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -41,13 +74,33 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
-- [ ] Deep health endpoint + record prod URL: `/api/health` returns `{"ok": true}`
-      without touching the DB; extend to report DB reachability, version, and poller
-      heartbeat, and record the Railway production URL in docs so the daily routine
-      can actually ping prod (quick win; implement directly; inline)
+- [ ] Nightly automated backup delivery: email the SQLite snapshot (or push it to
+      Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
+      (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
+      backup service; inline)
+- [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
+      planned P&L dashboard can show true realized profit instead of revenue only
+      (medium; **plan doc first** — schema change; inline)
+- [ ] Record the Railway production URL in README (owner input needed — the
+      README now has a placeholder next to the deploy steps; the deep health
+      endpoint shipped 2026-07-29)
+- [ ] Escape leading `=` `+` `-` `@` in CSV export cells (prefix `'`): formula
+      injection hardening note from the 2026-07-30 security review — import now
+      ingests third-party files, so a crafted Notes cell round-trips into an
+      Excel-interpretable formula on export; Sheets mirror unaffected (RAW input)
+      (quick win; implement directly; inline)
 
 ## Shipped
 
+- [x] 2026-07-30 — Bulk CSV inventory import (export layout round-trip, header-name
+      column mapping, per-row skip reasons, https-only eBay URLs)
+- [x] 2026-07-30 — Orphaned photo cleanup with preview + confirm on Analytics
+      manage-data (unreferenced by any card, 48h grace window)
+
+- [x] 2026-07-29 — Deep `/api/health` (DB ping, revision, poller heartbeat, 503 on DB failure)
+- [x] 2026-07-29 — Client-side photo downscale to ≤2000px before scan upload (server's largest preset — no accuracy loss; faster mobile uploads, smaller volume)
+- [x] 2026-07-28 — Sortable inventory columns + multi-field search (player, team, brand, set, card #, parallel, notes, year)
+- [x] 2026-07-28 — Server-side https-only validation of `ebay_listing_url` (2026-07-27 security-review hardening note)
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 

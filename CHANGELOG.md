@@ -10,7 +10,25 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
+## [Unreleased] — branch `claude/happy-ramanujan-cq647p`
+
+### Added
+- Bulk CSV inventory import: `POST /api/cards/import.csv` plus an "Import
+  inventory CSV" button on the Analytics manage-data panel. Accepts the CSV
+  export's column layout with columns matched by header name (order-independent,
+  unknown columns ignored, optional Parallel / Serial # / Refractor columns
+  picked up), skips bad rows individually with per-row reasons instead of
+  aborting the file, and enforces the same https-only rule for eBay URLs as the
+  attach-listing endpoint. Round-trips the export, so backup-restore and bulk
+  hand-edited sheets both work.
+- Orphaned photo cleanup: scanned photos previously stayed on the Railway
+  volume forever even when the card was never saved or later deleted.
+  `GET /api/analytics/uploads/orphans` previews reclaimable files (not
+  referenced by any card, older than a 48-hour grace window so unsaved
+  batch-queue scans survive); `POST /api/analytics/uploads/cleanup` deletes
+  them behind a count-and-size confirm on the manage-data panel.
+
+## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
 ### Added
 - Inventory image lightbox: clicking a card's thumbnail opens a full-size
