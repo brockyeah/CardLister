@@ -56,6 +56,18 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       cards added, scans + est. API cost, actives missing a listing URL, stale
       actives (medium; **plan doc first** — touches 3 subsystems: scheduler,
       mailer, analytics queries; inline)
+- [ ] Dependency-audit job in CI: non-blocking `pip-audit` + `npm audit` step so
+      new advisories surface on every PR instead of waiting for the Monday deep
+      pass — repo has no Dependabot (quick win; implement directly; inline)
+- [ ] Sheets drift detector on Analytics manage-data: on-demand compare of the
+      Sheets mirror vs DB (row count + per-card diff), showing mismatches next
+      to the existing one-click full resync — today drift is invisible until
+      someone eyeballs the sheet; `resync` endpoints already exist in
+      `backend/routers/sheets.py` (medium; implement directly; inline)
+- [ ] Bulk row selection in Inventory: checkbox column + bulk mark-sold /
+      delete / copy-listing-text over the selection; today every action is
+      one row at a time, which hurts at 100+ cards (medium; implement
+      directly; inline — builds on CardTable.jsx after PR #18 lands)
 
 ## Later
 
@@ -84,6 +96,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Record the Railway production URL in README (owner input needed — the
       README now has a placeholder next to the deploy steps; the deep health
       endpoint shipped 2026-07-29)
+- [ ] Pricing-source telemetry: the comps chain silently falls through five
+      sources to a $9.99 mock, so a blocked scraper looks like "pricing works
+      but is weird" — log source/hit/latency per lookup and chart hit rates on
+      Analytics, with a callout when mock share spikes (medium; **plan doc
+      first** — new table/schema; inline; dataviz skill for the panel)
+- [ ] Playwright E2E smoke in CI: login → scan (mocked vision) → save →
+      inventory round-trip against a real dev server; unit suites can't catch
+      broken page wiring like a bad api.js import (medium; implement directly;
+      inline)
 - [ ] Escape leading `=` `+` `-` `@` in CSV export cells (prefix `'`): formula
       injection hardening note from the 2026-07-30 security review — import now
       ingests third-party files, so a crafted Notes cell round-trips into an
