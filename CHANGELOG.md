@@ -10,7 +10,24 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-5q3uz5`
+## [Unreleased] — branch `claude/happy-ramanujan-po6ral`
+
+### Added
+- Sortable inventory columns: every data column header (player, year, brand,
+  set, card #, condition, qty, listed price, status, added) is clickable to
+  sort ascending/descending, with blanks always sorted last and card numbers
+  compared numerically ("BCP-9" before "BCP-100").
+- Inventory search now matches across player, team, brand, set, card number,
+  parallel color, notes, and year — previously player name only.
+
+### Changed
+- `ebay_listing_url` is now validated server-side: the attach-listing endpoint
+  rejects anything that doesn't start with `https://` (hardening item from the
+  2026-07-27 security review — the value is rendered as a clickable link). The
+  Attach eBay modal validates the prefix client-side too and surfaces server
+  rejections instead of failing silently (auto-review follow-up).
+
+## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 
 ### Added
 - Inventory image lightbox: clicking a card's thumbnail opens a full-size

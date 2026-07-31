@@ -12,20 +12,25 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
 - [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
 - [ ] Bulk CSV **import** (Phase 2 stub; export shipped 2026-07-25)
-- [ ] Sortable columns + multi-field search in Inventory: search currently matches
-      player name only; no column sorting anywhere (quick win; implement directly; inline)
 - [ ] Edit saved cards from Inventory: after save the only mutable field is price via
       the Comps modal — typos require delete + rescan; reuse CardForm in a modal
       (medium; implement directly; inline)
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
+- [ ] Client-side image downscale before scan upload: Scanner posts full-resolution
+      phone photos; resize to ≤1600px JPEG via canvas before POST — cuts Claude
+      vision cost and mobile upload time (quick win; implement directly; inline)
+- [ ] Row-level "Copy listing text" button: today clipboard text only comes via the
+      Open eBay flow, which also opens a tab and fires an alert; add a quiet
+      copy-only action reusing `getEbayListingText` (quick win; implement directly;
+      inline)
+- [ ] Unmark-sold (undo): mark-sold is irreversible in the UI — a misclick needs a
+      manual PATCH; add an action that restores status and clears sold_price/sold_at
+      (quick win; implement directly; inline)
 
 ## Later
 
-- [ ] Validate `ebay_listing_url` server-side (require `https://` prefix) — hardening
-      note from 2026-07-27 security review, below exploit threshold (quick win;
-      implement directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -41,6 +46,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
+- [ ] Nightly automated backup delivery: email the SQLite snapshot (or push it to
+      Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
+      (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
+      backup service; inline)
+- [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
+      planned P&L dashboard can show true realized profit instead of revenue only
+      (medium; **plan doc first** — schema change; inline)
 - [ ] Deep health endpoint + record prod URL: `/api/health` returns `{"ok": true}`
       without touching the DB; extend to report DB reachability, version, and poller
       heartbeat, and record the Railway production URL in docs so the daily routine
@@ -48,6 +60,8 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-07-28 — Sortable inventory columns + multi-field search (player, team, brand, set, card #, parallel, notes, year)
+- [x] 2026-07-28 — Server-side https-only validation of `ebay_listing_url` (2026-07-27 security-review hardening note)
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 

@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 # --- Auth ---
@@ -133,6 +133,17 @@ class PricingResponse(BaseModel):
 class EbayListingUpdate(BaseModel):
     ebay_listing_id: str
     ebay_listing_url: str
+
+    @field_validator("ebay_listing_url")
+    @classmethod
+    def _require_https(cls, v: str) -> str:
+        # The URL is rendered as a clickable link in the inventory table (and
+        # mirrored to Sheets), so reject anything that isn't plain https —
+        # keeps javascript:/http: values out of the href.
+        v = v.strip()
+        if not v.lower().startswith("https://"):
+            raise ValueError("ebay_listing_url must start with https://")
+        return v
 
 
 # --- Mark sold ---
