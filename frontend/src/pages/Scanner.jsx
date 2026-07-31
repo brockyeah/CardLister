@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import CardForm from '../components/CardForm.jsx'
 import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
+import { downscaleImage } from '../lib/downscaleImage'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -151,7 +152,13 @@ export default function Scanner() {
     setPricingNote('')
     setPricingSource('')
     try {
-      const result = await scanCard(stagedFile, mode, stagedBack)
+      // Shrink phone photos client-side before upload (falls back to the
+      // original file if decoding fails — never blocks a scan).
+      const [front, back] = await Promise.all([
+        downscaleImage(stagedFile),
+        stagedBack ? downscaleImage(stagedBack) : null,
+      ])
+      const result = await scanCard(front, mode, back)
       setImagePath(result.image_path)
       setMock(!!result.mock)
       setScanId(result.scan_id ?? null)
@@ -178,7 +185,8 @@ export default function Scanner() {
     const mark = (key, patch) =>
       setQueue((prev) => prev.map((q) => (q.key === key ? { ...q, ...patch } : q)))
     mark(next.key, { status: 'scanning' })
-    scanCard(next.file, mode)
+    downscaleImage(next.file)
+      .then((file) => scanCard(file, mode))
       .then((result) => mark(next.key, { status: 'ready', result }))
       .catch((e) => mark(next.key, { status: 'error', error: e.response?.data?.detail || 'Scan failed' }))
       .finally(() => { processingRef.current = false })

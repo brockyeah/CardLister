@@ -2,14 +2,16 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import text
 
-from .database import init_db, uploads_dir
+from .database import engine, init_db, uploads_dir
 from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
 from .routers import cards, scan, pricing, ebay, sheets, analytics, news
@@ -29,12 +31,19 @@ app.add_middleware(
 )
 
 
+# Heartbeat state for /api/health: whether the call-up poller is running in this
+# process and when its loop last completed a cycle (success or error — either
+# proves the loop is alive).
+POLL_MINUTES = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
+_poller_state = {"enabled": False, "last_cycle_at": None}
+_started_at = datetime.utcnow()
+
+
 async def _callup_poller():
     """Poll for MLB call-ups on a cadence. In-process; Railway keeps us alive."""
     from .services.callups import run_poll_cycle
     from .database import SessionLocal
 
-    minutes = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
     while True:
         try:
             db = SessionLocal()
@@ -46,7 +55,8 @@ async def _callup_poller():
                 db.close()
         except Exception:
             logger.exception("Call-up poll cycle errored")
-        await asyncio.sleep(minutes * 60)
+        _poller_state["last_cycle_at"] = datetime.utcnow()
+        await asyncio.sleep(POLL_MINUTES * 60)
 
 
 @app.on_event("startup")
@@ -60,6 +70,7 @@ def on_startup():
 
     # Background call-up poller — skip in tests/dev via env.
     if os.getenv("DISABLE_CALLUP_POLLER") != "1":
+        _poller_state["enabled"] = True
         asyncio.create_task(_callup_poller())
 
 
@@ -74,7 +85,41 @@ def login(payload: LoginRequest):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    """Deep health check for uptime monitors and the daily routine.
+
+    Unauthenticated by design, so it only reports coarse liveness facts:
+    DB reachability, the deployed revision (Railway injects the commit SHA),
+    and the call-up poller heartbeat. Returns 503 when the DB is unreachable
+    so HTTP-status-based monitors alert without parsing the body.
+    """
+    db_ok = True
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Health check: database unreachable")
+        db_ok = False
+
+    now = datetime.utcnow()
+    last = _poller_state["last_cycle_at"]
+    # Stale = poller should be running but hasn't completed a cycle within
+    # 3 poll intervals (measured from startup until the first cycle lands).
+    stale = (
+        _poller_state["enabled"]
+        and (now - (last or _started_at)).total_seconds() > 3 * POLL_MINUTES * 60
+    )
+    body = {
+        "ok": db_ok,
+        "db": db_ok,
+        "revision": os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None,
+        "poller": {
+            "enabled": _poller_state["enabled"],
+            "interval_minutes": POLL_MINUTES,
+            "last_cycle_at": last.isoformat() + "Z" if last else None,
+            "stale": stale,
+        },
+    }
+    return JSONResponse(body, status_code=200 if db_ok else 503)
 
 
 # --- Feature routers (all guarded by auth dependency inside each router) ---

@@ -18,15 +18,30 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
-- [ ] Client-side image downscale before scan upload: Scanner posts full-resolution
-      phone photos; resize to ≤1600px JPEG via canvas before POST — cuts Claude
-      vision cost and mobile upload time (quick win; implement directly; inline)
 - [ ] Row-level "Copy listing text" button: today clipboard text only comes via the
       Open eBay flow, which also opens a tab and fires an alert; add a quiet
       copy-only action reusing `getEbayListingText` (quick win; implement directly;
       inline)
 - [ ] Unmark-sold (undo): mark-sold is irreversible in the UI — a misclick needs a
       manual PATCH; add an action that restores status and clears sold_price/sold_at
+      (quick win; implement directly; inline)
+- [ ] Re-scan in a higher mode without re-upload: extraction misses currently mean
+      re-staging the photo; the file and Scan row are already on the server, so add
+      `POST /api/scan/{scan_id}/rescan` with a preset param + a "Re-scan in
+      Accuracy" button on the review form (medium; implement directly; inline)
+- [ ] Orphaned-upload cleanup: every scan writes to the uploads volume but
+      discarded scans/batch leftovers are never deleted; add an authenticated
+      preview endpoint (files unreferenced by cards/scans, older than N days) and
+      an explicit confirm-to-delete button on Analytics manage-data — no automatic
+      purge in v1 (medium; implement directly with preview+confirm gate; inline)
+- [ ] Storage usage panel on Analytics manage-data: DB file size + uploads
+      count/size so Railway volume pressure is visible; pairs with orphan cleanup
+      (quick win; implement directly; inline; dataviz skill first for stat tiles)
+- [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
+      those individually"); add a per-item back slot before scanning starts
+      (medium; implement directly; inline)
+- [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
+      sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
       (quick win; implement directly; inline)
 
 ## Later
@@ -53,13 +68,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
       planned P&L dashboard can show true realized profit instead of revenue only
       (medium; **plan doc first** — schema change; inline)
-- [ ] Deep health endpoint + record prod URL: `/api/health` returns `{"ok": true}`
-      without touching the DB; extend to report DB reachability, version, and poller
-      heartbeat, and record the Railway production URL in docs so the daily routine
-      can actually ping prod (quick win; implement directly; inline)
+- [ ] Record the Railway production URL in README (owner input needed — the
+      README now has a placeholder next to the deploy steps; the deep health
+      endpoint shipped 2026-07-29)
 
 ## Shipped
 
+- [x] 2026-07-29 — Deep `/api/health` (DB ping, revision, poller heartbeat, 503 on DB failure)
+- [x] 2026-07-29 — Client-side photo downscale to ≤2000px before scan upload (server's largest preset — no accuracy loss; faster mobile uploads, smaller volume)
 - [x] 2026-07-28 — Sortable inventory columns + multi-field search (player, team, brand, set, card #, parallel, notes, year)
 - [x] 2026-07-28 — Server-side https-only validation of `ebay_listing_url` (2026-07-27 security-review hardening note)
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
