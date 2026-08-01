@@ -50,6 +50,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
+- [ ] Early request-body size reject on `/api/scan`: the 25 MB per-file cap
+      (2026-08-01) stops oversized files landing in `uploads/`, but Starlette's
+      multipart parser still receives/spools the whole request body before the
+      cap fires — reject early on the `Content-Length` header (or add an
+      ASGI-level body limit) so an oversized request is refused before upload
+      completes (quick win; implement directly; inline — auto-review note on
+      PR #23)
 - [ ] ecdsa PYSEC-2026-1325 (transitive via python-jose, surfaced by the CI
       audit job on its first run 2026-08-01): no fixed ecdsa release exists;
       ignored in the pip-audit step since JWTs here are HS256 (ECDSA paths
