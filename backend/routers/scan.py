@@ -24,6 +24,12 @@ router = APIRouter(dependencies=[Depends(require_auth)])
 # PDFs are useful for scanned card pages from a flatbed scanner.
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 
+# Per-file cap so one request can't exhaust memory or fill the Railway volume.
+# Generous for flatbed PDF scans; phone photos arrive far smaller (and the
+# client downscales before upload).
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+_READ_CHUNK = 1024 * 1024
+
 
 async def _save_upload(upload: UploadFile, uploads: Path) -> str:
     suffix = Path(upload.filename or "").suffix.lower()
@@ -31,9 +37,21 @@ async def _save_upload(upload: UploadFile, uploads: Path) -> str:
         # Unknown extension — coerce to .jpg so downstream stays predictable.
         suffix = ".jpg"
     filename = f"{uuid.uuid4().hex}{suffix}"
-    contents = await upload.read()
-    with open(uploads / filename, "wb") as f:
-        f.write(contents)
+    dest = uploads / filename
+    size = 0
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await upload.read(_READ_CHUNK):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+                    )
+                f.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
     return filename
 
 
@@ -50,6 +68,9 @@ async def scan_card(
     try:
         front_name = await _save_upload(image, uploads)
         back_name = await _save_upload(back, uploads) if back and back.filename else None
+    except HTTPException:
+        # Already client-safe (e.g. 413 over the size cap).
+        raise
     except Exception:
         # Full detail goes to the server log only — raw exception text can leak
         # filesystem paths and internals to the client.
