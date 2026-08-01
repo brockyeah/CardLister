@@ -50,6 +50,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
+- [ ] ecdsa PYSEC-2026-1325 (transitive via python-jose, surfaced by the CI
+      audit job on its first run 2026-08-01): no fixed ecdsa release exists;
+      ignored in the pip-audit step since JWTs here are HS256 (ECDSA paths
+      unused). Revisit when a fix ships — or swap python-jose for PyJWT, which
+      drops the ecdsa dependency entirely (quick win–medium; implement
+      directly; inline — touches auth)
 - [ ] React Router v6 → v7 migration: clears the two remaining moderate npm audit
       advisories (open redirect via backslash paths; SSR hydration — neither has a
       v6 fix). Low actual exposure: no SSR, no user-controlled link targets

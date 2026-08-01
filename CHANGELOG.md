@@ -18,7 +18,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
   so new dependency advisories surface between Monday deep passes — the repo
   has no Dependabot. The job never blocks a merge; npm's bar is set to high
   because the two known moderate react-router advisories are already tracked
-  in the backlog pending the v7 migration.
+  in the backlog pending the v7 migration. On its first run the job surfaced
+  ecdsa PYSEC-2026-1325 (transitive via python-jose, no fix released, ECDSA
+  unused here — JWTs are HS256); that advisory is pinned as ignored with a
+  backlog entry to revisit, so the job's red state stays reserved for
+  genuinely new findings.
 
 ### Security
 - `/api/scan` uploads are now streamed to disk in 1 MB chunks with a 25 MB
