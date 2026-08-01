@@ -39,6 +39,15 @@ def test_count_inventory_matches(db_session):
     assert callups.count_inventory_matches(db_session, "Nobody") == (0, 0)
 
 
+def test_count_inventory_matches_excludes_sold(db_session):
+    db_session.add_all([
+        Card(player_name="Jackson Holliday", quantity=2, is_first_bowman=True, status="sold"),
+        Card(player_name="Jackson Holliday", quantity=1, is_first_bowman=False, status="active"),
+    ])
+    db_session.commit()
+    assert callups.count_inventory_matches(db_session, "Jackson Holliday") == (1, 0)
+
+
 def test_is_alertable_rule():
     assert callups.is_alertable("Selected", False) is True      # first call-up always
     assert callups.is_alertable("Recalled", True) is True       # recall of owned player

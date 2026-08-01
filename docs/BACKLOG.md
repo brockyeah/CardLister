@@ -23,9 +23,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
-- [ ] Validate `ebay_listing_url` server-side (require `https://` prefix) — hardening
-      note from 2026-07-27 security review, below exploit threshold (quick win;
-      implement directly; inline)
+- [ ] Unbounded upload size on `/api/scan`: `_save_upload` reads the whole file into
+      memory before writing with no size cap — an authenticated user posting a very
+      large file can exhaust memory/disk (quick win; implement directly; inline)
+- [ ] Scanner batch-review race: `fetchPricing` in Scanner.jsx isn't cancelled when
+      the user switches queue items quickly, so a slow response for item A can land
+      after item B is opened and silently overwrite B's comps/suggested price with
+      A's — needs a request-id or AbortController guard (quick win–medium; implement
+      directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -48,6 +53,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-01 — Code review: eBay listing URL http(s)-only validation (server +
+      client + defensive render guard) — closed a stored-XSS/token-theft path via
+      `javascript:` URLs; PATCH no longer accepts `status` directly; mark-sold and
+      listed-price now reject non-positive values; call-up matches exclude sold cards
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 

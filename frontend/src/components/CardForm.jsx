@@ -140,6 +140,7 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
           <input
             type="number"
             step="0.01"
+            min="0"
             value={data.listed_price ?? ''}
             onChange={(e) => update('listed_price', e.target.value ? Number(e.target.value) : null)}
             className="input"

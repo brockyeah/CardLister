@@ -39,6 +39,7 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
           <input
             type="number"
             step="0.01"
+            min="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className="input"
@@ -71,12 +72,18 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
   const [id, setId] = useState('')
   const [url, setUrl] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const submit = async (e) => {
     e.preventDefault()
+    if (!/^https?:\/\//i.test(url.trim())) {
+      setError('URL must start with http:// or https://')
+      return
+    }
+    setError('')
     setSaving(true)
     try {
-      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url })
+      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url.trim() })
       onClose()
     } finally {
       setSaving(false)
@@ -94,7 +101,15 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
         </div>
         <div className="mb-5">
           <label className="label">Listing URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} className="input" required />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="input"
+            placeholder="https://www.ebay.com/itm/..."
+            required
+          />
+          {error && <p className="text-sm text-red-400 mt-1">{error}</p>}
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>

@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # --- Auth ---
@@ -34,7 +34,7 @@ class CardBase(BaseModel):
     condition: str = "NM"
     quantity: int = 1
     suggested_price: Optional[float] = None
-    listed_price: Optional[float] = None
+    listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: str = ""
     back_image_path: Optional[str] = None
     notes: Optional[str] = None
@@ -63,11 +63,10 @@ class CardUpdate(BaseModel):
     condition: Optional[str] = None
     quantity: Optional[int] = None
     suggested_price: Optional[float] = None
-    listed_price: Optional[float] = None
+    listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: Optional[str] = None
     back_image_path: Optional[str] = None
     notes: Optional[str] = None
-    status: Optional[str] = None
 
 
 class CardOut(CardBase):
@@ -134,10 +133,19 @@ class EbayListingUpdate(BaseModel):
     ebay_listing_id: str
     ebay_listing_url: str
 
+    @field_validator("ebay_listing_url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        # Rejects javascript:/data: URIs — the value round-trips straight into an
+        # <a href> in the frontend with no further sanitization.
+        if not v.lower().startswith(("http://", "https://")):
+            raise ValueError("ebay_listing_url must start with http:// or https://")
+        return v
+
 
 # --- Mark sold ---
 class MarkSoldRequest(BaseModel):
-    sold_price: float
+    sold_price: float = Field(gt=0)
     sold_at: Optional[datetime] = None
 
 

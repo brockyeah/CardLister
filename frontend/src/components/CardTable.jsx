@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import StatusBadge from './StatusBadge.jsx'
 
+// Defense in depth: the backend now rejects non-http(s) listing URLs at save
+// time, but this guards rows saved before that validation existed.
+const isSafeHttpUrl = (url) => /^https?:\/\//i.test(url || '')
+
 function ImageLightbox({ card, onClose }) {
   useEffect(() => {
     const onKey = (e) => {
@@ -117,7 +121,7 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
               <td className="px-3 py-2 text-right">{fmtMoney(c.listed_price)}</td>
               <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
               <td className="px-3 py-2">
-                {c.ebay_listing_url ? (
+                {c.ebay_listing_url && isSafeHttpUrl(c.ebay_listing_url) ? (
                   <a
                     href={c.ebay_listing_url}
                     target="_blank"
