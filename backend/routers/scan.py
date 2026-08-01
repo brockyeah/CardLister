@@ -65,13 +65,18 @@ async def scan_card(
 ):
     uploads = uploads_dir()
     uploads.mkdir(parents=True, exist_ok=True)
+    saved: list[str] = []
     try:
         front_name = await _save_upload(image, uploads)
+        saved.append(front_name)
         back_name = await _save_upload(back, uploads) if back and back.filename else None
-    except HTTPException:
-        # Already client-safe (e.g. 413 over the size cap).
-        raise
-    except Exception:
+    except Exception as exc:
+        # A failed back save must not orphan the already-written front file.
+        for name in saved:
+            (uploads / name).unlink(missing_ok=True)
+        if isinstance(exc, HTTPException):
+            # Already client-safe (e.g. 413 over the size cap).
+            raise
         # Full detail goes to the server log only — raw exception text can leak
         # filesystem paths and internals to the client.
         logger.exception("Failed to save upload")

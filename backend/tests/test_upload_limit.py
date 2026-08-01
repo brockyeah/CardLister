@@ -32,15 +32,19 @@ def test_oversize_front_rejected_with_413_and_no_partial_file(monkeypatch):
         assert _upload_names() == before
 
 
-def test_oversize_back_rejected_with_413(monkeypatch):
+def test_oversize_back_rejected_with_413_and_front_cleaned_up(monkeypatch):
+    # The front image saves fine before the back overflows — the already-saved
+    # front file must not be left orphaned on the volume.
     monkeypatch.setattr(scan_module, "MAX_UPLOAD_BYTES", 1024)
     with TestClient(app) as client:
+        before = _upload_names()
         r = _scan(
             client, _auth(client),
             image=("front.jpg", io.BytesIO(b"x" * 512), "image/jpeg"),
             back=("back.jpg", io.BytesIO(b"x" * 4096), "image/jpeg"),
         )
         assert r.status_code == 413, r.text
+        assert _upload_names() == before
 
 
 def test_upload_exactly_at_cap_accepted(monkeypatch):
