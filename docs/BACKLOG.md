@@ -20,6 +20,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
+- [ ] Photo backup zip: the SQLite snapshot backs up the database only — card
+      photos on the Railway volume still have no backup story; add
+      `GET /api/analytics/backup-photos.zip` streaming all card-referenced
+      uploads (medium; implement directly; inline)
+- [ ] Server-side thumbnails: the inventory table's `<img>` cells load the
+      original scan photos; generate a ~256px thumbnail at upload time (Pillow
+      already a dependency) and serve that in `CardTable`, keeping the original
+      for the lightbox (medium; implement directly; inline — touches CardTable,
+      wait for the open PR queue to land)
+- [ ] Magic-byte validation of scan uploads: today only the file extension is
+      checked; verify image content with Pillow (and `%PDF-` header for PDFs)
+      before storing, so mislabeled non-image content is never stored and
+      re-served from `/uploads` (quick win; implement directly; inline)
+- [ ] Router-wide auth sweep test: parametrized test walking `app.routes` and
+      asserting every `/api` route except login and health returns 401 without
+      a token — guards a future router forgetting `Depends(require_auth)`
+      (quick win; implement directly; inline; test-only)
+- [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
+      exception middleware that records recent errors to a small table with a
+      "recent errors" readout on Analytics manage-data, reusing the ntfy push
+      for spikes (medium; **plan doc first** — new table/schema; inline)
 
 ## Later
 
@@ -48,6 +69,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
+      limit, no partial file left behind; closes the unbounded-upload hardening
+      note from the 2026-08-01 code review)
+- [x] 2026-08-01 — Non-blocking dependency-audit CI job (`pip-audit` + `npm audit`
+      high+) so advisories surface between Monday deep passes
 - [x] 2026-07-27 — Inventory image lightbox (front/back full-size overlay)
 - [x] 2026-07-27 — Vitest + shared JSON parity table for the eBay title mirror; CI runs frontend tests
 
