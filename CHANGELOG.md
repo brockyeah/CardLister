@@ -10,7 +10,32 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-jixe99` (integrates PRs #18–#23)
+## [Unreleased] — branch `fix/post-merge-followups`
+
+### Fixed
+- CSV import enforces sold-row consistency: a SOLD row without a Sale Price
+  greater than 0 is skipped with a reason (the import path bypasses the
+  mark-sold validators, so a bad row would corrupt revenue analytics), and a
+  SOLD row missing Date Sold gets today's date with a warning, mirroring
+  mark-sold's default.
+- Orphaned-photo cleanup warns before bulk deletion: when the orphan set is
+  half or more of all uploads (and at least 10 files), the confirm dialog
+  explains the likely cause — cards that lost their photo links, e.g. after a
+  CSV restore (the CSV carries no photo columns) — instead of presenting the
+  files as safe-to-delete junk. The orphans preview endpoint now reports
+  `total_files` to support this.
+- Orphan grace window computed with `time.time()` instead of a naive
+  `utcnow().timestamp()`, which shrank the 48h window on non-UTC hosts.
+- Prospect-news article links get the same scheme guard as listing links:
+  a non-http(s) `link` from an external RSS feed renders as plain text
+  instead of a clickable href.
+
+### Changed
+- The CI dependency-audit job no longer exits non-zero when advisories are
+  found — it emits a warning annotation and a step summary instead. The job
+  never blocked merges, so its red X only taught people to ignore red.
+
+## 2026-08-02 — One-click integration of PRs #18–#23 (PR #24)
 
 ### Added
 - Bulk CSV inventory import: `POST /api/cards/import.csv` plus an "Import

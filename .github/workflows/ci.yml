@@ -61,11 +61,14 @@ jobs:
         continue-on-error: true
         working-directory: frontend
         run: npm audit --audit-level=high
+      # Annotation + summary only, no exit 1: a red X on a job that never
+      # blocks anything just trains people to ignore red. The warning
+      # annotation still surfaces on the PR checks page.
       - name: Flag advisories
         if: steps.pip_audit.outcome == 'failure' || steps.npm_audit.outcome == 'failure'
         run: |
           echo "::warning::Dependency audit found new advisories — see the audit job logs."
-          exit 1
+          echo "⚠️ Dependency audit found new advisories — see the audit job logs." >> "$GITHUB_STEP_SUMMARY"
 
   build:
     runs-on: ubuntu-latest

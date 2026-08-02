@@ -33,6 +33,12 @@ def test_uploads_endpoints_require_auth(db_session):
 
 
 def test_orphan_detection_and_cleanup(db_session):
+    # The uploads dir is shared across the test session; start from a clean
+    # slate so the total_files assertion below is order-independent.
+    root = uploads_dir()
+    if root.is_dir():
+        for f in root.iterdir():
+            f.unlink()
     stale = _make_file("stale.jpg", age_hours=ORPHAN_GRACE_HOURS + 1, size=100)
     fresh = _make_file("fresh.jpg", age_hours=0)
     front = _make_file("front.jpg", age_hours=ORPHAN_GRACE_HOURS + 1)
@@ -45,7 +51,10 @@ def test_orphan_detection_and_cleanup(db_session):
         headers = _auth(client)
         r = client.get("/api/analytics/uploads/orphans", headers=headers)
         assert r.status_code == 200, r.text
-        assert r.json() == {"count": 1, "bytes": 100, "grace_hours": ORPHAN_GRACE_HOURS}
+        # total_files counts everything in uploads/ (stale, fresh, front, back)
+        # so the UI can warn when the orphan set is most of the directory.
+        assert r.json() == {"count": 1, "bytes": 100, "grace_hours": ORPHAN_GRACE_HOURS,
+                            "total_files": 4}
 
         r = client.post("/api/analytics/uploads/cleanup", headers=headers)
         assert r.status_code == 200, r.text
