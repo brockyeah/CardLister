@@ -267,7 +267,17 @@ function ManageData({ users, onDone }) {
         return
       }
       const mb = (o.bytes / (1024 * 1024)).toFixed(1)
+      // Most of the uploads dir flagged at once usually means the cards no
+      // longer reference their photos (e.g. inventory restored from CSV,
+      // which has no photo columns) — not genuinely abandoned scans.
+      const bulk = o.total_files > 0 && o.count >= 10 && o.count / o.total_files >= 0.5
       const ok = window.confirm(
+        (bulk
+          ? `WARNING: this would delete ${o.count} of the ${o.total_files} photos on the server. ` +
+            `That usually means saved cards lost their photo links (e.g. after a CSV import/restore, ` +
+            `which does not carry photos) — NOT that the photos are junk. ` +
+            `If you recently imported inventory from CSV, cancel and ask before cleaning up.\n\n`
+          : '') +
         `Delete ${o.count} orphaned photo${o.count === 1 ? '' : 's'} (${mb} MB)? ` +
         `Photos attached to saved cards or scanned in the last ${o.grace_hours}h are kept.`,
       )

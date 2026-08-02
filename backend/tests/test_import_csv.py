@@ -92,7 +92,7 @@ def test_import_skips_bad_rows_and_keeps_good_ones(db_session):
             ",2021,,\n"                       # no player
             "Good Card,notayear,,\n"          # bad year
             "Also Good,2020,bogus,\n"         # bad status
-            "Keeper,2019,SOLD,$1,\n"          # note: $1 then trailing empty col
+            "Keeper,2019,ACTIVE,$1,\n"        # note: $1 then trailing empty col
             "Elly De La Cruz,2022,ACTIVE,12.50\n"
         )
         r = _post_csv(client, headers, csv_text)
@@ -105,7 +105,7 @@ def test_import_skips_bad_rows_and_keeps_good_ones(db_session):
         assert "number" in reasons[3]
         assert "status" in reasons[4]
         keeper = db_session.query(Card).filter(Card.player_name == "Keeper").one()
-        assert keeper.status == "sold"
+        assert keeper.status == "active"
         assert keeper.listed_price == 1.0
 
 
@@ -198,3 +198,36 @@ def test_import_skips_negative_prices(db_session):
         assert set(reasons) == {2, 3}
         assert all("negative" in reason for reason in reasons.values())
         assert db_session.query(Card).filter(Card.player_name == "Fine").one().listed_price == 0.0
+
+
+def test_import_sold_row_requires_positive_sale_price(db_session):
+    """Card(**fields) bypasses MarkSoldRequest's sold_price > 0 rule, so the
+    importer must enforce it: a SOLD row with no (or zero) sale price would
+    corrupt revenue analytics and the CSV export."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        csv_text = (
+            "Player,Status,Sale Price\n"
+            "No Price,SOLD,\n"
+            "Zero Price,SOLD,0\n"
+            "Fine,SOLD,12.50\n"
+        )
+        r = _post_csv(client, headers, csv_text)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["created"] == 1
+        assert {s["row"] for s in body["skipped"]} == {2, 3}
+        assert all("Sale Price" in s["reason"] for s in body["skipped"])
+        assert db_session.query(Card).one().player_name == "Fine"
+
+
+def test_import_sold_row_defaults_missing_sold_date(db_session):
+    """Mirrors mark-sold: a sold card always carries a sale date."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        r = _post_csv(client, _auth(client), "Player,Status,Sale Price\nSold Guy,SOLD,20\n")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["created"] == 1
+        assert any("Date Sold" in w for w in body["warnings"])
+        assert db_session.query(Card).one().sold_at is not None

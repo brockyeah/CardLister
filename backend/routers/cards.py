@@ -190,6 +190,12 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
         if status not in _VALID_STATUSES:
             skipped.append({"row": line_no, "reason": f"invalid status {val('status')!r}"})
             continue
+        if status == "sold" and not fields["sold_price"]:
+            # Card(**fields) bypasses MarkSoldRequest's sold_price > 0 rule; a
+            # sold row without a real sale price corrupts revenue analytics
+            # and the CSV export, so enforce the same rule here.
+            skipped.append({"row": line_no, "reason": "sold row needs a Sale Price greater than 0"})
+            continue
         fields["status"] = status
 
         for col, field in _IMPORT_STR_FIELDS.items():
@@ -214,6 +220,11 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
                     warnings.append(f"row {line_no}: unparseable {col} ignored")
                 else:
                     fields[field] = parsed
+
+        if status == "sold" and "sold_at" not in fields:
+            # Same default as mark-sold: a sold card always carries a sale date.
+            fields["sold_at"] = datetime.utcnow()
+            warnings.append(f"row {line_no}: sold row missing Date Sold — set to today")
 
         db.add(Card(**fields))
         created += 1

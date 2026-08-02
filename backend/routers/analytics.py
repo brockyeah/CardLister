@@ -7,6 +7,7 @@ per-model token prices; settlement happens offline.
 import os
 import sqlite3
 import tempfile
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
@@ -230,7 +231,9 @@ def _orphaned_uploads(db: Session) -> list:
         for p in (front, back):
             if p:
                 referenced.add(os.path.basename(p))
-    cutoff = (datetime.utcnow() - timedelta(hours=ORPHAN_GRACE_HOURS)).timestamp()
+    # time.time(), not utcnow().timestamp(): .timestamp() on a naive datetime
+    # assumes local time, which silently shrinks the grace window off-UTC.
+    cutoff = time.time() - ORPHAN_GRACE_HOURS * 3600
     orphans = []
     root = uploads_dir()
     if not root.is_dir():
@@ -248,10 +251,15 @@ def _orphaned_uploads(db: Session) -> list:
 def upload_orphans(db: Session = Depends(get_db)):
     """Count + size of reclaimable upload files, without deleting anything."""
     orphans = _orphaned_uploads(db)
+    root = uploads_dir()
+    total_files = sum(1 for p in root.iterdir() if p.is_file()) if root.is_dir() else 0
     return {
         "count": len(orphans),
         "bytes": sum(size for _, size in orphans),
         "grace_hours": ORPHAN_GRACE_HOURS,
+        # Lets the UI warn when the orphan set is most of the uploads dir —
+        # e.g. after a CSV restore, where no card references any photo.
+        "total_files": total_files,
     }
 
 

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { getNews } from '../api'
 
+// Same guard as CardTable's listing links: article links come from external
+// RSS feeds, so never render a non-http(s) value as a clickable href.
+const isSafeHttpUrl = (url) => /^https?:\/\//i.test(url || '')
+
 const KEY = 'cardlister_news_open'
 const SERIF = "font-['Georgia',serif]"
 
@@ -107,14 +111,20 @@ export default function NewsSection() {
                       <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-emerald-400 mb-1">
                         {a.source}
                       </div>
-                      <a
-                        href={a.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`${SERIF} font-semibold text-base text-gray-100 hover:text-emerald-300 hover:underline`}
-                      >
-                        {a.title}
-                      </a>
+                      {isSafeHttpUrl(a.link) ? (
+                        <a
+                          href={a.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${SERIF} font-semibold text-base text-gray-100 hover:text-emerald-300 hover:underline`}
+                        >
+                          {a.title}
+                        </a>
+                      ) : (
+                        <span className={`${SERIF} font-semibold text-base text-gray-100`}>
+                          {a.title}
+                        </span>
+                      )}
                       {a.summary && (
                         <p className="font-sans text-sm text-gray-400 mt-1 line-clamp-2">{a.summary}</p>
                       )}
