@@ -65,3 +65,23 @@ def test_listed_price_rejects_negative(db_session):
         headers = _auth(client)
         r = client.post("/api/cards", json=_payload(listed_price=-10), headers=headers)
         assert r.status_code == 422, r.text
+
+
+def test_quantity_rejects_zero_and_negative(db_session):
+    with TestClient(app) as client:
+        headers = _auth(client)
+        for bad in (0, -1):
+            r = client.post("/api/cards", json=_payload(quantity=bad), headers=headers)
+            assert r.status_code == 422, r.text
+
+
+def test_patch_quantity_rejects_zero_and_negative(db_session):
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        for bad in (0, -3):
+            r = client.patch(f"/api/cards/{created['id']}", json={"quantity": bad}, headers=headers)
+            assert r.status_code == 422, r.text
+        r = client.patch(f"/api/cards/{created['id']}", json={"quantity": 4}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["quantity"] == 4
