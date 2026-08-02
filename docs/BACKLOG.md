@@ -56,9 +56,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       cards added, scans + est. API cost, actives missing a listing URL, stale
       actives (medium; **plan doc first** — touches 3 subsystems: scheduler,
       mailer, analytics queries; inline)
-- [ ] Dependency-audit job in CI: non-blocking `pip-audit` + `npm audit` step so
-      new advisories surface on every PR instead of waiting for the Monday deep
-      pass — repo has no Dependabot (quick win; implement directly; inline)
 - [ ] Sheets drift detector on Analytics manage-data: on-demand compare of the
       Sheets mirror vs DB (row count + per-card diff), showing mismatches next
       to the existing one-click full resync — today drift is invisible until
@@ -68,6 +65,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       delete / copy-listing-text over the selection; today every action is
       one row at a time, which hurts at 100+ cards (medium; implement
       directly; inline — builds on CardTable.jsx after PR #18 lands)
+- [ ] Photo backup zip: the SQLite snapshot backs up the database only — card
+      photos on the Railway volume still have no backup story; add
+      `GET /api/analytics/backup-photos.zip` streaming all card-referenced
+      uploads (medium; implement directly; inline)
+- [ ] Server-side thumbnails: the inventory table's `<img>` cells load the
+      original scan photos; generate a ~256px thumbnail at upload time (Pillow
+      already a dependency) and serve that in `CardTable`, keeping the original
+      for the lightbox (medium; implement directly; inline — touches CardTable,
+      wait for the open PR queue to land)
+- [ ] Magic-byte validation of scan uploads: today only the file extension is
+      checked; verify image content with Pillow (and `%PDF-` header for PDFs)
+      before storing, so mislabeled non-image content is never stored and
+      re-served from `/uploads` (quick win; implement directly; inline)
+- [ ] Router-wide auth sweep test: parametrized test walking `app.routes` and
+      asserting every `/api` route except login and health returns 401 without
+      a token — guards a future router forgetting `Depends(require_auth)`
+      (quick win; implement directly; inline; test-only)
+- [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
+      exception middleware that records recent errors to a small table with a
+      "recent errors" readout on Analytics manage-data, reusing the ntfy push
+      for spikes (medium; **plan doc first** — new table/schema; inline)
 
 ## Later
 
@@ -79,6 +97,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
+- [ ] Early request-body size reject on `/api/scan`: the 25 MB per-file cap
+      (2026-08-01) stops oversized files landing in `uploads/`, but Starlette's
+      multipart parser still receives/spools the whole request body before the
+      cap fires — reject early on the `Content-Length` header (or add an
+      ASGI-level body limit) so an oversized request is refused before upload
+      completes (quick win; implement directly; inline — auto-review note on
+      PR #23)
+- [ ] ecdsa PYSEC-2026-1325 (transitive via python-jose, surfaced by the CI
+      audit job on its first run 2026-08-01): no fixed ecdsa release exists;
+      ignored in the pip-audit step since JWTs here are HS256 (ECDSA paths
+      unused). Revisit when a fix ships — or swap python-jose for PyJWT, which
+      drops the ecdsa dependency entirely (quick win–medium; implement
+      directly; inline — touches auth)
 - [ ] React Router v6 → v7 migration: clears the two remaining moderate npm audit
       advisories (open redirect via backslash paths; SSR hydration — neither has a
       v6 fix). Low actual exposure: no SSR, no user-controlled link targets
@@ -118,6 +149,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
+      limit, no partial file left behind; closes the unbounded-upload hardening
+      note from the 2026-08-01 code review)
+- [x] 2026-08-01 — Non-blocking dependency-audit CI job (`pip-audit` + `npm audit`
+      high+) so advisories surface between Monday deep passes
 - [x] 2026-08-01 — Code review: eBay listing URL http(s)-only validation (server +
       client + defensive render guard) — closed a stored-XSS/token-theft path via
       `javascript:` URLs; PATCH no longer accepts `status` directly; mark-sold and

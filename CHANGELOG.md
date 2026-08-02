@@ -10,7 +10,7 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-3mwdtn` (integrates PRs #18, #19, #20)
+## [Unreleased] — branch `claude/happy-ramanujan-jixe99` (integrates PRs #18–#23)
 
 ### Added
 - Bulk CSV inventory import: `POST /api/cards/import.csv` plus an "Import
@@ -39,6 +39,16 @@ only in `[Unreleased]` on a branch is not in prod yet.
   intervals). Returns 503 when the database is unreachable so plain HTTP
   uptime monitors can alert on status code alone. README gains a placeholder
   for recording the production URL so tooling can actually ping prod.
+- Non-blocking `audit` job in CI: `pip-audit` over the backend requirements and
+  `npm audit` (high and above) over the frontend on every PR and push to main,
+  so new dependency advisories surface between Monday deep passes — the repo
+  has no Dependabot. The job never blocks a merge; npm's bar is set to high
+  because the two known moderate react-router advisories are already tracked
+  in the backlog pending the v7 migration. On its first run the job surfaced
+  ecdsa PYSEC-2026-1325 (transitive via python-jose, no fix released, ECDSA
+  unused here — JWTs are HS256); that advisory is pinned as ignored with a
+  backlog entry to revisit, so the job's red state stays reserved for
+  genuinely new findings.
 
 ### Changed
 - `ebay_listing_url` is now validated server-side: the attach-listing endpoint
@@ -52,6 +62,30 @@ only in `[Unreleased]` on a branch is not in prod yet.
   baked in. Cuts multi-MB phone photos to a few hundred KB — faster mobile
   scans and far less Railway volume growth — with automatic fallback to the
   original file if in-browser decoding fails. PDFs pass through untouched.
+
+### Security
+- `/api/scan` uploads are now streamed to disk in 1 MB chunks with a 25 MB
+  per-file cap (front and back images independently) — previously the whole
+  file was read into memory with no size limit, so a single oversized upload
+  could exhaust memory or fill the Railway volume. Over-cap requests get a
+  `413` with a clean error message and leave no partial file behind.
+  (Hardening note from the 2026-08-01 code review.)
+- Stored-XSS path via listing links closed end-to-end (PR #22): `ebay_listing_url`
+  is validated server-side (https-only, unified with the PR #18 rule), the
+  Inventory table's link render carries a defensive scheme guard, and the Attach
+  eBay modal validates client-side before submitting.
+
+### Fixed
+- `PATCH /api/cards/{id}` no longer accepts `status` — sold/active can only
+  change through the mark-sold flow, so a stray PATCH can't silently flip a
+  card's state (PR #22).
+- Data-integrity guards: `sold_price` and `listed_price` reject negative
+  values, and `quantity` must be ≥ 1 on both create and patch (a negative
+  quantity could render "Quantity available: -3" in an eBay description and
+  suppress call-up alerts by dragging the summed inventory match count to
+  zero). Quantity input in the card form now enforces `min=1` too (PR #22 +
+  auto-review follow-up).
+- Call-up inventory matches exclude sold cards (PR #22).
 
 ## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 

@@ -28,6 +28,45 @@ jobs:
             echo "::notice::backend/tests not on this ref yet — nothing to run"
           fi
 
+  # Non-blocking dependency audit: surfaces new advisories on every PR / push
+  # to main instead of waiting for the Monday deep pass (repo has no
+  # Dependabot). continue-on-error keeps findings from ever gating a merge.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # PYSEC-2026-1325 (ecdsa, transitive via python-jose): no fixed release
+      # exists upstream, and the app signs JWTs with HS256 so python-jose's
+      # ECDSA paths are never exercised. Tracked in docs/BACKLOG.md — drop the
+      # ignore when a fixed ecdsa ships or python-jose is replaced.
+      - name: pip-audit (backend requirements)
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt -r backend/requirements-dev.txt \
+            --ignore-vuln PYSEC-2026-1325
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Bar set to high: the two known moderate react-router advisories are
+      # already tracked in the backlog pending the v7 migration, and a
+      # permanently-red job would train everyone to ignore it.
+      - name: npm audit (frontend, high+)
+        id: npm_audit
+        continue-on-error: true
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Flag advisories
+        if: steps.pip_audit.outcome == 'failure' || steps.npm_audit.outcome == 'failure'
+        run: |
+          echo "::warning::Dependency audit found new advisories — see the audit job logs."
+          exit 1
+
   build:
     runs-on: ubuntu-latest
     steps:
