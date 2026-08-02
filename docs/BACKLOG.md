@@ -132,10 +132,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       unused). Revisit when a fix ships — or swap python-jose for PyJWT, which
       drops the ecdsa dependency entirely (quick win–medium; implement
       directly; inline — touches auth)
-- [ ] React Router v6 → v7 migration: clears the two remaining moderate npm audit
-      advisories (open redirect via backslash paths; SSR hydration — neither has a
-      v6 fix). Low actual exposure: no SSR, no user-controlled link targets
-      (medium; implement directly; inline)
+- [x] 2026-08-02 — React Router v6 → v8 migration (with React 19): went past v7
+      because 7.12.0–8.2.0 carries an unpatched RSC-CSRF advisory; 8.3.0 clears
+      every react-router advisory (npm audit: 0 vulnerabilities). React 19 was
+      required by v8's peer range.
 - [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see monetization notes Phase A)
 - [ ] PSA/BGS grade slab detection in vision + grade-aware pricing queries
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
