@@ -177,3 +177,24 @@ def test_import_rejects_non_utf8(db_session):
             headers=_auth(client),
         )
         assert r.status_code == 422
+
+
+def test_import_skips_negative_prices(db_session):
+    """Card(**fields) bypasses the Pydantic ge=0 price guards, so _parse_money
+    must reject negatives itself (auto-review finding on PR #24)."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        csv_text = (
+            "Player,Year,Status,Listed Price,Sale Price\n"
+            "Neg Listed,2021,ACTIVE,-5,\n"
+            "Neg Sold,2021,SOLD,,-3.50\n"
+            "Fine,2021,ACTIVE,0,\n"
+        )
+        r = _post_csv(client, headers, csv_text)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["created"] == 1
+        reasons = {s["row"]: s["reason"] for s in body["skipped"]}
+        assert set(reasons) == {2, 3}
+        assert all("negative" in reason for reason in reasons.values())
+        assert db_session.query(Card).filter(Card.player_name == "Fine").one().listed_price == 0.0

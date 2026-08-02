@@ -86,6 +86,10 @@ only in `[Unreleased]` on a branch is not in prod yet.
   zero). Quantity input in the card form now enforces `min=1` too (PR #22 +
   auto-review follow-up).
 - Call-up inventory matches exclude sold cards (PR #22).
+- CSV import rejects negative Listed/Sale Price values (row skipped with a
+  reason, like other malformed values) — the import path builds rows directly
+  against the model, so it bypassed the ge=0 guards above (auto-review finding
+  on this PR).
 
 ## 2026-07-28 — Lightbox, title parity tests, dependency refresh (PR #17)
 

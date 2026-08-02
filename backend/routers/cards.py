@@ -124,6 +124,10 @@ def _parse_money(raw: str) -> float:
     value = float(raw.replace("$", "").replace(",", ""))
     if not math.isfinite(value):
         raise ValueError("value must be a finite number")
+    if value < 0:
+        # Card(**fields) below skips the CardCreate/MarkSoldRequest validators,
+        # so the ge=0 price rule has to be enforced here too.
+        raise ValueError("value must not be negative")
     return value
 
 
