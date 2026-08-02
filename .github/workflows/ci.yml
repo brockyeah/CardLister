@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+# Checkout-only jobs: drop the GITHUB_TOKEN from its broad defaults to
+# read-only for every job (CodeQL actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
