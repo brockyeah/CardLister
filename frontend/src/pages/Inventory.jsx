@@ -40,6 +40,7 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
           <input
             type="number"
             step="0.01"
+            min="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className="input"
@@ -76,10 +77,14 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
 
   const submit = async (e) => {
     e.preventDefault()
+    if (!/^https:\/\//i.test(url.trim())) {
+      setError('URL must start with https://')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
-      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url })
+      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url.trim() })
       onClose()
     } catch (err) {
       const detail = err.response?.data?.detail

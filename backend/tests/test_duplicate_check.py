@@ -51,7 +51,7 @@ def test_sold_cards_and_blank_players_never_match(db_session):
     with TestClient(app) as client:
         headers = _auth(client)
         created = client.post("/api/cards", json=_payload(), headers=headers).json()
-        client.patch(f"/api/cards/{created['id']}", json={"status": "sold"}, headers=headers)
+        client.post(f"/api/cards/{created['id']}/mark-sold", json={"sold_price": 9.99}, headers=headers)
         assert client.post("/api/cards/check-duplicate", json=_payload(),
                            headers=headers).json()["duplicate"] is None
         assert client.post("/api/cards/check-duplicate", json=_payload(player_name="  "),

@@ -71,6 +71,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Scanner batch-review race: `fetchPricing` in Scanner.jsx isn't cancelled when
+      the user switches queue items quickly, so a slow response for item A can land
+      after item B is opened and silently overwrite B's comps/suggested price with
+      A's — needs a request-id or AbortController guard (quick win–medium; implement
+      directly; inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -112,6 +117,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-01 — Code review: eBay listing URL http(s)-only validation (server +
+      client + defensive render guard) — closed a stored-XSS/token-theft path via
+      `javascript:` URLs; PATCH no longer accepts `status` directly; mark-sold and
+      listed-price now reject non-positive values; call-up matches exclude sold cards
 
 - [x] 2026-07-30 — Bulk CSV inventory import (export layout round-trip, header-name
       column mapping, per-row skip reasons, https-only eBay URLs)
