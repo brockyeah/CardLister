@@ -241,3 +241,7 @@ cardlister/
 ├── .env.example
 └── README.md
 ```
+
+## License
+
+[MIT](LICENSE)
