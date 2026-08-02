@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import CardForm from '../components/CardForm.jsx'
 import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'

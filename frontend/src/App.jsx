@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router'
 import { getToken, getUsername, clearToken } from './api'
 import Login from './pages/Login.jsx'
 import Scanner from './pages/Scanner.jsx'
