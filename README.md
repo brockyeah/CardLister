@@ -118,6 +118,12 @@ docker run --rm -p 8000:8000 \
    - `DB_PATH=/data/cardlister.db`
 5. Deploy. Railway exposes the URL — log in with your password.
 
+**Production URL:** _not recorded yet — after deploying, paste the Railway URL
+here so tooling (e.g. the daily review routine) can ping `GET /api/health`._
+The health endpoint is unauthenticated and reports DB reachability, the
+deployed revision, and the call-up poller heartbeat; it returns 503 when the
+database is unreachable so any HTTP uptime monitor can alert on status alone.
+
 > ⚠️ **Without the `/data` volume, every redeploy wipes your SQLite DB and uploaded images.** This is the single biggest deployment mistake to avoid. The volume is what makes the data persistent across deploys.
 
 ---

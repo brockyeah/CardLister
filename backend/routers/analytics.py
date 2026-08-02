@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..auth import require_auth, get_users
-from ..database import DB_PATH, get_db
-from ..models import Correction, Scan, UsageEvent
+from ..database import DB_PATH, get_db, uploads_dir
+from ..models import Card, Correction, Scan, UsageEvent
 from ..services.billing_alerts import send_test_alert
 from ..schemas import (
     AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow, ReassignRequest,
@@ -211,6 +211,63 @@ def download_backup():
         filename=f"cardlister-backup-{stamp}.db",
         background=BackgroundTask(os.unlink, tmp_path),
     )
+
+
+# Files younger than this are never treated as orphans — they may belong to a
+# scan that's still sitting unsaved in the Scanner (e.g. an overnight batch queue).
+ORPHAN_GRACE_HOURS = 48
+
+
+def _orphaned_uploads(db: Session) -> list:
+    """Upload files not referenced by any card and older than the grace window.
+
+    Scan rows deliberately do NOT protect files: a scan whose card was never
+    saved (or was deleted) is exactly the disk growth this exists to reclaim.
+    Only the cards table represents data the user chose to keep.
+    """
+    referenced = set()
+    for front, back in db.query(Card.image_path, Card.back_image_path).all():
+        for p in (front, back):
+            if p:
+                referenced.add(os.path.basename(p))
+    cutoff = (datetime.utcnow() - timedelta(hours=ORPHAN_GRACE_HOURS)).timestamp()
+    orphans = []
+    root = uploads_dir()
+    if not root.is_dir():
+        return orphans
+    for path in root.iterdir():
+        if not path.is_file() or path.name in referenced:
+            continue
+        stat = path.stat()
+        if stat.st_mtime < cutoff:
+            orphans.append((path, stat.st_size))
+    return orphans
+
+
+@router.get("/uploads/orphans")
+def upload_orphans(db: Session = Depends(get_db)):
+    """Count + size of reclaimable upload files, without deleting anything."""
+    orphans = _orphaned_uploads(db)
+    return {
+        "count": len(orphans),
+        "bytes": sum(size for _, size in orphans),
+        "grace_hours": ORPHAN_GRACE_HOURS,
+    }
+
+
+@router.post("/uploads/cleanup")
+def cleanup_uploads(db: Session = Depends(get_db)):
+    """Delete orphaned upload files. Recomputes the orphan set at call time."""
+    deleted = 0
+    freed = 0
+    for path, size in _orphaned_uploads(db):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        deleted += 1
+        freed += size
+    return {"deleted": deleted, "freed_bytes": freed}
 
 
 @router.post("/alerts/test")

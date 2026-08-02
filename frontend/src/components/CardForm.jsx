@@ -11,7 +11,7 @@ const FIELDS = [
   { key: 'parallel_color', label: 'Parallel Color', type: 'text' },
   { key: 'serial_number', label: 'Serial Number (e.g. /99)', type: 'text' },
   { key: 'condition', label: 'Condition', type: 'text' },
-  { key: 'quantity', label: 'Quantity', type: 'number' },
+  { key: 'quantity', label: 'Quantity', type: 'number', min: '1' },
 ]
 
 const FLAGS = [
@@ -66,6 +66,7 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
             <label className="label">{f.label}</label>
             <input
               type={f.type}
+              min={f.min}
               value={data[f.key] ?? ''}
               onChange={(e) =>
                 update(f.key, f.type === 'number' ? (e.target.value ? Number(e.target.value) : null) : e.target.value)
@@ -140,6 +141,7 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
           <input
             type="number"
             step="0.01"
+            min="0"
             value={data.listed_price ?? ''}
             onChange={(e) => update('listed_price', e.target.value ? Number(e.target.value) : null)}
             className="input"

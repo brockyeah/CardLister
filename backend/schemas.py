@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # --- Auth ---
@@ -32,9 +32,9 @@ class CardBase(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: str = "NM"
-    quantity: int = 1
+    quantity: int = Field(default=1, ge=1)
     suggested_price: Optional[float] = None
-    listed_price: Optional[float] = None
+    listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: str = ""
     back_image_path: Optional[str] = None
     notes: Optional[str] = None
@@ -61,13 +61,12 @@ class CardUpdate(BaseModel):
     parallel_color: Optional[str] = None
     serial_number: Optional[str] = None
     condition: Optional[str] = None
-    quantity: Optional[int] = None
+    quantity: Optional[int] = Field(default=None, ge=1)
     suggested_price: Optional[float] = None
-    listed_price: Optional[float] = None
+    listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: Optional[str] = None
     back_image_path: Optional[str] = None
     notes: Optional[str] = None
-    status: Optional[str] = None
 
 
 class CardOut(CardBase):
@@ -134,10 +133,21 @@ class EbayListingUpdate(BaseModel):
     ebay_listing_id: str
     ebay_listing_url: str
 
+    @field_validator("ebay_listing_url")
+    @classmethod
+    def _require_https(cls, v: str) -> str:
+        # The URL is rendered as a clickable link in the inventory table (and
+        # mirrored to Sheets), so reject anything that isn't plain https —
+        # keeps javascript:/http: values out of the href.
+        v = v.strip()
+        if not v.lower().startswith("https://"):
+            raise ValueError("ebay_listing_url must start with https://")
+        return v
+
 
 # --- Mark sold ---
 class MarkSoldRequest(BaseModel):
-    sold_price: float
+    sold_price: float = Field(gt=0)
     sold_at: Optional[datetime] = None
 
 

@@ -78,7 +78,8 @@ def count_inventory_matches(db: Session, player_name: str) -> tuple[int, int]:
     if not target:
         return 0, 0
     total = first_bowman = 0
-    rows = db.query(Card.player_name, Card.quantity, Card.is_first_bowman).all()
+    rows = (db.query(Card.player_name, Card.quantity, Card.is_first_bowman)
+            .filter(Card.status != "sold").all())
     for name, qty, is_fb in rows:
         if normalize_name(name) == target:
             total += qty or 0

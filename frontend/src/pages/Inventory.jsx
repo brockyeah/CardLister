@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
+import { cardMatchesSearch, sortCards } from '../lib/sortCards'
 import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value }) {
@@ -39,6 +40,7 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
           <input
             type="number"
             step="0.01"
+            min="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             className="input"
@@ -71,13 +73,22 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
   const [id, setId] = useState('')
   const [url, setUrl] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
 
   const submit = async (e) => {
     e.preventDefault()
+    if (!/^https:\/\//i.test(url.trim())) {
+      setError('URL must start with https://')
+      return
+    }
     setSaving(true)
+    setError(null)
     try {
-      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url })
+      await onConfirm({ ebay_listing_id: id, ebay_listing_url: url.trim() })
       onClose()
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      setError(Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : (detail || err.message))
     } finally {
       setSaving(false)
     }
@@ -94,8 +105,18 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
         </div>
         <div className="mb-5">
           <label className="label">Listing URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} className="input" required />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="input"
+            placeholder="https://www.ebay.com/itm/…"
+            pattern="https://.*"
+            title="Must start with https://"
+            required
+          />
         </div>
+        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
         <div className="flex gap-2">
           <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
           <button type="submit" disabled={saving} className="btn-primary flex-1">
@@ -206,6 +227,7 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' })
   const [soldModalCard, setSoldModalCard] = useState(null)
   const [attachModalCard, setAttachModalCard] = useState(null)
   const [compsModalCard, setCompsModalCard] = useState(null)
@@ -225,13 +247,20 @@ export default function Inventory() {
   }, [])
 
   const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase()
-    return cards.filter((c) => {
+    const visible = cards.filter((c) => {
       if (statusFilter && c.status !== statusFilter) return false
-      if (s && !(c.player_name || '').toLowerCase().includes(s)) return false
-      return true
+      return cardMatchesSearch(c, search)
     })
-  }, [cards, search, statusFilter])
+    return sortCards(visible, sort.key, sort.dir)
+  }, [cards, search, statusFilter, sort])
+
+  const onSort = (key) => {
+    setSort((prev) => (
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    ))
+  }
 
   const stats = useMemo(() => {
     const total = cards.length
@@ -293,7 +322,7 @@ export default function Inventory() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by player name…"
+          placeholder="Search player, team, brand, set, card #…"
           className="input md:max-w-md"
         />
         <select
@@ -325,6 +354,8 @@ export default function Inventory() {
           onOpenEbay={onOpenEbay}
           onDelete={onDelete}
           onCheckComps={setCompsModalCard}
+          sort={sort}
+          onSort={onSort}
         />
       )}
 
