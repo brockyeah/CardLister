@@ -86,6 +86,28 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
       for spikes (medium; **plan doc first** — new table/schema; inline)
+- [ ] eBay fee + net-proceeds estimate: show the final-value fee (env-configurable
+      rate, default ~13.25% + $0.30) and net proceeds next to the price in the
+      Comps modal and mark-sold dialog — pricing today shows gross only, so
+      thin-margin cards look better than they are (quick win; implement directly —
+      display-only math, no schema; inline)
+- [ ] Condition dropdown with canonical values: `condition` is a free-text input
+      (defaults "NM"), so typos like "nm "/"Near Mint" fragment the data; replace
+      with a select (RAW, GEM-MT, NM-MT, NM, EX, VG, POOR) and normalize known
+      variants on CSV import (quick win; implement directly; inline — touches
+      CardForm.jsx, land after the open PR queue clears)
+- [ ] Scanner batch-review keyboard shortcuts: Enter = save & advance, ←/→ move
+      through the queue — batch review is the highest-repetition flow in the app
+      and is entirely mouse-driven today (quick win–medium; implement directly;
+      inline — touches Scanner.jsx, land after the open PR queue clears)
+- [ ] Monthly scan-cost budget alert: usage table already tracks est. cost per
+      scan; add an env-configurable monthly cap with an Analytics banner and the
+      existing ntfy push when 80% / 100% is crossed, checked in the poll cycle
+      (medium; implement directly — reuses usage table + alerts, no schema; inline)
+- [ ] Sold-cards tax-year CSV export: `GET /api/cards/export-sold.csv?year=` with
+      sold date/price columns for tax reporting — sold data and the CSV writer
+      both exist, but sold rows only export mixed into the full inventory dump
+      (quick win; implement directly; inline)
 
 ## Later
 
