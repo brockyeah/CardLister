@@ -79,8 +79,9 @@ only in `[Unreleased]` on a branch is not in prod yet.
 - `PATCH /api/cards/{id}` no longer accepts `status` — sold/active can only
   change through the mark-sold flow, so a stray PATCH can't silently flip a
   card's state (PR #22).
-- Data-integrity guards: `sold_price` and `listed_price` reject negative
-  values, and `quantity` must be ≥ 1 on both create and patch (a negative
+- Data-integrity guards: `/mark-sold` rejects `sold_price <= 0`,
+  `listed_price` rejects negative values, and `quantity` must be ≥ 1 on both
+  create and patch (a negative
   quantity could render "Quantity available: -3" in an eBay description and
   suppress call-up alerts by dragging the summed inventory match count to
   zero). Quantity input in the card form now enforces `min=1` too (PR #22 +
@@ -112,26 +113,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
   in-range minors. Remaining: two moderate react-router advisories whose only
   fix is the v7 major, deferred to the backlog (no SSR, no user-controlled
   link targets here).
-
-### Security
-- eBay listing URL is now validated to `http://`/`https://` only, both
-  server-side (`EbayListingUpdate` schema) and client-side (Attach eBay
-  modal) — previously any string was accepted and rendered straight into an
-  `<a href>` in Inventory, so a `javascript:` URL saved as the "listing URL"
-  would execute in-session for anyone who clicked "View", with the potential
-  to read the bearer token out of `localStorage`. `CardTable` also now
-  refuses to render a clickable link for any already-stored value that isn't
-  `http(s)://`, so existing rows saved before this fix can't trigger it either.
-- `PATCH /api/cards/{id}` no longer accepts a `status` field — it previously
-  let a client set a card to `"sold"` directly, bypassing `/mark-sold` and
-  leaving `sold_price`/`sold_at` unset, which corrupted CSV export and
-  revenue analytics for that row.
-- `/mark-sold` now rejects `sold_price <= 0`, and `listed_price` (create and
-  update) rejects negative values — both used to save silently and skew the
-  Inventory revenue tile.
-- Call-up inventory-match counts (`count_inventory_matches`) no longer count
-  already-sold cards, so selling your only copy of a player no longer
-  produces a false "you own this player" call-up alert.
 
 ## 2026-07-26 — Title preview & database backup (PR #16)
 
