@@ -17,13 +17,25 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
-- [ ] Row-level "Copy listing text" button: today clipboard text only comes via the
-      Open eBay flow, which also opens a tab and fires an alert; add a quiet
-      copy-only action reusing `getEbayListingText` (quick win; implement directly;
-      inline)
-- [ ] Unmark-sold (undo): mark-sold is irreversible in the UI — a misclick needs a
-      manual PATCH; add an action that restores status and clears sold_price/sold_at
-      (quick win; implement directly; inline)
+- [ ] Attribute-aware comps: `PricingRequest` carries only player/year/brand/set/
+      card # — parallel color, serial number, refractor, and auto never reach the
+      pricing chain, so a Gold /50 comps like the base card and the suggested
+      price is systematically wrong for exactly the cards worth the most
+      (medium; implement directly; inline — touches schemas, pricing router,
+      pricing service query builders, CompsModal/Scanner callers)
+- [ ] Quantity-aware inventory stats: the StatTiles count rows, not copies —
+      Total Cards ignores quantity and Est. Active Value is `listed_price × 1`
+      even for qty-3 rows, understating the collection (quick win; implement
+      directly; inline — pure frontend math in Inventory.jsx)
+- [ ] Days-to-sell analytics: avg/median `created_at → sold_at` interval plus a
+      distribution view on Analytics, so pricing strategy gets feedback ("Bowman
+      autos sell in 4 days, base sits for 60") (medium; implement directly;
+      inline; dataviz skill first)
+- [ ] CSV import duplicate handling: import blindly creates rows even when an
+      identical non-sold card exists — reuse the check-duplicate identity rules
+      per row to warn (or opt-in merge quantities), preventing double-ups on
+      re-import of an edited export (medium; implement directly; inline —
+      builds on the import parser + `check_duplicate` matcher)
 - [ ] Re-scan in a higher mode without re-upload: extraction misses currently mean
       re-staging the photo; the file and Scan row are already on the server, so add
       `POST /api/scan/{scan_id}/rescan` with a preset param + a "Re-scan in
@@ -144,6 +156,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
+- [ ] Unmark-sold restores CSV-imported "unlisted" cards to "active" (PR #29
+      auto-review note): a correct restore needs a `previous_status` column set
+      by mark-sold — the no-schema heuristic (unlisted iff no listing attached)
+      would wrongly demote saved-but-unattached active cards; fold into the
+      same schema pass as soft-delete (quick win once the column exists;
+      **plan doc first** — schema change; inline)
 - [ ] Nightly automated backup delivery: email the SQLite snapshot (or push it to
       Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
       (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
@@ -163,6 +181,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       inventory round-trip against a real dev server; unit suites can't catch
       broken page wiring like a bad api.js import (medium; implement directly;
       inline)
+- [ ] Tailwind CSS 3.4 → 4.x migration: surfaced by the 2026-08-03 Monday
+      dependency pass (only major-version drift left; npm/pip audits clean) —
+      v4 changes the config/PostCSS pipeline, so defer until a quiet window
+      (medium; implement directly; inline)
 - [ ] Escape leading `=` `+` `-` `@` in CSV export cells (prefix `'`): formula
       injection hardening note from the 2026-07-30 security review — import now
       ingests third-party files, so a crafted Notes cell round-trips into an
@@ -170,6 +192,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-03 — Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores
+      status to active and clears sold_price/sold_at, with confirm-gated
+      "Unmark Sold" button on sold rows
+- [x] 2026-08-03 — Row-level "Copy Text" button: quiet clipboard-only listing
+      text on non-sold rows (transient Copied ✓, prompt fallback)
 
 - [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
       limit, no partial file left behind; closes the unbounded-upload hardening

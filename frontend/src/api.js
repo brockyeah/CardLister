@@ -124,6 +124,9 @@ export const deleteCard = (id) =>
 export const markSold = (id, payload) =>
   api.post(`/api/cards/${id}/mark-sold`, payload).then((r) => r.data)
 
+export const unmarkSold = (id) =>
+  api.post(`/api/cards/${id}/unmark-sold`).then((r) => r.data)
+
 export const attachEbayListing = (id, payload) =>
   api.post(`/api/cards/${id}/ebay-id`, payload).then((r) => r.data)
 

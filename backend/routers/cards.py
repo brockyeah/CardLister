@@ -345,3 +345,27 @@ def mark_sold(card_id: int, payload: MarkSoldRequest, background_tasks: Backgrou
     db.refresh(card)
     background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
+
+
+@router.post("/{card_id}/unmark-sold", response_model=CardOut)
+def unmark_sold(card_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Undo a mis-clicked mark-sold: restore the card and clear the sale.
+
+    Restores to "active" — create_card forces every saved card to active, so
+    that is the only state a card can have been in before mark-sold (imported
+    "unlisted" rows lose that distinction, an accepted trade-off for not
+    storing a previous-status column). The sale fields are cleared so revenue
+    analytics and the CSV export stop counting the phantom sale.
+    """
+    card = db.query(Card).filter(Card.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    if card.status != "sold":
+        raise HTTPException(status_code=409, detail="Card is not marked sold")
+    card.status = "active"
+    card.sold_price = None
+    card.sold_at = None
+    db.commit()
+    db.refresh(card)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
+    return card

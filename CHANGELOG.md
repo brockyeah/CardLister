@@ -10,7 +10,34 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `fix/post-merge-followups`
+## [Unreleased] — branch `claude/happy-ramanujan-nzi4jh`
+
+### Added
+- Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores a mis-clicked
+  sold card to Active and clears the sale price/date (409 if the card isn't
+  sold), with an "Unmark Sold" button on sold rows behind a confirm dialog.
+  Previously mark-sold was irreversible in the UI — fixing a misclick needed a
+  manual PATCH, and the phantom sale polluted revenue analytics until then.
+- Row-level "Copy Text" button on non-sold inventory rows: copies the eBay
+  listing text to the clipboard quietly (transient "Copied ✓" on the button,
+  prompt fallback when the clipboard API is blocked). Previously the only way
+  to get listing text was the Open eBay flow, which also opens a tab and fires
+  an alert.
+
+## 2026-08-02 — React Router v8 + React 19 (PR #28)
+
+### Changed
+- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
+  Clears all three Dependabot advisories against the v6 line (open-redirect
+  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
+  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
+  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
+  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
+  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
+  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
+  live click-through of login → scan → inventory → analytics → logout.
+
+## 2026-08-02 — Post-#24 follow-ups (PR #25)
 
 ### Fixed
 - CSV import enforces sold-row consistency: a SOLD row without a Sale Price
@@ -34,19 +61,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
 - The CI dependency-audit job no longer exits non-zero when advisories are
   found — it emits a warning annotation and a step summary instead. The job
   never blocked merges, so its red X only taught people to ignore red.
-
-## [Unreleased] — branch `chore/react-router-v7`
-
-### Changed
-- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
-  Clears all three Dependabot advisories against the v6 line (open-redirect
-  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
-  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
-  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
-  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
-  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
-  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
-  live click-through of login → scan → inventory → analytics → logout.
 
 ## 2026-08-02 — One-click integration of PRs #18–#23 (PR #24)
 

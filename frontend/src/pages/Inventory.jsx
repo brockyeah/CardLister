@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
 import { cardMatchesSearch, sortCards } from '../lib/sortCards'
-import { listCards, markSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
+import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value }) {
   return (
@@ -276,6 +276,36 @@ export default function Inventory() {
   const onMarkSold = (card) => setSoldModalCard(card)
   const onAttachEbay = (card) => setAttachModalCard(card)
 
+  const onUnmarkSold = async (card) => {
+    const label = card.player_name || `card #${card.id}`
+    if (!window.confirm(`Unmark ${label} as sold? The card returns to Active and the sale price/date are cleared.`)) return
+    try {
+      await unmarkSold(card.id)
+      await reload()
+    } catch (e) {
+      alert('Unmark failed: ' + (e.response?.data?.detail || e.message))
+    }
+  }
+
+  // Quiet clipboard-only variant of the Open eBay flow: no tab, no alert.
+  // Returns true so CardTable can flash "Copied ✓" on the row.
+  const onCopyText = async (card) => {
+    try {
+      const text = await getEbayListingText(card.id)
+      try {
+        await navigator.clipboard.writeText(text.clipboard_text)
+        return true
+      } catch {
+        // Clipboard API blocked — fall back to a prompt for manual copy.
+        window.prompt('Copy this listing text:', text.clipboard_text)
+        return false
+      }
+    } catch {
+      alert('Failed to build listing text')
+      return false
+    }
+  }
+
   const onOpenEbay = async (card) => {
     // Copy listing text to clipboard, then open eBay's sell page.
     // (Pre-fill URLs no longer populate eBay's form — paste workflow only.)
@@ -350,10 +380,12 @@ export default function Inventory() {
         <CardTable
           cards={filtered}
           onMarkSold={onMarkSold}
+          onUnmarkSold={onUnmarkSold}
           onAttachEbay={onAttachEbay}
           onOpenEbay={onOpenEbay}
           onDelete={onDelete}
           onCheckComps={setCompsModalCard}
+          onCopyText={onCopyText}
           sort={sort}
           onSort={onSort}
         />
