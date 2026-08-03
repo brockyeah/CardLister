@@ -72,8 +72,15 @@ const COLUMNS = [
   { label: '', key: null },
 ]
 
-export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps, sort, onSort }) {
+export default function CardTable({ cards, onMarkSold, onUnmarkSold, onAttachEbay, onOpenEbay, onDelete, onCheckComps, onCopyText, sort, onSort }) {
   const [lightboxCard, setLightboxCard] = useState(null)
+  const [copiedId, setCopiedId] = useState(null)
+
+  useEffect(() => {
+    if (copiedId == null) return undefined
+    const t = setTimeout(() => setCopiedId(null), 2000)
+    return () => clearTimeout(t)
+  }, [copiedId])
 
   if (!cards.length) {
     return (
@@ -178,6 +185,26 @@ export default function CardTable({ cards, onMarkSold, onAttachEbay, onOpenEbay,
                     className="text-xs bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-1 mr-1"
                   >
                     Mark Sold
+                  </button>
+                )}
+                {c.status === 'sold' && (
+                  <button
+                    onClick={() => onUnmarkSold?.(c)}
+                    className="text-xs bg-ink-600 hover:bg-ink-500 text-white rounded px-2 py-1 mr-1"
+                    title="Undo mark-sold: restore to active and clear the sale price/date"
+                  >
+                    Unmark Sold
+                  </button>
+                )}
+                {c.status !== 'sold' && (
+                  <button
+                    onClick={async () => {
+                      if (await onCopyText?.(c)) setCopiedId(c.id)
+                    }}
+                    className="text-xs bg-ink-600 hover:bg-ink-500 text-white rounded px-2 py-1 mr-1"
+                    title="Copy the eBay listing text to the clipboard (without opening eBay)"
+                  >
+                    {copiedId === c.id ? 'Copied ✓' : 'Copy Text'}
                   </button>
                 )}
                 {!c.ebay_listing_id && (
