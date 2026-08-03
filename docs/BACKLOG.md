@@ -156,6 +156,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
+- [ ] Unmark-sold restores CSV-imported "unlisted" cards to "active" (PR #29
+      auto-review note): a correct restore needs a `previous_status` column set
+      by mark-sold — the no-schema heuristic (unlisted iff no listing attached)
+      would wrongly demote saved-but-unattached active cards; fold into the
+      same schema pass as soft-delete (quick win once the column exists;
+      **plan doc first** — schema change; inline)
 - [ ] Nightly automated backup delivery: email the SQLite snapshot (or push it to
       Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
       (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
