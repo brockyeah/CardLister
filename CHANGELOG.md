@@ -20,6 +20,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
   the extension was checked (with unknown extensions coerced to `.jpg`), so
   arbitrary non-image content — e.g. an HTML payload named `photo.jpg` —
   was stored and re-served from `/uploads` in the app's origin.
+- Router-wide auth sweep test: a parametrized test asserts every `/api`
+  route except login and the health check returns 401 without a token, so a
+  future router (or route) that forgets `Depends(require_auth)` fails CI
+  automatically. Collected from the OpenAPI schema with a self-check that
+  the sweep is non-empty.
 
 ## 2026-08-02 — React Router v8 + React 19 (PR #28)
 

@@ -74,14 +74,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       already a dependency) and serve that in `CardTable`, keeping the original
       for the lightbox (medium; implement directly; inline — touches CardTable,
       wait for the open PR queue to land)
-- [ ] Magic-byte validation of scan uploads: today only the file extension is
-      checked; verify image content with Pillow (and `%PDF-` header for PDFs)
-      before storing, so mislabeled non-image content is never stored and
-      re-served from `/uploads` (quick win; implement directly; inline)
-- [ ] Router-wide auth sweep test: parametrized test walking `app.routes` and
-      asserting every `/api` route except login and health returns 401 without
-      a token — guards a future router forgetting `Depends(require_auth)`
-      (quick win; implement directly; inline; test-only)
 - [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
@@ -170,6 +162,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-04 — Magic-byte validation of scan uploads (415 on unrecognized
+      content before write; stored suffix derived from sniffed content, not the
+      client filename)
+- [x] 2026-08-04 — Router-wide auth sweep test: every `/api` route except
+      login/health must 401 without a token (walks the OpenAPI schema, with a
+      self-check that the sweep is non-empty)
 
 - [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
       limit, no partial file left behind; closes the unbounded-upload hardening
