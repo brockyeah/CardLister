@@ -10,6 +10,17 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `claude/happy-ramanujan-ak1ftz`
+
+### Security
+- Scan uploads are validated by content, not filename: the first bytes must
+  carry a JPEG/PNG/WebP/PDF magic signature or the request is rejected with
+  415 before anything is written, and the stored suffix now comes from the
+  sniffed content instead of the client-supplied extension. Previously only
+  the extension was checked (with unknown extensions coerced to `.jpg`), so
+  arbitrary non-image content — e.g. an HTML payload named `photo.jpg` —
+  was stored and re-served from `/uploads` in the app's origin.
+
 ## 2026-08-02 — React Router v8 + React 19 (PR #28)
 
 ### Changed
