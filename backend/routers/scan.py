@@ -21,9 +21,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 
-# PDFs are useful for scanned card pages from a flatbed scanner.
-ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
-
 # Per-file cap so one request can't exhaust memory or fill the Railway volume.
 # Generous for flatbed PDF scans; phone photos arrive far smaller (and the
 # client downscales before upload).
@@ -31,17 +28,40 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 _READ_CHUNK = 1024 * 1024
 
 
+def _sniff_suffix(head: bytes) -> Optional[str]:
+    """Map leading magic bytes to a storage suffix; None = unsupported content.
+
+    The filename extension is client-controlled and therefore ignored — the
+    stored suffix comes from the sniffed content, so the media type later
+    guessed from it (vision API, /uploads Content-Disposition) can't be
+    steered by a mislabeled upload. PDFs are useful for flatbed scan pages.
+    """
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    if head.startswith(b"%PDF-"):
+        return ".pdf"
+    return None
+
+
 async def _save_upload(upload: UploadFile, uploads: Path) -> str:
-    suffix = Path(upload.filename or "").suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        # Unknown extension — coerce to .jpg so downstream stays predictable.
-        suffix = ".jpg"
+    first = await upload.read(_READ_CHUNK)
+    suffix = _sniff_suffix(first)
+    if suffix is None:
+        raise HTTPException(
+            status_code=415,
+            detail="File content is not a supported image (JPEG, PNG, WebP) or PDF.",
+        )
     filename = f"{uuid.uuid4().hex}{suffix}"
     dest = uploads / filename
     size = 0
+    chunk = first
     try:
         with open(dest, "wb") as f:
-            while chunk := await upload.read(_READ_CHUNK):
+            while chunk:
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(
@@ -49,6 +69,7 @@ async def _save_upload(upload: UploadFile, uploads: Path) -> str:
                         detail=f"Upload larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
                     )
                 f.write(chunk)
+                chunk = await upload.read(_READ_CHUNK)
     except Exception:
         dest.unlink(missing_ok=True)
         raise

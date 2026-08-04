@@ -74,14 +74,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       already a dependency) and serve that in `CardTable`, keeping the original
       for the lightbox (medium; implement directly; inline — touches CardTable,
       wait for the open PR queue to land)
-- [ ] Magic-byte validation of scan uploads: today only the file extension is
-      checked; verify image content with Pillow (and `%PDF-` header for PDFs)
-      before storing, so mislabeled non-image content is never stored and
-      re-served from `/uploads` (quick win; implement directly; inline)
-- [ ] Router-wide auth sweep test: parametrized test walking `app.routes` and
-      asserting every `/api` route except login and health returns 401 without
-      a token — guards a future router forgetting `Depends(require_auth)`
-      (quick win; implement directly; inline; test-only)
 - [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
@@ -108,6 +100,21 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       sold date/price columns for tax reporting — sold data and the CSV writer
       both exist, but sold rows only export mixed into the full inventory dump
       (quick win; implement directly; inline)
+
+- [ ] Paste-from-clipboard scan capture: Scanner only offers the file picker
+      and mobile camera; add a paste handler on the scan staging area so a
+      desktop screenshot (Ctrl/Cmd+V) stages like a chosen file — screenshots
+      of online purchases are a common source (quick win; implement directly;
+      inline — touches Scanner.jsx)
+- [ ] Immutable cache headers on `/uploads`: stored names are uuid-hex so the
+      content behind a URL never changes, but `serve_upload` sends no
+      Cache-Control — every inventory render refetches full-size photos; add
+      `public, max-age=31536000, immutable` (quick win; implement directly;
+      inline — pairs with the server-side thumbnails item)
+- [ ] QR labels for physical storage: print a sheet of QR codes (selected rows
+      or a filter) that deep-link back to the card in Inventory, so a physical
+      box/toploader can be matched to its row; needs a card permalink/filter
+      param first (medium; implement directly; inline)
 
 ## Later
 
@@ -141,6 +148,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
 - [ ] Sold-comp price history per card (store lookups over time, sparkline in inventory)
 - [ ] Production/multi-tenant track — see `docs/notes/2026-07-25-production-monetization.md`
+- [ ] Auth on `/uploads` photo serving: `/uploads/{filename}` is deliberately
+      unauthenticated and relies on unguessable uuid names (capability URLs) —
+      a leaked URL (browser history, pasted link) exposes the photo forever,
+      and `<img>` tags can't carry the Bearer token; needs short-lived signed
+      URLs or a cookie-scheme decision (medium; **plan doc first** — touches
+      auth; inline)
+- [ ] Restore-from-snapshot: backup download exists but there is no restore
+      path — recovering a Railway volume means manual SQLite surgery; add an
+      upload-snapshot flow with integrity check (`PRAGMA integrity_check` +
+      expected schema) and a pre-restore safety copy (medium; **plan doc
+      first** — destructive, replaces the live DB; inline)
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
@@ -170,6 +188,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-04 — Magic-byte validation of scan uploads (415 on unrecognized
+      content before write; stored suffix derived from sniffed content, not the
+      client filename)
+- [x] 2026-08-04 — Router-wide auth sweep test: every `/api` route except
+      login/health must 401 without a token (walks the OpenAPI schema, with a
+      self-check that the sweep is non-empty)
 
 - [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
       limit, no partial file left behind; closes the unbounded-upload hardening
