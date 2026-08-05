@@ -40,6 +40,7 @@ def test_export_import_round_trip(db_session):
             player_name="Wander Franco", year=2021, brand="Bowman",
             set_name="Chrome", card_number="BCP-100", quantity=3,
             is_first_bowman=True, listed_price=25.0, notes="PC",
+            parallel_color="Gold", serial_number="12/50", is_refractor=True,
         ), headers=headers)
         exported = client.get("/api/cards/export.csv", headers=headers).text
 
@@ -59,10 +60,32 @@ def test_export_import_round_trip(db_session):
         assert imported.is_first_bowman is True
         assert imported.listed_price == 25.0
         assert imported.notes == "PC"
+        assert imported.parallel_color == "Gold"
+        assert imported.serial_number == "12/50"
+        assert imported.is_refractor is True
         # Export upper-cases status; import normalizes it back.
         assert imported.status == "active"
         # created_at round-trips through the "Date Listed" column.
         assert imported.created_at == cards[0].created_at
+
+
+def test_escaped_formula_cells_round_trip(db_session):
+    """The export's formula-injection escape (leading apostrophe) is stripped
+    on import, so export -> import preserves the original value."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        client.post("/api/cards", json=dict(
+            player_name="Bobby Witt Jr.", notes="=SUM(A1:A9)", condition="-NM",
+        ), headers=headers)
+        exported = client.get("/api/cards/export.csv", headers=headers).text
+        assert "'=SUM(A1:A9)" in exported
+
+        r = _post_csv(client, headers, exported)
+        assert r.status_code == 200, r.text
+        assert r.json()["created"] == 1
+        imported = db_session.query(Card).order_by(Card.id.desc()).first()
+        assert imported.notes == "=SUM(A1:A9)"
+        assert imported.condition == "-NM"
 
 
 def test_import_maps_columns_by_name_not_position(db_session):

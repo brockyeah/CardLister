@@ -65,6 +65,24 @@ def list_cards(
     return q.order_by(Card.created_at.desc()).all()
 
 
+# Spreadsheet apps execute cells starting with these as formulas, so a crafted
+# Notes value like "=HYPERLINK(...)" in an exported CSV could run in Excel.
+# The Sheets mirror is unaffected (rows are written with valueInputOption=RAW).
+_FORMULA_CHARS = ("=", "+", "-", "@")
+
+
+def _escape_formula_cell(value):
+    if isinstance(value, str) and value.startswith(_FORMULA_CHARS):
+        return "'" + value
+    return value
+
+
+def _unescape_formula_cell(value: str) -> str:
+    if len(value) > 1 and value[0] == "'" and value[1] in _FORMULA_CHARS:
+        return value[1:]
+    return value
+
+
 # Must be declared before GET /{card_id} — "export.csv" would otherwise 422
 # against the int path param.
 @router.get("/export.csv")
@@ -74,7 +92,7 @@ def export_csv(db: Session = Depends(get_db)):
     writer = csv.writer(buf)
     writer.writerow(SHEET_HEADERS)
     for card in db.query(Card).order_by(Card.created_at.asc()).all():
-        writer.writerow(_card_to_row(card))
+        writer.writerow([_escape_formula_cell(cell) for cell in _card_to_row(card)])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -169,7 +187,10 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
 
         def val(name: str) -> str:
             i = idx.get(name)
-            return row[i].strip() if i is not None and i < len(row) else ""
+            if i is None or i >= len(row):
+                return ""
+            # Undo the export's formula-injection escape so values round-trip.
+            return _unescape_formula_cell(row[i].strip())
 
         player = val("player")
         if not player:
