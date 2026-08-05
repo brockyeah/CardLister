@@ -71,14 +71,21 @@ def list_cards(
 _FORMULA_CHARS = ("=", "+", "-", "@")
 
 
+def _needs_formula_escape(value: str) -> bool:
+    # Apostrophe-lead values like "'-1/1 SP" must be escaped too — otherwise
+    # the import-side unescape couldn't tell a user's literal apostrophe from
+    # one the exporter added, and would strip it (round-trip corruption).
+    return value.lstrip("'").startswith(_FORMULA_CHARS)
+
+
 def _escape_formula_cell(value):
-    if isinstance(value, str) and value.startswith(_FORMULA_CHARS):
+    if isinstance(value, str) and _needs_formula_escape(value):
         return "'" + value
     return value
 
 
 def _unescape_formula_cell(value: str) -> str:
-    if len(value) > 1 and value[0] == "'" and value[1] in _FORMULA_CHARS:
+    if value.startswith("'") and _needs_formula_escape(value[1:]):
         return value[1:]
     return value
 

@@ -76,6 +76,7 @@ def test_escaped_formula_cells_round_trip(db_session):
         headers = _auth(client)
         client.post("/api/cards", json=dict(
             player_name="Bobby Witt Jr.", notes="=SUM(A1:A9)", condition="-NM",
+            serial_number="'-1/1 SP",
         ), headers=headers)
         exported = client.get("/api/cards/export.csv", headers=headers).text
         assert "'=SUM(A1:A9)" in exported
@@ -86,6 +87,9 @@ def test_escaped_formula_cells_round_trip(db_session):
         imported = db_session.query(Card).order_by(Card.id.desc()).first()
         assert imported.notes == "=SUM(A1:A9)"
         assert imported.condition == "-NM"
+        # A hand-typed leading apostrophe survives the round trip: the export
+        # escapes it to ''-1/1 SP and the import strips exactly one level.
+        assert imported.serial_number == "'-1/1 SP"
 
 
 def test_import_maps_columns_by_name_not_position(db_session):

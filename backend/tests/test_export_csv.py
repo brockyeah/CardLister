@@ -48,12 +48,15 @@ def test_export_escapes_formula_cells(db_session):
         headers = _auth(client)
         client.post("/api/cards", json=dict(
             player_name="=HYPERLINK(\"http://evil\",\"click\")",
-            notes="@SUM(A1)", condition="-NM",
+            notes="@SUM(A1)", condition="-NM", serial_number="'-1/1 SP",
         ), headers=headers)
         r = client.get("/api/cards/export.csv", headers=headers)
         rows = list(csv.reader(io.StringIO(r.text)))
         assert rows[1][SHEET_HEADERS.index("Player")] == "'=HYPERLINK(\"http://evil\",\"click\")"
         assert rows[1][SHEET_HEADERS.index("Notes")] == "'@SUM(A1)"
         assert rows[1][SHEET_HEADERS.index("Condition")] == "'-NM"
+        # A literal apostrophe before a formula char is escaped too, so the
+        # importer can tell it apart from an exporter-added apostrophe.
+        assert rows[1][SHEET_HEADERS.index("Serial #")] == "''-1/1 SP"
         # Ordinary cells are untouched.
         assert rows[1][SHEET_HEADERS.index("Status")] == "ACTIVE"
