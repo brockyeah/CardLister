@@ -14,7 +14,7 @@ SHEET_HEADERS = [
     "Player", "Year", "Brand", "Set", "Card #", "Team",
     "RC", "Auto", "Patch", "Condition", "Listed Price",
     "eBay URL", "Status", "Date Listed", "Date Sold", "Sale Price", "Notes",
-    "Quantity", "1st Bowman",
+    "Quantity", "1st Bowman", "Parallel", "Serial #", "Refractor",
 ]
 
 SHEET_TAB = "Inventory"
@@ -77,6 +77,9 @@ def _card_to_row(card) -> list:
         card.notes or "",
         card.quantity if card.quantity is not None else 1,
         "Y" if card.is_first_bowman else "",
+        card.parallel_color or "",
+        card.serial_number or "",
+        "Y" if card.is_refractor else "",
     ]
 
 
