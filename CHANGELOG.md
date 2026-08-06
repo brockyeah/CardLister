@@ -10,7 +10,36 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `fix/post-merge-followups`
+## [Unreleased] — branch `claude/happy-ramanujan-s7p2o5`
+
+### Added
+- Storage usage tiles on the Analytics manage-data panel: database file size,
+  photo count, and photo bytes on the server (`GET /api/analytics/storage`),
+  refreshed after a CSV import or orphan cleanup. Railway volume pressure was
+  previously invisible until a deploy failed or the volume filled — now it sits
+  next to the cleanup tools that relieve it.
+
+### Fixed
+- Scanner pricing lookups can no longer land on the wrong card: switching
+  batch-review items (or saving/discarding) while a comps lookup was in flight
+  let the stale response overwrite the newer card's comps, pricing note, and
+  suggested price. Lookups now carry a monotonic id and only the latest may
+  write state; save/discard/new-scan invalidate anything in flight.
+
+## 2026-08-02 — React Router v8 + React 19 (PR #28)
+
+### Changed
+- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
+  Clears all three Dependabot advisories against the v6 line (open-redirect
+  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
+  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
+  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
+  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
+  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
+  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
+  live click-through of login → scan → inventory → analytics → logout.
+
+## 2026-08-02 — Post-#24 follow-ups (PR #25)
 
 ### Fixed
 - CSV import enforces sold-row consistency: a SOLD row without a Sale Price
@@ -34,19 +63,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
 - The CI dependency-audit job no longer exits non-zero when advisories are
   found — it emits a warning annotation and a step summary instead. The job
   never blocked merges, so its red X only taught people to ignore red.
-
-## [Unreleased] — branch `chore/react-router-v7`
-
-### Changed
-- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
-  Clears all three Dependabot advisories against the v6 line (open-redirect
-  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
-  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
-  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
-  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
-  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
-  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
-  live click-through of login → scan → inventory → analytics → logout.
 
 ## 2026-08-02 — One-click integration of PRs #18–#23 (PR #24)
 
