@@ -24,6 +24,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   prompt fallback when the clipboard API is blocked). Previously the only way
   to get listing text was the Open eBay flow, which also opens a tab and fires
   an alert. (PR #29)
+- Parallel, Serial #, and Refractor columns in the CSV export and the Google
+  Sheets mirror (appended after 1st Bowman so existing sheet columns keep
+  their positions). A Gold /50 refractor is no longer indistinguishable from
+  the base card in the export; the CSV importer already read these columns by
+  header name, so the export ↔ import round-trip now preserves all three.
+  (PR #31)
 
 ### Security
 - Scan uploads are validated by content, not filename: the first bytes must
@@ -38,6 +44,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   future router (or route) that forgets `Depends(require_auth)` fails CI
   automatically. Collected from the OpenAPI schema with a self-check that
   the sweep is non-empty. (PR #30)
+- CSV export escapes formula-leading cells (`=`, `+`, `-`, `@` get a leading
+  apostrophe) so a crafted value — e.g. a Notes cell imported from a
+  third-party CSV — can't execute as a formula when the export is opened in
+  Excel or Google Sheets. The importer strips the escape on the way back in,
+  so exported values round-trip unchanged. The Sheets mirror needs no change
+  (rows are written with `valueInputOption=RAW`). (PR #31)
 
 ## 2026-08-03 — React Router v8 + React 19 (PR #28)
 

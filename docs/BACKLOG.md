@@ -49,10 +49,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
       sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
       (quick win; implement directly; inline)
-- [ ] Parallel / Serial # / Refractor columns in CSV export + Sheets mirror: the
-      row layout omits all three, so a Gold /50 is indistinguishable from base in
-      the export — the 2026-07-30 importer already reads these columns when present
-      (quick win; implement directly; inline — touches `google_sheets.py` row layout)
 - [ ] CSV import dry-run preview: run the 2026-07-30 import parser without
       committing and show would-be created/skipped counts before the real import
       (quick win; implement directly; inline)
@@ -112,6 +108,24 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       sold date/price columns for tax reporting — sold data and the CSV writer
       both exist, but sold rows only export mixed into the full inventory dump
       (quick win; implement directly; inline)
+- [ ] eBay Seller Hub bulk-listing CSV export: export active cards in eBay's
+      bulk-upload template (title from `build_title`, price, condition,
+      category) so a batch of drafts can be created in one Seller Hub upload —
+      a no-OAuth stepping stone to the Sell API item in Later (medium;
+      implement directly; inline — new endpoint beside `export.csv`)
+- [ ] Inventory pagination / windowed rendering: `GET /api/cards` returns every
+      row and CardTable renders them all — payload and DOM both grow unbounded
+      with the collection; add `limit`/`offset` (or cursor) + a "load more" or
+      windowing on the table (medium; implement directly; inline — touches
+      Inventory.jsx, land after PR #29 merges)
+- [ ] Scanner drag-and-drop + paste-from-clipboard upload: staging photos is
+      file-picker/camera only; accept dropped files on the stage area and
+      Ctrl+V image paste for desktop workflows (quick win; implement directly;
+      inline — Scanner.jsx only, no open-PR overlap)
+- [ ] Inventory filter chips: status / RC / Auto / 1st Bowman / Refractor
+      toggle filters next to the existing search box — search can't express
+      "all my active autos" today (quick win; implement directly; inline —
+      touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
 
 - [ ] Paste-from-clipboard scan capture: Scanner only offers the file picker
       and mobile camera; add a paste handler on the scan staging area so a
@@ -184,6 +198,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
       (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
       backup service; inline)
+- [ ] Backup restore endpoint: upload a previously downloaded SQLite snapshot
+      to replace the live DB — completes the backup story (download exists,
+      restore is manual volume surgery today) (medium; **plan doc first** —
+      data-destructive, needs integrity check + pre-restore safety snapshot;
+      inline)
 - [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
       planned P&L dashboard can show true realized profit instead of revenue only
       (medium; **plan doc first** — schema change; inline)
@@ -203,13 +222,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       dependency pass (only major-version drift left; npm/pip audits clean) —
       v4 changes the config/PostCSS pipeline, so defer until a quiet window
       (medium; implement directly; inline)
-- [ ] Escape leading `=` `+` `-` `@` in CSV export cells (prefix `'`): formula
-      injection hardening note from the 2026-07-30 security review — import now
-      ingests third-party files, so a crafted Notes cell round-trips into an
-      Excel-interpretable formula on export; Sheets mirror unaffected (RAW input)
-      (quick win; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-05 — Parallel / Serial # / Refractor columns in CSV export +
+      Sheets mirror (appended after 1st Bowman; importer already read them,
+      so the round-trip now preserves all three)
+- [x] 2026-08-05 — CSV formula-injection escaping on export (leading `'` for
+      `=` `+` `-` `@` cells, stripped back out on import; Sheets mirror
+      unaffected — RAW input)
 
 - [x] 2026-08-04 — Magic-byte validation of scan uploads (415 on unrecognized
       content before write; stored suffix derived from sniffed content, not the
