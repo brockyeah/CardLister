@@ -40,9 +40,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       re-staging the photo; the file and Scan row are already on the server, so add
       `POST /api/scan/{scan_id}/rescan` with a preset param + a "Re-scan in
       Accuracy" button on the review form (medium; implement directly; inline)
-- [ ] Storage usage panel on Analytics manage-data: DB file size + uploads
-      count/size so Railway volume pressure is visible; pairs with orphan cleanup
-      (quick win; implement directly; inline; dataviz skill first for stat tiles)
 - [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
       those individually"); add a per-item back slot before scanning starts
       (medium; implement directly; inline)
@@ -127,11 +124,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       "all my active autos" today (quick win; implement directly; inline —
       touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
 
-- [ ] Paste-from-clipboard scan capture: Scanner only offers the file picker
-      and mobile camera; add a paste handler on the scan staging area so a
-      desktop screenshot (Ctrl/Cmd+V) stages like a chosen file — screenshots
-      of online purchases are a common source (quick win; implement directly;
-      inline — touches Scanner.jsx)
 - [ ] Immutable cache headers on `/uploads`: stored names are uuid-hex so the
       content behind a URL never changes, but `serve_upload` sends no
       Cache-Control — every inventory render refetches full-size photos; add
@@ -141,14 +133,37 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       or a filter) that deep-link back to the card in Inventory, so a physical
       box/toploader can be matched to its row; needs a card permalink/filter
       param first (medium; implement directly; inline)
+- [ ] Sheets sync failure visibility: `_sync_card_to_sheets` runs as a
+      fire-and-forget background task, so a dead Google credential or quota
+      error means the mirror silently drifts forever; add bounded retries plus
+      an in-memory "last sync error" readout on manage-data — push-side
+      complement to the on-demand drift detector above (medium; implement
+      directly — no schema, in-memory state only; inline)
+- [ ] "See sold comps on eBay" deep link: build the eBay sold/completed search
+      URL from player/year/brand/set/card # next to the suggested price in the
+      Scanner pricing panel and the Comps modal — a zero-API sanity check on
+      the five-source pricing chain, especially when it quietly falls back to
+      mock (quick win; implement directly; inline — touches Scanner.jsx +
+      Inventory comps modal, land after PR #29 merges)
+- [ ] Scan preset refresh to the current model lineup: PRESETS pin Sonnet 4.6 /
+      Opus 4.7 and the Scanner mode cards hardcode the same names — evaluate
+      newer models (e.g. Haiku 4.5 for Cost, current Sonnet/Opus for
+      Balanced/Accuracy) on a sample of corrected scans before switching, and
+      update analytics MODEL_PRICES + Scanner labels in the same change
+      (medium; implement directly, gated on a small accuracy eval; inline —
+      touches claude_vision.py, analytics.py, Scanner.jsx)
 
 ## Later
 
-- [ ] Scanner batch-review race: `fetchPricing` in Scanner.jsx isn't cancelled when
-      the user switches queue items quickly, so a slow response for item A can land
-      after item B is opened and silently overwrite B's comps/suggested price with
-      A's — needs a request-id or AbortController guard (quick win–medium; implement
-      directly; inline)
+- [ ] Offline scan queue (PWA): stage photos while offline (IndexedDB) and
+      auto-upload when connectivity returns — card shows and garage sales have
+      bad signal, and the PWA manifest already exists (long-term; **plan doc
+      first** — service worker, upload queue, and Scanner UI; inline)
+- [ ] Inventory mutation audit trail: multi-user households share one
+      inventory, but deletes / mark-solds / imports are anonymous today; add a
+      small `audit_events` table (who, what, when) with a recent-activity
+      readout on manage-data (medium; **plan doc first** — new table/schema;
+      inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -224,6 +239,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-06 — Storage usage tiles on Analytics manage-data: DB file size +
+      photo count/bytes via `GET /api/analytics/storage`, refreshed after
+      import/cleanup
+- [x] 2026-08-06 — Scanner pricing race fix: comps lookups carry a monotonic id
+      so a stale response can't overwrite the currently reviewed card's
+      comps/suggested price (was listed under Later as "Scanner batch-review
+      race")
 
 - [x] 2026-08-05 — Parallel / Serial # / Refractor columns in CSV export +
       Sheets mirror (appended after 1st Bowman; importer already read them,

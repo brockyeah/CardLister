@@ -30,6 +30,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
   the base card in the export; the CSV importer already read these columns by
   header name, so the export ↔ import round-trip now preserves all three.
   (PR #31)
+- Storage usage tiles on the Analytics manage-data panel: database file size,
+  photo count, and photo bytes on the server (`GET /api/analytics/storage`),
+  refreshed after a CSV import or orphan cleanup. Railway volume pressure was
+  previously invisible until a deploy failed or the volume filled — now it sits
+  next to the cleanup tools that relieve it. (PR #32)
 
 ### Security
 - Scan uploads are validated by content, not filename: the first bytes must
@@ -50,6 +55,13 @@ only in `[Unreleased]` on a branch is not in prod yet.
   Excel or Google Sheets. The importer strips the escape on the way back in,
   so exported values round-trip unchanged. The Sheets mirror needs no change
   (rows are written with `valueInputOption=RAW`). (PR #31)
+
+### Fixed
+- Scanner pricing lookups can no longer land on the wrong card: switching
+  batch-review items (or saving/discarding) while a comps lookup was in flight
+  let the stale response overwrite the newer card's comps, pricing note, and
+  suggested price. Lookups now carry a monotonic id and only the latest may
+  write state; save/discard/new-scan invalidate anything in flight. (PR #32)
 
 ## 2026-08-03 — React Router v8 + React 19 (PR #28)
 
