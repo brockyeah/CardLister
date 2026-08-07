@@ -10,7 +10,73 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `fix/post-merge-followups`
+## [Unreleased] — branch `claude/happy-ramanujan-z9nq0x` (integrates PRs #29–#32)
+
+### Added
+- Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores a mis-clicked
+  sold card to Active and clears the sale price/date (409 if the card isn't
+  sold), with an "Unmark Sold" button on sold rows behind a confirm dialog.
+  Previously mark-sold was irreversible in the UI — fixing a misclick needed a
+  manual PATCH, and the phantom sale polluted revenue analytics until then.
+  (PR #29)
+- Row-level "Copy Text" button on non-sold inventory rows: copies the eBay
+  listing text to the clipboard quietly (transient "Copied ✓" on the button,
+  prompt fallback when the clipboard API is blocked). Previously the only way
+  to get listing text was the Open eBay flow, which also opens a tab and fires
+  an alert. (PR #29)
+- Parallel, Serial #, and Refractor columns in the CSV export and the Google
+  Sheets mirror (appended after 1st Bowman so existing sheet columns keep
+  their positions). A Gold /50 refractor is no longer indistinguishable from
+  the base card in the export; the CSV importer already read these columns by
+  header name, so the export ↔ import round-trip now preserves all three.
+  (PR #31)
+- Storage usage tiles on the Analytics manage-data panel: database file size,
+  photo count, and photo bytes on the server (`GET /api/analytics/storage`),
+  refreshed after a CSV import or orphan cleanup. Railway volume pressure was
+  previously invisible until a deploy failed or the volume filled — now it sits
+  next to the cleanup tools that relieve it. (PR #32)
+
+### Security
+- Scan uploads are validated by content, not filename: the first bytes must
+  carry a JPEG/PNG/WebP/PDF magic signature or the request is rejected with
+  415 before anything is written, and the stored suffix now comes from the
+  sniffed content instead of the client-supplied extension. Previously only
+  the extension was checked (with unknown extensions coerced to `.jpg`), so
+  arbitrary non-image content — e.g. an HTML payload named `photo.jpg` —
+  was stored and re-served from `/uploads` in the app's origin. (PR #30)
+- Router-wide auth sweep test: a parametrized test asserts every `/api`
+  route except login and the health check returns 401 without a token, so a
+  future router (or route) that forgets `Depends(require_auth)` fails CI
+  automatically. Collected from the OpenAPI schema with a self-check that
+  the sweep is non-empty. (PR #30)
+- CSV export escapes formula-leading cells (`=`, `+`, `-`, `@` get a leading
+  apostrophe) so a crafted value — e.g. a Notes cell imported from a
+  third-party CSV — can't execute as a formula when the export is opened in
+  Excel or Google Sheets. The importer strips the escape on the way back in,
+  so exported values round-trip unchanged. The Sheets mirror needs no change
+  (rows are written with `valueInputOption=RAW`). (PR #31)
+
+### Fixed
+- Scanner pricing lookups can no longer land on the wrong card: switching
+  batch-review items (or saving/discarding) while a comps lookup was in flight
+  let the stale response overwrite the newer card's comps, pricing note, and
+  suggested price. Lookups now carry a monotonic id and only the latest may
+  write state; save/discard/new-scan invalidate anything in flight. (PR #32)
+
+## 2026-08-03 — React Router v8 + React 19 (PR #28)
+
+### Changed
+- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
+  Clears all three Dependabot advisories against the v6 line (open-redirect
+  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
+  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
+  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
+  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
+  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
+  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
+  live click-through of login → scan → inventory → analytics → logout.
+
+## 2026-08-02 — Post-#24 follow-ups (PR #25)
 
 ### Fixed
 - CSV import enforces sold-row consistency: a SOLD row without a Sale Price
@@ -34,19 +100,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
 - The CI dependency-audit job no longer exits non-zero when advisories are
   found — it emits a warning annotation and a step summary instead. The job
   never blocked merges, so its red X only taught people to ignore red.
-
-## [Unreleased] — branch `chore/react-router-v7`
-
-### Changed
-- React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
-  Clears all three Dependabot advisories against the v6 line (open-redirect
-  XSS, backslash-path bypass CVE-2025-68470, SSR deserializeErrors injection —
-  none exploitable here, but unfixable on v6) and skips the 7.12–8.2 range,
-  which carries an unpatched RSC-CSRF advisory. `npm audit` is now clean.
-  Package moves from `react-router-dom` to `react-router` per the v7+ layout;
-  no API changes were needed (BrowserRouter/Routes/Route/Navigate/NavLink/
-  useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
-  live click-through of login → scan → inventory → analytics → logout.
 
 ## 2026-08-02 — One-click integration of PRs #18–#23 (PR #24)
 

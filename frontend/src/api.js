@@ -67,6 +67,8 @@ export const getUploadOrphans = () =>
   api.get('/api/analytics/uploads/orphans').then((r) => r.data)
 export const cleanupUploadOrphans = () =>
   api.post('/api/analytics/uploads/cleanup').then((r) => r.data)
+export const getStorageUsage = () =>
+  api.get('/api/analytics/storage').then((r) => r.data)
 
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)
@@ -123,6 +125,9 @@ export const deleteCard = (id) =>
 
 export const markSold = (id, payload) =>
   api.post(`/api/cards/${id}/mark-sold`, payload).then((r) => r.data)
+
+export const unmarkSold = (id) =>
+  api.post(`/api/cards/${id}/unmark-sold`).then((r) => r.data)
 
 export const attachEbayListing = (id, payload) =>
   api.post(`/api/cards/${id}/ebay-id`, payload).then((r) => r.data)

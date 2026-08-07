@@ -17,30 +17,35 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
-- [ ] Row-level "Copy listing text" button: today clipboard text only comes via the
-      Open eBay flow, which also opens a tab and fires an alert; add a quiet
-      copy-only action reusing `getEbayListingText` (quick win; implement directly;
-      inline)
-- [ ] Unmark-sold (undo): mark-sold is irreversible in the UI — a misclick needs a
-      manual PATCH; add an action that restores status and clears sold_price/sold_at
-      (quick win; implement directly; inline)
+- [ ] Attribute-aware comps: `PricingRequest` carries only player/year/brand/set/
+      card # — parallel color, serial number, refractor, and auto never reach the
+      pricing chain, so a Gold /50 comps like the base card and the suggested
+      price is systematically wrong for exactly the cards worth the most
+      (medium; implement directly; inline — touches schemas, pricing router,
+      pricing service query builders, CompsModal/Scanner callers)
+- [ ] Quantity-aware inventory stats: the StatTiles count rows, not copies —
+      Total Cards ignores quantity and Est. Active Value is `listed_price × 1`
+      even for qty-3 rows, understating the collection (quick win; implement
+      directly; inline — pure frontend math in Inventory.jsx)
+- [ ] Days-to-sell analytics: avg/median `created_at → sold_at` interval plus a
+      distribution view on Analytics, so pricing strategy gets feedback ("Bowman
+      autos sell in 4 days, base sits for 60") (medium; implement directly;
+      inline; dataviz skill first)
+- [ ] CSV import duplicate handling: import blindly creates rows even when an
+      identical non-sold card exists — reuse the check-duplicate identity rules
+      per row to warn (or opt-in merge quantities), preventing double-ups on
+      re-import of an edited export (medium; implement directly; inline —
+      builds on the import parser + `check_duplicate` matcher)
 - [ ] Re-scan in a higher mode without re-upload: extraction misses currently mean
       re-staging the photo; the file and Scan row are already on the server, so add
       `POST /api/scan/{scan_id}/rescan` with a preset param + a "Re-scan in
       Accuracy" button on the review form (medium; implement directly; inline)
-- [ ] Storage usage panel on Analytics manage-data: DB file size + uploads
-      count/size so Railway volume pressure is visible; pairs with orphan cleanup
-      (quick win; implement directly; inline; dataviz skill first for stat tiles)
 - [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
       those individually"); add a per-item back slot before scanning starts
       (medium; implement directly; inline)
 - [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
       sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
       (quick win; implement directly; inline)
-- [ ] Parallel / Serial # / Refractor columns in CSV export + Sheets mirror: the
-      row layout omits all three, so a Gold /50 is indistinguishable from base in
-      the export — the 2026-07-30 importer already reads these columns when present
-      (quick win; implement directly; inline — touches `google_sheets.py` row layout)
 - [ ] CSV import dry-run preview: run the 2026-07-30 import parser without
       committing and show would-be created/skipped counts before the real import
       (quick win; implement directly; inline)
@@ -74,14 +79,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       already a dependency) and serve that in `CardTable`, keeping the original
       for the lightbox (medium; implement directly; inline — touches CardTable,
       wait for the open PR queue to land)
-- [ ] Magic-byte validation of scan uploads: today only the file extension is
-      checked; verify image content with Pillow (and `%PDF-` header for PDFs)
-      before storing, so mislabeled non-image content is never stored and
-      re-served from `/uploads` (quick win; implement directly; inline)
-- [ ] Router-wide auth sweep test: parametrized test walking `app.routes` and
-      asserting every `/api` route except login and health returns 401 without
-      a token — guards a future router forgetting `Depends(require_auth)`
-      (quick win; implement directly; inline; test-only)
 - [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
@@ -108,14 +105,86 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       sold date/price columns for tax reporting — sold data and the CSV writer
       both exist, but sold rows only export mixed into the full inventory dump
       (quick win; implement directly; inline)
+- [ ] Card permalink deep link: `/inventory?card=123` scrolls to and highlights
+      the row (clearing the search/filters if they hide it) — the QR-labels
+      item below explicitly needs a permalink first, and shared links/bookmarks
+      get it for free (quick win; implement directly; inline — touches
+      Inventory.jsx only, land after the open PR queue merges)
+- [ ] Player-name autocomplete in CardForm: a `<datalist>` fed from existing
+      inventory player names, so repeat players are picked instead of retyped —
+      free-text typos ("Jackson Holiday") fragment search and the planned
+      per-player analytics (quick win; implement directly; inline — CardForm.jsx
+      plus a tiny names endpoint or reuse of the already-loaded card list)
+- [ ] Backup-staleness nudge on Analytics manage-data: remember the last
+      "Download database backup" click (localStorage) and show a banner when
+      it's older than 14 days — the backup story is entirely manual until the
+      plan-doc-gated nightly delivery ships, and nothing reminds anyone today
+      (quick win; implement directly; inline — Analytics.jsx only)
+- [ ] Call-up poller stale push alert: `/api/health` already computes poller
+      staleness (3 missed intervals) but only reports it to whoever looks; fire
+      the existing ntfy push (billing_alerts) once per stale episode from the
+      poll-cycle watchdog so a silently dead poller gets noticed — prospects
+      can get called up during the outage (medium; implement directly — reuses
+      `_poller_state` + ntfy, no schema; inline)
+- [ ] eBay Seller Hub bulk-listing CSV export: export active cards in eBay's
+      bulk-upload template (title from `build_title`, price, condition,
+      category) so a batch of drafts can be created in one Seller Hub upload —
+      a no-OAuth stepping stone to the Sell API item in Later (medium;
+      implement directly; inline — new endpoint beside `export.csv`)
+- [ ] Inventory pagination / windowed rendering: `GET /api/cards` returns every
+      row and CardTable renders them all — payload and DOM both grow unbounded
+      with the collection; add `limit`/`offset` (or cursor) + a "load more" or
+      windowing on the table (medium; implement directly; inline — touches
+      Inventory.jsx, land after PR #29 merges)
+- [ ] Scanner drag-and-drop + paste-from-clipboard upload: staging photos is
+      file-picker/camera only; accept dropped files on the stage area and
+      Ctrl+V image paste for desktop workflows (quick win; implement directly;
+      inline — Scanner.jsx only, no open-PR overlap)
+- [ ] Inventory filter chips: status / RC / Auto / 1st Bowman / Refractor
+      toggle filters next to the existing search box — search can't express
+      "all my active autos" today (quick win; implement directly; inline —
+      touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
+
+- [ ] Immutable cache headers on `/uploads`: stored names are uuid-hex so the
+      content behind a URL never changes, but `serve_upload` sends no
+      Cache-Control — every inventory render refetches full-size photos; add
+      `public, max-age=31536000, immutable` (quick win; implement directly;
+      inline — pairs with the server-side thumbnails item)
+- [ ] QR labels for physical storage: print a sheet of QR codes (selected rows
+      or a filter) that deep-link back to the card in Inventory, so a physical
+      box/toploader can be matched to its row; needs a card permalink/filter
+      param first (medium; implement directly; inline)
+- [ ] Sheets sync failure visibility: `_sync_card_to_sheets` runs as a
+      fire-and-forget background task, so a dead Google credential or quota
+      error means the mirror silently drifts forever; add bounded retries plus
+      an in-memory "last sync error" readout on manage-data — push-side
+      complement to the on-demand drift detector above (medium; implement
+      directly — no schema, in-memory state only; inline)
+- [ ] "See sold comps on eBay" deep link: build the eBay sold/completed search
+      URL from player/year/brand/set/card # next to the suggested price in the
+      Scanner pricing panel and the Comps modal — a zero-API sanity check on
+      the five-source pricing chain, especially when it quietly falls back to
+      mock (quick win; implement directly; inline — touches Scanner.jsx +
+      Inventory comps modal, land after PR #29 merges)
+- [ ] Scan preset refresh to the current model lineup: PRESETS pin Sonnet 4.6 /
+      Opus 4.7 and the Scanner mode cards hardcode the same names — evaluate
+      newer models (e.g. Haiku 4.5 for Cost, current Sonnet/Opus for
+      Balanced/Accuracy) on a sample of corrected scans before switching, and
+      update analytics MODEL_PRICES + Scanner labels in the same change
+      (medium; implement directly, gated on a small accuracy eval; inline —
+      touches claude_vision.py, analytics.py, Scanner.jsx)
 
 ## Later
 
-- [ ] Scanner batch-review race: `fetchPricing` in Scanner.jsx isn't cancelled when
-      the user switches queue items quickly, so a slow response for item A can land
-      after item B is opened and silently overwrite B's comps/suggested price with
-      A's — needs a request-id or AbortController guard (quick win–medium; implement
-      directly; inline)
+- [ ] Offline scan queue (PWA): stage photos while offline (IndexedDB) and
+      auto-upload when connectivity returns — card shows and garage sales have
+      bad signal, and the PWA manifest already exists (long-term; **plan doc
+      first** — service worker, upload queue, and Scanner UI; inline)
+- [ ] Inventory mutation audit trail: multi-user households share one
+      inventory, but deletes / mark-solds / imports are anonymous today; add a
+      small `audit_events` table (who, what, when) with a recent-activity
+      readout on manage-data (medium; **plan doc first** — new table/schema;
+      inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
       auth; inline)
@@ -141,13 +210,35 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
 - [ ] Sold-comp price history per card (store lookups over time, sparkline in inventory)
 - [ ] Production/multi-tenant track — see `docs/notes/2026-07-25-production-monetization.md`
+- [ ] Auth on `/uploads` photo serving: `/uploads/{filename}` is deliberately
+      unauthenticated and relies on unguessable uuid names (capability URLs) —
+      a leaked URL (browser history, pasted link) exposes the photo forever,
+      and `<img>` tags can't carry the Bearer token; needs short-lived signed
+      URLs or a cookie-scheme decision (medium; **plan doc first** — touches
+      auth; inline)
+- [ ] Restore-from-snapshot: backup download exists but there is no restore
+      path — recovering a Railway volume means manual SQLite surgery; add an
+      upload-snapshot flow with integrity check (`PRAGMA integrity_check` +
+      expected schema) and a pre-restore safety copy (medium; **plan doc
+      first** — destructive, replaces the live DB; inline)
 - [ ] Soft-delete with undo: Delete is permanent behind a single confirm; add
       `deleted_at` + undo toast + periodic purge (medium; **plan doc first** —
       schema change; inline)
+- [ ] Unmark-sold restores CSV-imported "unlisted" cards to "active" (PR #29
+      auto-review note): a correct restore needs a `previous_status` column set
+      by mark-sold — the no-schema heuristic (unlisted iff no listing attached)
+      would wrongly demote saved-but-unattached active cards; fold into the
+      same schema pass as soft-delete (quick win once the column exists;
+      **plan doc first** — schema change; inline)
 - [ ] Nightly automated backup delivery: email the SQLite snapshot (or push it to
       Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
       (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
       backup service; inline)
+- [ ] Backup restore endpoint: upload a previously downloaded SQLite snapshot
+      to replace the live DB — completes the backup story (download exists,
+      restore is manual volume surgery today) (medium; **plan doc first** —
+      data-destructive, needs integrity check + pre-restore safety snapshot;
+      inline)
 - [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
       planned P&L dashboard can show true realized profit instead of revenue only
       (medium; **plan doc first** — schema change; inline)
@@ -163,13 +254,40 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       inventory round-trip against a real dev server; unit suites can't catch
       broken page wiring like a bad api.js import (medium; implement directly;
       inline)
-- [ ] Escape leading `=` `+` `-` `@` in CSV export cells (prefix `'`): formula
-      injection hardening note from the 2026-07-30 security review — import now
-      ingests third-party files, so a crafted Notes cell round-trips into an
-      Excel-interpretable formula on export; Sheets mirror unaffected (RAW input)
-      (quick win; implement directly; inline)
+- [ ] Tailwind CSS 3.4 → 4.x migration: surfaced by the 2026-08-03 Monday
+      dependency pass (only major-version drift left; npm/pip audits clean) —
+      v4 changes the config/PostCSS pipeline, so defer until a quiet window
+      (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-06 — Storage usage tiles on Analytics manage-data: DB file size +
+      photo count/bytes via `GET /api/analytics/storage`, refreshed after
+      import/cleanup
+- [x] 2026-08-06 — Scanner pricing race fix: comps lookups carry a monotonic id
+      so a stale response can't overwrite the currently reviewed card's
+      comps/suggested price (was listed under Later as "Scanner batch-review
+      race")
+
+- [x] 2026-08-05 — Parallel / Serial # / Refractor columns in CSV export +
+      Sheets mirror (appended after 1st Bowman; importer already read them,
+      so the round-trip now preserves all three)
+- [x] 2026-08-05 — CSV formula-injection escaping on export (leading `'` for
+      `=` `+` `-` `@` cells, stripped back out on import; Sheets mirror
+      unaffected — RAW input)
+
+- [x] 2026-08-04 — Magic-byte validation of scan uploads (415 on unrecognized
+      content before write; stored suffix derived from sniffed content, not the
+      client filename)
+- [x] 2026-08-04 — Router-wide auth sweep test: every `/api` route except
+      login/health must 401 without a token (walks the OpenAPI schema, with a
+      self-check that the sweep is non-empty)
+
+- [x] 2026-08-03 — Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores
+      status to active and clears sold_price/sold_at, with confirm-gated
+      "Unmark Sold" button on sold rows
+- [x] 2026-08-03 — Row-level "Copy Text" button: quiet clipboard-only listing
+      text on non-sold rows (transient Copied ✓, prompt fallback)
 
 - [x] 2026-08-01 — 25 MB streamed per-file cap on `/api/scan` uploads (413 over
       limit, no partial file left behind; closes the unbounded-upload hardening

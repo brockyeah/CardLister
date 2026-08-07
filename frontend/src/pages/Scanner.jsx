@@ -120,7 +120,13 @@ export default function Scanner() {
     })))
   }
 
+  // Monotonic id so only the latest pricing lookup may write state: switching
+  // review items (or discarding) while a lookup is in flight must not let the
+  // stale response overwrite the newer card's comps/suggested price.
+  const pricingSeq = useRef(0)
+
   const fetchPricing = async (next) => {
+    const seq = ++pricingSeq.current
     setPricingLoading(true)
     try {
       const pricing = await getPricing({
@@ -130,6 +136,7 @@ export default function Scanner() {
         set_name: next.set_name,
         card_number: next.card_number,
       })
+      if (seq !== pricingSeq.current) return
       setComps(pricing.comps || [])
       setPricingNote(pricing.note || '')
       setPricingSource(pricing.source || '')
@@ -137,15 +144,17 @@ export default function Scanner() {
         setForm((prev) => ({ ...prev, suggested_price: pricing.suggested_price }))
       }
     } catch {
+      if (seq !== pricingSeq.current) return
       setPricingNote('Pricing lookup failed — set price manually.')
     } finally {
-      setPricingLoading(false)
+      if (seq === pricingSeq.current) setPricingLoading(false)
     }
   }
 
   // --- Actual scan — runs only when user clicks the Scan button ---
   const runScan = async () => {
     if (!stagedFile) return
+    pricingSeq.current += 1 // a lookup for the previous card must not land here
     setError('')
     setScanning(true)
     setComps([])
@@ -211,6 +220,7 @@ export default function Scanner() {
 
   // Reset the form + advance the batch queue, shared by every save outcome.
   const resetAfterSave = () => {
+    pricingSeq.current += 1 // drop any in-flight lookup for the card just saved
     setForm(EMPTY_FORM)
     setImagePath('')
     setComps([])
@@ -218,6 +228,7 @@ export default function Scanner() {
     setScanId(null)
     setPricingNote('')
     setPricingSource('')
+    setPricingLoading(false)
 
     if (activeKey) {
       // Compute from the render snapshot — reading state back out of a
@@ -540,12 +551,15 @@ export default function Scanner() {
               )}
               <button
                 onClick={() => {
+                  pricingSeq.current += 1 // drop any in-flight pricing lookup
                   setForm(EMPTY_FORM)
                   setImagePath('')
                   setComps([])
                   setScanId(null)
                   setActiveKey(null)
+                  setPricingNote('')
                   setPricingSource('')
+                  setPricingLoading(false)
                 }}
                 className="btn-secondary w-full"
               >
