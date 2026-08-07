@@ -105,6 +105,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       sold date/price columns for tax reporting — sold data and the CSV writer
       both exist, but sold rows only export mixed into the full inventory dump
       (quick win; implement directly; inline)
+- [ ] Card permalink deep link: `/inventory?card=123` scrolls to and highlights
+      the row (clearing the search/filters if they hide it) — the QR-labels
+      item below explicitly needs a permalink first, and shared links/bookmarks
+      get it for free (quick win; implement directly; inline — touches
+      Inventory.jsx only, land after the open PR queue merges)
+- [ ] Player-name autocomplete in CardForm: a `<datalist>` fed from existing
+      inventory player names, so repeat players are picked instead of retyped —
+      free-text typos ("Jackson Holiday") fragment search and the planned
+      per-player analytics (quick win; implement directly; inline — CardForm.jsx
+      plus a tiny names endpoint or reuse of the already-loaded card list)
+- [ ] Backup-staleness nudge on Analytics manage-data: remember the last
+      "Download database backup" click (localStorage) and show a banner when
+      it's older than 14 days — the backup story is entirely manual until the
+      plan-doc-gated nightly delivery ships, and nothing reminds anyone today
+      (quick win; implement directly; inline — Analytics.jsx only)
+- [ ] Call-up poller stale push alert: `/api/health` already computes poller
+      staleness (3 missed intervals) but only reports it to whoever looks; fire
+      the existing ntfy push (billing_alerts) once per stale episode from the
+      poll-cycle watchdog so a silently dead poller gets noticed — prospects
+      can get called up during the outage (medium; implement directly — reuses
+      `_poller_state` + ntfy, no schema; inline)
 - [ ] eBay Seller Hub bulk-listing CSV export: export active cards in eBay's
       bulk-upload template (title from `build_title`, price, condition,
       category) so a batch of drafts can be created in one Seller Hub upload —
