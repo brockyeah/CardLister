@@ -48,6 +48,19 @@ only in `[Unreleased]` on a branch is not in prod yet.
   useNavigate/Link all unchanged). Verified: 24 frontend tests, build, and a
   live click-through of login → scan → inventory → analytics → logout.
 
+## [Unreleased] — branch `feat/ebay-portal-prereqs`
+
+### Added
+- Public eBay compliance router (`/api/ebay-compliance/*`, no auth — eBay's
+  servers call these): marketplace account-deletion notification endpoint
+  (challenge handshake per eBay's sha256(challengeCode + verificationToken +
+  endpointUrl) formula, fast-ack for deletion notices, config via
+  `EBAY_VERIFICATION_TOKEN` + `EBAY_DELETION_ENDPOINT_URL`), plus OAuth
+  accepted/declined landing pages and a privacy-policy page so the RuName
+  form can be filled once. Unlocks the production keyset without claiming
+  the data-storage exemption, so nothing in the developer portal has to
+  change when seller-OAuth draft listings land.
+
 ## 2026-08-02 — One-click integration of PRs #18–#23 (PR #24)
 
 ### Added

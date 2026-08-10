@@ -14,7 +14,7 @@ from sqlalchemy import text
 from .database import engine, init_db, uploads_dir
 from .auth import DEFAULT_USERNAME, authenticate, create_token, validate_secrets
 from .schemas import LoginRequest, TokenResponse
-from .routers import cards, scan, pricing, ebay, sheets, analytics, news
+from .routers import cards, scan, pricing, ebay, ebay_compliance, sheets, analytics, news
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,8 @@ app.include_router(cards.router, prefix="/api/cards", tags=["cards"])
 app.include_router(scan.router, prefix="/api/scan", tags=["scan"])
 app.include_router(pricing.router, prefix="/api/pricing", tags=["pricing"])
 app.include_router(ebay.router, prefix="/api/ebay", tags=["ebay"])
+# Public: eBay's servers call these (deletion notices, OAuth redirects) — no auth.
+app.include_router(ebay_compliance.router, prefix="/api/ebay-compliance", tags=["ebay-compliance"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(news.router, prefix="/api/news", tags=["news"])
