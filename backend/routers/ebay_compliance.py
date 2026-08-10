@@ -76,7 +76,12 @@ async def account_deletion_notice(request: Request):
         user_id = (payload.get("notification", {}).get("data", {}) or {}).get("userId")
     except Exception:
         user_id = None
-    log.info("eBay account-deletion notice received (userId=%s) — no eBay user data stored", user_id)
+    # repr() + cap: the body is unauthenticated, so never let a crafted
+    # userId inject newlines (fake log lines) or bloat into the audit log.
+    log.info(
+        "eBay account-deletion notice received (userId=%s) — no eBay user data stored",
+        repr(str(user_id)[:64]) if user_id is not None else None,
+    )
     return {"ack": True}
 
 
