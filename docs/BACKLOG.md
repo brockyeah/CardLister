@@ -24,7 +24,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       auditable (medium; implement directly — pricing chain +
       title-token filter shared across ebay_api and scrapers; needs a
       title-marker test table)
-- [ ] Scan-accuracy report on Analytics: Corrections table already stores
+- [ ] Interactive pricing agent on the post-scan page: instead of a single
+      suggested price, collect the full comp set (eBay API + scrapers, raw
+      titles/prices/dates) into context and open a chat box — "my card is a
+      PSA 10, what should I list at?", "now price it without parallels",
+      "why is this one $40?". Agent answers from the gathered comps, can
+      re-query sources with refined terms (graded, base-only), and can
+      write its conclusion back into the listed-price field on request.
+      Cost-aware: comps gathered once per card, cheap model for chat
+      turns, usage metered into the existing UsageEvent tracking (large;
+      design first — new agent loop endpoint + chat UI on review form;
+      pairs with the comp variant-filter item above)
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
 - [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler pattern; Phase 2 stub in `backend/routers/ebay.py`)
