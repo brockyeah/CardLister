@@ -65,6 +65,31 @@ def list_cards(
     return q.order_by(Card.created_at.desc()).all()
 
 
+# Spreadsheet apps execute cells starting with these as formulas, so a crafted
+# Notes value like "=HYPERLINK(...)" in an exported CSV could run in Excel.
+# The Sheets mirror is unaffected (rows are written with valueInputOption=RAW).
+_FORMULA_CHARS = ("=", "+", "-", "@")
+
+
+def _needs_formula_escape(value: str) -> bool:
+    # Apostrophe-lead values like "'-1/1 SP" must be escaped too — otherwise
+    # the import-side unescape couldn't tell a user's literal apostrophe from
+    # one the exporter added, and would strip it (round-trip corruption).
+    return value.lstrip("'").startswith(_FORMULA_CHARS)
+
+
+def _escape_formula_cell(value):
+    if isinstance(value, str) and _needs_formula_escape(value):
+        return "'" + value
+    return value
+
+
+def _unescape_formula_cell(value: str) -> str:
+    if value.startswith("'") and _needs_formula_escape(value[1:]):
+        return value[1:]
+    return value
+
+
 # Must be declared before GET /{card_id} — "export.csv" would otherwise 422
 # against the int path param.
 @router.get("/export.csv")
@@ -74,7 +99,7 @@ def export_csv(db: Session = Depends(get_db)):
     writer = csv.writer(buf)
     writer.writerow(SHEET_HEADERS)
     for card in db.query(Card).order_by(Card.created_at.asc()).all():
-        writer.writerow(_card_to_row(card))
+        writer.writerow([_escape_formula_cell(cell) for cell in _card_to_row(card)])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -169,7 +194,10 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
 
         def val(name: str) -> str:
             i = idx.get(name)
-            return row[i].strip() if i is not None and i < len(row) else ""
+            if i is None or i >= len(row):
+                return ""
+            # Undo the export's formula-injection escape so values round-trip.
+            return _unescape_formula_cell(row[i].strip())
 
         player = val("player")
         if not player:
@@ -341,6 +369,30 @@ def mark_sold(card_id: int, payload: MarkSoldRequest, background_tasks: Backgrou
     card.status = "sold"
     card.sold_price = payload.sold_price
     card.sold_at = payload.sold_at or datetime.utcnow()
+    db.commit()
+    db.refresh(card)
+    background_tasks.add_task(_sync_card_to_sheets, card.id)
+    return card
+
+
+@router.post("/{card_id}/unmark-sold", response_model=CardOut)
+def unmark_sold(card_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Undo a mis-clicked mark-sold: restore the card and clear the sale.
+
+    Restores to "active" — create_card forces every saved card to active, so
+    that is the only state a card can have been in before mark-sold (imported
+    "unlisted" rows lose that distinction, an accepted trade-off for not
+    storing a previous-status column). The sale fields are cleared so revenue
+    analytics and the CSV export stop counting the phantom sale.
+    """
+    card = db.query(Card).filter(Card.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    if card.status != "sold":
+        raise HTTPException(status_code=409, detail="Card is not marked sold")
+    card.status = "active"
+    card.sold_price = None
+    card.sold_at = None
     db.commit()
     db.refresh(card)
     background_tasks.add_task(_sync_card_to_sheets, card.id)

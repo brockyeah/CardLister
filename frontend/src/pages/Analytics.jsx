@@ -2,10 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import {
   getAnalytics, reassignUser, deleteUserData, getConfiguredUsers,
   downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
+  getStorageUsage,
 } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
+const fmtBytes = (n) => {
+  if (n == null) return '—'
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB']
+  let v = n
+  let u = -1
+  do { v /= 1024; u += 1 } while (v >= 1024 && u < units.length - 1)
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[u]}`
+}
 
 const RANGES = [
   { key: 'today', label: 'Today' },
@@ -193,9 +203,13 @@ function ManageData({ users, onDone }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [targets, setTargets] = useState([])
+  const [storage, setStorage] = useState(null)
+
+  const loadStorage = () => getStorageUsage().then(setStorage).catch(() => setStorage(null))
 
   useEffect(() => {
     getConfiguredUsers().then((d) => setTargets(d.users || [])).catch(() => setTargets([]))
+    loadStorage()
   }, [])
 
   const merge = async () => {
@@ -252,6 +266,7 @@ function ManageData({ users, onDone }) {
         parts.push(r.warnings.slice(0, 3).join('; ') + (r.warnings.length > 3 ? '…' : ''))
       }
       setMsg(parts.join(' '))
+      loadStorage()
     } catch (err) {
       const detail = err.response?.data?.detail
       setMsg(typeof detail === 'string' ? detail : 'Import failed.')
@@ -284,6 +299,7 @@ function ManageData({ users, onDone }) {
       if (!ok) return
       const r = await cleanupUploadOrphans()
       setMsg(`Deleted ${r.deleted} photo${r.deleted === 1 ? '' : 's'}, freed ${(r.freed_bytes / (1024 * 1024)).toFixed(1)} MB.`)
+      loadStorage()
     } catch (e) {
       setMsg(e.response?.data?.detail || 'Cleanup failed.')
     } finally { setBusy(false) }
@@ -296,6 +312,13 @@ function ManageData({ users, onDone }) {
         Merge a stale/renamed username into a real user (keeps its cost history), or delete it.
         Download a database backup regularly — inventory, scans, and usage history all live in it.
       </p>
+      {storage && (
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <Tile label="Database size" value={fmtBytes(storage.db_bytes)} />
+          <Tile label="Photos on server" value={fmt(storage.uploads_count)} />
+          <Tile label="Photo storage" value={fmtBytes(storage.uploads_bytes)} />
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap gap-3">
         <button onClick={backup} disabled={busy} className="btn-secondary">
           Download database backup

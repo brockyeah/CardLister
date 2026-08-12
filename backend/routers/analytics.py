@@ -278,6 +278,26 @@ def cleanup_uploads(db: Session = Depends(get_db)):
     return {"deleted": deleted, "freed_bytes": freed}
 
 
+@router.get("/storage")
+def storage_usage():
+    """DB file + uploads footprint, so Railway volume pressure is visible
+    next to the cleanup tools that relieve it."""
+    db_bytes = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    uploads_count = 0
+    uploads_bytes = 0
+    root = uploads_dir()
+    if root.is_dir():
+        for path in root.iterdir():
+            if path.is_file():
+                uploads_count += 1
+                uploads_bytes += path.stat().st_size
+    return {
+        "db_bytes": db_bytes,
+        "uploads_count": uploads_count,
+        "uploads_bytes": uploads_bytes,
+    }
+
+
 @router.post("/alerts/test")
 def test_alerts():
     """Fire the credits-exhausted alert channels (email + ntfy push) right now,
