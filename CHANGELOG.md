@@ -45,10 +45,11 @@ only in `[Unreleased]` on a branch is not in prod yet.
   arbitrary non-image content — e.g. an HTML payload named `photo.jpg` —
   was stored and re-served from `/uploads` in the app's origin. (PR #30)
 - Router-wide auth sweep test: a parametrized test asserts every `/api`
-  route except login and the health check returns 401 without a token, so a
-  future router (or route) that forgets `Depends(require_auth)` fails CI
-  automatically. Collected from the OpenAPI schema with a self-check that
-  the sweep is non-empty. (PR #30)
+  route returns 401 without a token — except login, the health check, and
+  the deliberately public `/api/ebay-compliance/*` routes (eBay's servers
+  and browser-facing landing pages) — so a future router (or route) that
+  forgets `Depends(require_auth)` fails CI automatically. Collected from
+  the OpenAPI schema with a self-check that the sweep is non-empty. (PR #30)
 - CSV export escapes formula-leading cells (`=`, `+`, `-`, `@` get a leading
   apostrophe) so a crafted value — e.g. a Notes cell imported from a
   third-party CSV — can't execute as a formula when the export is opened in
