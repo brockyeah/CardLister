@@ -5,6 +5,36 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Batch scan front/back auto-pairing: uploading 20 images of 10 cards
+      currently treats each image as its own card; match front+back pairs
+      before extraction. Candidate signals: upload order/adjacency (phone
+      camera rolls alternate front,back), filename timestamps, then a cheap
+      vision pass ("is this a card back?") to pair each back with the
+      preceding front; unpaired images fall back to single-sided scan. UI:
+      pairing review step in the batch queue with drag-to-repair before
+      Claude extraction runs (large; design first — touches Scanner queue,
+      /api/scan, and scan cost per card)
+- [ ] Comps accuracy — parallel/variant contamination: suggested price
+      factors in parallel + serialized listings when pricing a base card
+      (and vice versa), skewing high. Filter comp results against the
+      card's own parallel_color/serial/refractor flags: exclude comps whose
+      titles carry non-matching variant markers (Gold, /99, Refractor,
+      Auto, etc.), require matching markers when the card HAS them, and
+      surface which comps were excluded in the modal so mispricing is
+      auditable (medium; implement directly — pricing chain +
+      title-token filter shared across ebay_api and scrapers; needs a
+      title-marker test table)
+- [ ] Interactive pricing agent on the post-scan page: instead of a single
+      suggested price, collect the full comp set (eBay API + scrapers, raw
+      titles/prices/dates) into context and open a chat box — "my card is a
+      PSA 10, what should I list at?", "now price it without parallels",
+      "why is this one $40?". Agent answers from the gathered comps, can
+      re-query sources with refined terms (graded, base-only), and can
+      write its conclusion back into the listed-price field on request.
+      Cost-aware: comps gathered once per card, cheap model for chat
+      turns, usage metered into the existing UsageEvent tracking (large;
+      design first — new agent loop endpoint + chat UI on review form;
+      pairs with the comp variant-filter item above)
 - [ ] Scan-accuracy report on Analytics: Corrections table already stores
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
