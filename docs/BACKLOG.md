@@ -35,6 +35,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       turns, usage metered into the existing UsageEvent tracking (large;
       design first — new agent loop endpoint + chat UI on review form;
       pairs with the comp variant-filter item above)
+- [ ] Scan-accuracy report on Analytics: Corrections table already stores
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
 - [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler pattern; Phase 2 stub in `backend/routers/ebay.py`)
