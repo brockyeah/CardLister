@@ -64,6 +64,26 @@ only in `[Unreleased]` on a branch is not in prod yet.
   suggested price. Lookups now carry a monotonic id and only the latest may
   write state; save/discard/new-scan invalidate anything in flight. (PR #32)
 
+## [Unreleased] — branch `docs/refresh-readme`
+
+### Added
+- `CLAUDE.md`: architecture guide for AI coding agents — the scan billing ladder,
+  pricing chain (and why the primary source returns active rather than sold
+  listings), the corrections learning loop, and an "invariants that break
+  silently" list covering the append-only `SHEET_HEADERS` contract, the
+  `" (subscription)"` cost suffix, `_COLUMN_MIGRATIONS`, route ordering, the
+  three-file eBay title change, and the single-worker/`$PORT` deploy constraints.
+
+### Changed
+- README refreshed against the code: React 19 + React Router 8 (it still said
+  React 18), venv at the repo root rather than `backend/`, a Tests section
+  (there was none), the `_COLUMN_MIGRATIONS` schema workflow in place of the
+  "delete the DB or hand-write ALTER TABLE" advice, the four env vars missing
+  from the table (`EBAY_VERIFICATION_TOKEN`, `EBAY_DELETION_ENDPOINT_URL`,
+  `SMTP_HOST`/`SMTP_PORT`, `DISABLE_CALLUP_POLLER`), and a project layout that
+  had drifted by five routers, seven services, and the whole `lib/` and `docs/`
+  trees.
+
 ## 2026-08-10 — eBay portal prerequisites (PR #34)
 
 ### Added

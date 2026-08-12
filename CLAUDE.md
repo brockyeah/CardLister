@@ -1,0 +1,133 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+An internal tool for listing baseball cards on eBay: photo → Claude vision extracts card details → comp lookup suggests a price → review form → save copies listing text to the clipboard and mirrors the card to a Google Sheet. Two users (the owner and one other), single Railway container, SQLite.
+
+## Commands
+
+The venv is at the **repo root** (`.venv`). Bare `python` may not be on PATH — use `.venv/bin/python` or `python3`.
+
+```bash
+# Backend dev server — MUST run from repo root so the `backend.` import path resolves
+.venv/bin/python -m uvicorn backend.main:app --reload --port 8000
+# DISABLE_CALLUP_POLLER=1 silences the 15-min call-up poller locally
+
+# Frontend dev server (proxies /api and /uploads to :8000)
+cd frontend && npm run dev          # :5173
+
+# Backend tests — all / one file / one test / one parametrized case
+.venv/bin/python -m pytest backend/tests -q
+.venv/bin/python -m pytest backend/tests/test_ebay_title_parity.py -q
+.venv/bin/python -m pytest backend/tests/test_scan_endpoint.py::test_scan_accepts_optional_back_image -q
+.venv/bin/python -m pytest "backend/tests/test_ebay_title_parity.py::test_build_title_matches_shared_table[serial already slashed]" -q
+
+# Frontend tests — all / one file / one test name
+cd frontend && npm test             # vitest run
+cd frontend && npx vitest run src/lib/ebayTitle.test.js
+cd frontend && npx vitest run -t "returns PDFs untouched"
+
+cd frontend && npm run build        # → frontend/dist
+```
+
+Must be `python -m pytest` from the repo root — there is no `pytest.ini`/`pyproject.toml`, so bare `pytest` fails to resolve `backend.`. CI and the Dockerfile pin Python 3.11; the local venv is 3.12.
+
+**There is no linter or formatter in this repo** (no eslint/prettier/ruff/black). A stray `eslint-disable` comment in `CardForm.jsx` reads to nothing.
+
+## Architecture
+
+### Scan pipeline (`routers/scan.py` → `services/claude_vision.py`)
+
+Three presets in `PRESETS` — `cost` (sonnet-4-6/low/1100px), `balance` (opus-4-7/medium/1300px), `accuracy` (opus-4-7/high/2000px) — arrive as a **form field** (multipart endpoint), and control model + thinking effort + image downsample cap. `resolve_preset()` never raises; unknown keys fall back to env defaults.
+
+Billing ladder in `extract_card_from_image`, in order: API key → **subscription fallback** (headless `claude -p` CLI, requires both `CLAUDE_CODE_OAUTH_TOKEN` and the `claude` binary; also triggered when the API key exists but credits are exhausted, matched by three narrow substrings so 429s don't misfire) → mock response (`is_mock=True`) → blank card with an `error` string. The mock/error distinction is deliberate: the UI shows "set your API key" only for mock.
+
+The 15–30s Anthropic call is sync, so `scan.py` wraps it in `run_in_threadpool` with **positional args** — argument order in `extract_card_from_image` is part of the contract. Keep this pattern for any new blocking call; there is only one worker.
+
+### Pricing chain (`routers/pricing.py`)
+
+Tries in order, each returning a median of up to 10 comps: **eBay Browse API** (only when `EBAY_APP_ID` + `EBAY_CERT_ID` are set) → 130point → Mavin → eBay HTML scrape → mock $9.99. Notes from every attempted source are joined with ` | ` and surfaced in the UI.
+
+Critical distinction: the Browse API returns **active listings (asking prices), not sales**. True sold comps need eBay's gated Marketplace Insights API. So the highest-priority source is structurally the least accurate comp type, while the scrapers return real sold prices — and the scrapers routinely 403 from a datacenter IP. Every source is written to never raise; each degrades to `([], None, note)`.
+
+### Learning from corrections (`services/learning.py`)
+
+Saving a card whose payload differs from its `Scan.extracted_json` writes a `Correction` row with a field-level diff. `build_cheatsheet()` runs on **every scan**, rendering the 200 most recent corrections into ≤30 dedup'd rules appended to the prompt. `find_exact_match()` additionally overlays prior corrections when brand + card # + year all match.
+
+The load-bearing split: `IDENTITY_FIELDS` (player, year, brand, set, card #, team, rookie, 1st Bowman) may be overlaid; `COPY_SPECIFIC_FIELDS` (auto, patch, refractor, parallel color, serial) are recorded but **never** applied, because the same card number exists as base / refractor / gold /50. Both prompts explicitly tell the model not to copy those.
+
+Note the loop is inert in mock mode — no API key means no `Scan` row, so no `scan_id`, so no corrections.
+
+### Google Sheets mirror (`services/google_sheets.py`)
+
+`SHEET_HEADERS` is a shared contract with three consumers: the Sheets mirror, `GET /api/cards/export.csv`, and `POST /api/cards/import.csv` (which imports the private `_card_to_row` across module boundaries). Mutating card routes queue `_sync_card_to_sheets` as a background task that takes the **card id, not the ORM object**, and opens its own session — the request session is closed by then. Sheets failures are swallowed; the mirror must never delay or break a save.
+
+CSV export escapes formula-leading cells (`=`, `+`, `-`, `@`, and apostrophe-led variants); import unescapes so values round-trip. The Sheets mirror is exempt — it writes `valueInputOption=RAW`.
+
+### Auth (`auth.py`)
+
+`CARDLISTER_USERS="user:pass,user2:pass2"` parsed per-request (no caching, so env changes take effect live and removing a user invalidates their tokens immediately), falling back to a single `owner` user. HS256 JWT, 30-day TTL, `hmac.compare_digest`. `validate_secrets()` runs at startup and **refuses to boot** in production with default secrets.
+
+`require_auth` is used two ways: as a router-level blanket guard, and as a value dependency where the username is needed for usage attribution. Deliberately public: `/api/auth/login`, `/api/health`, and all of `/api/ebay-compliance/*` (eBay's own servers call those).
+
+### Background poller (`main.py` + `services/callups.py`)
+
+An in-process asyncio task polls MLB transactions every `CALLUP_POLL_MINUTES`, emails one digest per batch, and stamps a heartbeat after both success and failure. `/api/health` reports it stale after 3 missed intervals, and returns **503** when the DB is unreachable so status-code-only monitors work.
+
+### Database (`database.py`)
+
+SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTERs — so **every new column on an existing table needs an entry in `_COLUMN_MIGRATIONS`**, a hand-maintained list applied idempotently at startup. New *tables* need nothing. `uploads_dir()` is derived as `Path(DB_PATH).parent / "uploads"`, so one Railway volume at `/data` holds both the DB and every photo.
+
+### Frontend (`frontend/src`)
+
+**React 19 + react-router v8** — import from `'react-router'`; `react-router-dom` is not installed. Tailwind v3. Plain declarative `<Routes>`, no data-router APIs.
+
+JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Two download endpoints fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
+
+`Scanner.jsx` is the center of gravity: a batch queue (`queued → scanning → ready → saved`) processed one item at a time behind a ref guard, front images only. Pricing lookups carry a monotonic `pricingSeq` and every write path bails if a newer lookup has started — this is a shipped race fix, so **any new async state write in Scanner needs the same guard**.
+
+Uploads are downscaled client-side before hitting the API, with EXIF rotation baked in before re-encode; anything that fails or grows returns the original file untouched.
+
+## Invariants that break silently
+
+These have no compile-time or test-time guard unless noted — they fail in production or cost money.
+
+1. **`SHEET_HEADERS` is append-only.** New columns go at the end, with a matching trailing element in `_card_to_row`. Inserting mid-list misaligns every already-synced sheet row, since `Card.sheets_row` writes a fixed bounded range.
+2. **The `" (subscription)"` model suffix is load-bearing.** `analytics.py:_cost()` prices anything with that exact suffix at $0.00. Change the format and subscription-billed scans start reporting phantom Opus dollars.
+3. **Literal-path GET routes must be declared above `/{card_id}`** in `routers/cards.py`, or they 422 against the int path param. `export.csv` carries a comment saying so.
+4. **New columns on existing tables need a `_COLUMN_MIGRATIONS` entry** — otherwise they work on a fresh DB and break every deployed one.
+5. **New routers need `dependencies=[Depends(require_auth)]`** — `test_auth_sweep.py` walks the OpenAPI schema and fails CI otherwise. A genuinely public route means updating `PUBLIC`/`PUBLIC_PREFIXES` there.
+6. **`VISION_MAX_IMAGE_PX=0` overrides every preset's cap** (pinned by a test), quietly multiplying token cost.
+7. **Changing the eBay title format is a three-file change**: `routers/ebay.py:build_title`, `frontend/src/lib/ebayTitle.js`, and regenerated `expected` values in `backend/tests/fixtures/ebay_title_cases.json` — a fixture both suites read, the frontend one importing it across the repo boundary. Backend is the source of truth; the JS is preview-only.
+8. **`MAX_DIMENSION_PX = 2000` in `downscaleImage.js` shadows the `accuracy` preset.** Raising the preset above 2000 does nothing until the client cap moves too.
+9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers.
+10. **Never add a `startCommand` to `railway.toml`** — Railway passes it literally and won't expand `$PORT`; the Dockerfile's `sh -c` does.
+11. `app.mount("/", StaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed.
+
+## Testing notes
+
+`backend/tests/conftest.py` sets env (temp `DB_PATH`, test secrets, `DISABLE_CALLUP_POLLER=1`, and **pops `ANTHROPIC_API_KEY`** so endpoint tests run in mock mode) **before any backend import**, because `database.py` binds `DB_PATH` into the engine at import time. A module-level import placed above those lines breaks the whole suite.
+
+Use `with TestClient(app) as client:` — the context-manager form triggers the startup hook. Most endpoint tests define a local `_auth(client)` helper that logs in as `tester:pw`; there is no shared fixture. Patch *module attributes*, not bound imports (`patch.object(callups, "fetch_callup_transactions")`) — several modules import a module rather than a function specifically to stay patchable.
+
+The `db_session` fixture hard-deletes a fixed list of models between tests; a new model needing isolation must be added to it.
+
+Frontend tests are pure-function only (node environment, no jsdom, no testing-library). Adding a component test means adding jsdom + testing-library + a `test.environment` config first — a real decision, not a drop-in.
+
+## Repo process
+
+These conventions are enforced by convention, not tooling, and the daily review routine (`docs/notes/daily-routine-prompt.md`) depends on them.
+
+- **CHANGELOG.md**: work lands under `[Unreleased]` on the feature branch and moves under a dated heading with its PR number when that PR merges. **The changelog as it reads on `main` is the record of what production runs** — read `git show origin/main:CHANGELOG.md` to know what actually shipped. Never edit dated (merged) sections. Entries are prose explaining the prior pain, tagged `(PR #N)`.
+- **docs/BACKLOG.md**: persistent idea ledger, sections `Now / next` → `Later` → `Shipped`. **Move items to Shipped with a date instead of deleting** so runs don't re-propose them. Open items carry a sizing tag: `(medium; implement directly; inline)`, `(large; design first — …)`.
+- **A feature without a changelog entry is not done.** Ship gates: full backend suite green, frontend build green.
+- Anything touching schema, auth, money, or 3+ subsystems gets a design doc in `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/` before code.
+- **Never merge PRs — that is the owner's call.** Open the PR, drive it to green, respond to the Claude auto-review action's findings (it exists to give a second opinion from a clean context; don't self-review in its place).
+
+**NOTE** Codex will review your output once you are done with any implementation. This happens outside GitHub — the owner runs Codex themselves and relays its findings back in chat. Nothing will appear on the PR, so don't wait for it, look for it in CI, or treat its absence as a pass. Expect follow-up concerns to arrive from the owner after work looks finished, and treat them as review feedback on code you already shipped.
+
+## Other agent configs
+
+A Codex config exists at `~/.codex/config.toml`. To import anything portable from it (MCP servers, commands, subagents, instructions), reply `/import` to scan and list what's importable, then `/import --yes=<digest>` to apply — the scan output names the digest.

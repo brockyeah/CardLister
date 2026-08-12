@@ -2,18 +2,20 @@
 
 A dead-simple internal tool for listing baseball cards on eBay faster.
 
-**Workflow:** snap a photo → Claude vision extracts the card details → sold-comp lookup (130point → Mavin → eBay) suggests a price → review and tweak the form → click Save to copy a ready-to-paste listing to your clipboard and open eBay's sell page. Every card is mirrored to a Google Sheet.
+**Workflow:** snap a photo → Claude vision extracts the card details → comp lookup suggests a price → review and tweak the form → click Save to copy a ready-to-paste listing to your clipboard and open eBay's sell page. Every card is mirrored to a Google Sheet.
 
 ---
 
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.11), SQLAlchemy, SQLite
-- **Frontend:** React 18 + Tailwind CSS, built with Vite
-- **AI:** Anthropic Claude `claude-opus-4-7` with vision + adaptive thinking
-- **Pricing:** eBay API when configured (primary), else a sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
+- **Frontend:** React 19 + React Router 8 + Tailwind CSS, built with Vite
+- **AI:** Anthropic Claude with vision + adaptive thinking; model and thinking depth
+  are chosen per scan by the Cost / Balanced / Accuracy selector
+- **Pricing:** eBay Browse API when configured (primary — note it returns *active*
+  listings), else a sold-comp scrape chain — 130point → Mavin → eBay (BeautifulSoup + httpx)
 - **Inventory mirror:** Google Sheets API (write-only)
-- **Deploy:** Single Docker container on Railway (one service, one URL)
+- **Deploy:** Single Docker container on Railway (one service, one URL, **one worker**)
 
 ---
 
@@ -23,19 +25,18 @@ You can run it as one process (Docker) or as two dev servers (recommended for ac
 
 ### Two-server dev mode
 
-**Backend (port 8000):**
+**Backend (port 8000):** run everything from the **project root** — the venv lives there, and the `backend.` package import path only resolves from there.
 
 ```bash
-cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp ../.env.example ../.env   # then edit .env with your secrets
-export $(grep -v '^#' ../.env | xargs)   # or use a tool like direnv / dotenv
+pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+cp .env.example .env         # then edit .env with your secrets
+export $(grep -v '^#' .env | xargs)   # or use a tool like direnv / dotenv
 uvicorn backend.main:app --reload --port 8000
 ```
 
-> Run `uvicorn` from the **project root** (one level above `backend/`) so the `backend.` package import path resolves.
+> Set `DISABLE_CALLUP_POLLER=1` to silence the background call-up poller during local work.
 
 **Frontend (port 5173):**
 
@@ -46,6 +47,22 @@ npm run dev
 ```
 
 Open <http://localhost:5173>. Vite proxies `/api` and `/uploads` to the FastAPI server.
+
+### Tests
+
+```bash
+# Backend — from the project root (module form puts the root on sys.path)
+python -m pytest backend/tests -q
+python -m pytest backend/tests/test_ebay_title_parity.py -q          # one file
+python -m pytest backend/tests/test_presets.py::test_unknown_preset_falls_back_to_env_defaults -q
+
+# Frontend
+cd frontend && npm test                              # vitest run
+cd frontend && npx vitest run src/lib/ebayTitle.test.js
+```
+
+There is no linter or formatter configured. CI runs the backend suite, the frontend
+tests + build, and a non-blocking dependency audit.
 
 ### One-process production-style mode
 
@@ -92,13 +109,17 @@ docker run --rm -p 8000:8000 \
 | `EBAY_CERT_ID` | optional | eBay Cert ID (OAuth client_secret), paired with `EBAY_APP_ID`. |
 | `EBAY_MARKETPLACE_ID` | optional | eBay marketplace, default `EBAY_US`. |
 | `EBAY_ENV` | optional | `production` (default) or `sandbox`. |
+| `EBAY_VERIFICATION_TOKEN` | optional | 32–80 chars, required to enable a production eBay keyset. The same value goes in the developer portal's marketplace account-deletion form; the app answers eBay's challenge handshake at `/api/ebay-compliance/account-deletion`. |
+| `EBAY_DELETION_ENDPOINT_URL` | optional | The full public URL of that endpoint (`https://<host>/api/ebay-compliance/account-deletion`). It is part of the challenge hash, so it must match the portal field exactly. |
+| `SMTP_HOST` / `SMTP_PORT` | optional | SMTP server for alert emails, default `smtp.gmail.com:587`. Unused when `SENDGRID_API_KEY` is set. |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | optional | Gmail address + App Password for call-up alert emails. Without them the call-up ticker still works; only emails are skipped. |
 | `ALERT_EMAILS` | optional | Comma-separated alert recipients. |
 | `SENDGRID_API_KEY` | optional | SendGrid API key — the preferred email path on Railway (SMTP is blocked there). Takes precedence over SMTP when set. |
 | `ALERT_FROM` | optional | Verified SendGrid single-sender address. Defaults to `SMTP_USERNAME`. |
 | `CALLUP_POLL_MINUTES` | optional | Minutes between MLB call-up polls. Default `15`. |
 | `NEWS_FEEDS` | optional | Comma-separated RSS feed URLs for the news section (defaults to MLB.com feeds). |
-| `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** |
+| `DB_PATH` | optional | Path to the SQLite file. Defaults to `./cardlister.db`. **On Railway, set to `/data/cardlister.db`.** Uploaded images are stored in an `uploads/` directory *derived from this path*, so one volume covers both. |
+| `DISABLE_CALLUP_POLLER` | optional | Set to `1` to skip starting the background call-up poller (used by the test suite and handy in local dev). |
 
 ---
 
@@ -187,11 +208,15 @@ Look for `# TODO (Phase 2)` comments throughout the codebase:
 
 ## Updating the Database Schema
 
-The app uses SQLAlchemy's `create_all` on startup, which only adds *new* tables — it won't migrate existing ones. If you change a column on the `cards` table:
+SQLAlchemy's `create_all` runs on startup but only creates *missing tables* — it never
+alters existing ones. A lightweight migration list closes that gap:
 
-- **Local dev:** delete `cardlister.db` (you'll lose data) and restart, OR run a one-off migration with `sqlite3` (`ALTER TABLE cards ADD COLUMN ...`).
-- **Production (Railway):** SSH-equivalent isn't trivial here. Easier: scale the service to 0, attach to the volume from a one-shot job that runs the `ALTER TABLE`, then redeploy.
-- **Long-term:** add Alembic when the schema starts changing more than once or twice.
+- **New table:** nothing to do; `create_all` builds it complete.
+- **New column on an existing table:** add a `(table, column, ddl)` entry to
+  `_COLUMN_MIGRATIONS` in `backend/database.py`. It's applied idempotently at startup,
+  so deployed databases pick it up on the next boot. **Skipping this means the column
+  works on a fresh local DB and is missing in production.**
+- Alembic is still the long-term answer if the schema starts changing often.
 
 ---
 
@@ -200,46 +225,32 @@ The app uses SQLAlchemy's `create_all` on startup, which only adds *new* tables 
 ```
 cardlister/
 ├── backend/
-│   ├── main.py              # FastAPI app, mounts routers + static frontend
-│   ├── database.py          # Engine, session, Base
-│   ├── models.py            # Card SQLAlchemy model
+│   ├── main.py              # FastAPI app: routers, health, call-up poller, static mount
+│   ├── database.py          # Engine, session, uploads_dir, _COLUMN_MIGRATIONS
+│   ├── models.py            # Card, Scan, Correction, UsageEvent, CallupEvent
 │   ├── schemas.py           # Pydantic request/response schemas
-│   ├── auth.py              # Named users + JWT
-│   ├── routers/
-│   │   ├── cards.py         # CRUD + mark sold + attach eBay listing
-│   │   ├── scan.py          # Image upload → Claude vision (records usage)
-│   │   ├── pricing.py       # eBay API + scraper comp chain
-│   │   ├── ebay.py          # Listing text builder
-│   │   ├── sheets.py        # Manual resync endpoints
-│   │   └── analytics.py     # Usage + cost analytics (filters)
-│   ├── services/
-│   │   ├── claude_vision.py # Claude API call
-│   │   ├── ebay_api.py      # eBay API pricing (primary)
-│   │   ├── onethirtypoint.py / mavin.py / ebay_pricing.py  # scraper fallbacks
-│   │   ├── pricing_utils.py # shared query/price helpers
-│   │   └── google_sheets.py # Sheets API write layer
+│   ├── auth.py              # Named users + JWT + production secret checks
+│   ├── routers/             # cards, scan, pricing, ebay, ebay_compliance,
+│   │                        #   sheets, analytics, news
+│   ├── services/            # claude_vision, learning, ebay_api, comp scrapers
+│   │                        #   (onethirtypoint/mavin/ebay_pricing), pricing_utils,
+│   │                        #   google_sheets, callups, prospect_news, mailer,
+│   │                        #   billing_alerts
+│   ├── tests/               # pytest suite + shared fixtures/
 │   └── requirements.txt
 ├── frontend/
-│   ├── src/
-│   │   ├── App.jsx          # Router + nav
-│   │   ├── api.js           # Axios wrapper + token storage
-│   │   ├── pages/
-│   │   │   ├── Login.jsx
-│   │   │   ├── Scanner.jsx  # Upload + review (default page)
-│   │   │   ├── Inventory.jsx
-│   │   │   └── Analytics.jsx # Usage + cost analytics
-│   │   └── components/
-│   │       ├── CardForm.jsx
-│   │       ├── CardTable.jsx
-│   │       └── StatusBadge.jsx
-│   ├── index.html
-│   ├── vite.config.js
-│   ├── tailwind.config.js
-│   └── package.json
+│   └── src/
+│       ├── App.jsx          # Routes + nav shell + auth gate
+│       ├── api.js           # Axios wrapper + token storage
+│       ├── pages/           # Login, Scanner (default), Inventory, Analytics
+│       ├── components/      # CardForm, CardTable, StatusBadge, NewsSection
+│       └── lib/             # ebayTitle, downscaleImage, sortCards (+ their tests)
+├── docs/                    # BACKLOG.md, notes/, superpowers/{specs,plans}
+├── CHANGELOG.md             # on `main`, this is the record of what production runs
+├── CLAUDE.md                # architecture + invariants for AI coding agents
 ├── Dockerfile
 ├── railway.toml
-├── .env.example
-└── README.md
+└── .env.example
 ```
 
 ## License
