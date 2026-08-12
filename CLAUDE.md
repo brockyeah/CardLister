@@ -126,7 +126,7 @@ These conventions are enforced by convention, not tooling, and the daily review 
 - Anything touching schema, auth, money, or 3+ subsystems gets a design doc in `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/` before code.
 - **Never merge PRs — that is the owner's call.** Open the PR, drive it to green, respond to the Claude auto-review action's findings (it exists to give a second opinion from a clean context; don't self-review in its place).
 
-**NOTE** Codex will review your output once you are done with any implementation.
+**NOTE** Codex will review your output once you are done with any implementation. This happens outside GitHub — the owner runs Codex themselves and relays its findings back in chat. Nothing will appear on the PR, so don't wait for it, look for it in CI, or treat its absence as a pass. Expect follow-up concerns to arrive from the owner after work looks finished, and treat them as review feedback on code you already shipped.
 
 ## Other agent configs
 
