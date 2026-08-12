@@ -5,6 +5,40 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Batch scan front/back auto-pairing: uploading 20 images of 10 cards
+      currently treats each image as its own card; match front+back pairs
+      before extraction. Candidate signals: upload order/adjacency (phone
+      camera rolls alternate front,back), filename timestamps, then a cheap
+      vision pass ("is this a card back?") to pair each back with the
+      preceding front; unpaired images fall back to single-sided scan. UI:
+      pairing review step in the batch queue with drag-to-repair before
+      Claude extraction runs (large; design first — touches Scanner queue,
+      /api/scan, and scan cost per card)
+- [ ] Comps accuracy — parallel/variant contamination: suggested price
+      factors in parallel + serialized listings when pricing a base card
+      (and vice versa), skewing high, and it's worst on exactly the cards
+      worth the most. Two halves of one fix: (a) plumb the attributes
+      through — `PricingRequest` carries only player/year/brand/set/card #,
+      so parallel color, serial number, refractor, and auto never reach the
+      pricing chain at all (schemas, pricing router, service query builders,
+      CompsModal/Scanner callers); (b) filter results against the card's own
+      parallel_color/serial/refractor flags — exclude comps whose titles
+      carry non-matching variant markers (Gold, /99, Refractor, Auto, etc.),
+      require matching markers when the card HAS them, and surface which
+      comps were excluded in the modal so mispricing is auditable (medium;
+      implement directly — title-token filter shared across ebay_api and
+      scrapers; needs a title-marker test table)
+- [ ] Interactive pricing agent on the post-scan page: instead of a single
+      suggested price, collect the full comp set (eBay API + scrapers, raw
+      titles/prices/dates) into context and open a chat box — "my card is a
+      PSA 10, what should I list at?", "now price it without parallels",
+      "why is this one $40?". Agent answers from the gathered comps, can
+      re-query sources with refined terms (graded, base-only), and can
+      write its conclusion back into the listed-price field on request.
+      Cost-aware: comps gathered once per card, cheap model for chat
+      turns, usage metered into the existing UsageEvent tracking (large;
+      design first — new agent loop endpoint + chat UI on review form;
+      pairs with the comp variant-filter item above)
 - [ ] Scan-accuracy report on Analytics: Corrections table already stores
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
@@ -17,12 +51,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
-- [ ] Attribute-aware comps: `PricingRequest` carries only player/year/brand/set/
-      card # — parallel color, serial number, refractor, and auto never reach the
-      pricing chain, so a Gold /50 comps like the base card and the suggested
-      price is systematically wrong for exactly the cards worth the most
-      (medium; implement directly; inline — touches schemas, pricing router,
-      pricing service query builders, CompsModal/Scanner callers)
 - [ ] Quantity-aware inventory stats: the StatTiles count rows, not copies —
       Total Cards ignores quantity and Est. Active Value is `listed_price × 1`
       even for qty-3 rows, understating the collection (quick win; implement
@@ -144,7 +172,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       toggle filters next to the existing search box — search can't express
       "all my active autos" today (quick win; implement directly; inline —
       touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
-
 - [ ] Immutable cache headers on `/uploads`: stored names are uuid-hex so the
       content behind a URL never changes, but `serve_upload` sends no
       Cache-Control — every inventory render refetches full-size photos; add
@@ -234,11 +261,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Drive) on a schedule — backup endpoint, scheduler, and mailer all exist
       (medium; **plan doc first** — touches 3 subsystems: scheduler, mailer,
       backup service; inline)
-- [ ] Backup restore endpoint: upload a previously downloaded SQLite snapshot
-      to replace the live DB — completes the backup story (download exists,
-      restore is manual volume surgery today) (medium; **plan doc first** —
-      data-destructive, needs integrity check + pre-restore safety snapshot;
-      inline)
 - [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
       planned P&L dashboard can show true realized profit instead of revenue only
       (medium; **plan doc first** — schema change; inline)

@@ -5,7 +5,8 @@ existing router) that forgets `Depends(require_auth)` fails this sweep
 automatically. The schema is used instead of `app.routes` because FastAPI
 keeps included routers nested there (they stopped being flattened into
 APIRoute entries), while the schema always lists every route with its full
-path. Only login and the health check are public by design.
+path. Only login, the health check, and the eBay compliance router are
+public by design.
 """
 import re
 
@@ -19,10 +20,15 @@ PUBLIC = {
     ("/api/health", "GET"),
 }
 
+# eBay's own servers call these unauthenticated (account-deletion notices and
+# the OAuth redirect landing pages) — see backend/routers/ebay_compliance.py.
+# A prefix, not tuples: the router grows as more eBay callbacks are added.
+PUBLIC_PREFIXES = ("/api/ebay-compliance/",)
+
 
 def _protected_routes():
     for path, methods in app.openapi()["paths"].items():
-        if not path.startswith("/api"):
+        if not path.startswith("/api") or path.startswith(PUBLIC_PREFIXES):
             continue
         for method in methods:
             method = method.upper()

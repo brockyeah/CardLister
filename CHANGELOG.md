@@ -63,7 +63,20 @@ only in `[Unreleased]` on a branch is not in prod yet.
   suggested price. Lookups now carry a monotonic id and only the latest may
   write state; save/discard/new-scan invalidate anything in flight. (PR #32)
 
-## 2026-08-03 — React Router v8 + React 19 (PR #28)
+## 2026-08-10 — eBay portal prerequisites (PR #34)
+
+### Added
+- Public eBay compliance router (`/api/ebay-compliance/*`, no auth — eBay's
+  servers call these): marketplace account-deletion notification endpoint
+  (challenge handshake per eBay's sha256(challengeCode + verificationToken +
+  endpointUrl) formula, fast-ack for deletion notices, config via
+  `EBAY_VERIFICATION_TOKEN` + `EBAY_DELETION_ENDPOINT_URL`), plus OAuth
+  accepted/declined landing pages and a privacy-policy page so the RuName
+  form can be filled once. Unlocks the production keyset without claiming
+  the data-storage exemption, so nothing in the developer portal has to
+  change when seller-OAuth draft listings land.
+
+## 2026-08-02 — React Router v8 + React 19 (PR #28)
 
 ### Changed
 - React Router v6.30 → v8.3 and React 18.3 → 19.2 (v8's peer requirement).
