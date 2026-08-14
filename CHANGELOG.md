@@ -10,7 +10,32 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `docs/routine-gate-fixes`
+## [Unreleased]
+
+### Fixed
+- Hard loads of client routes no longer 404. `StaticFiles(html=True)` only
+  serves `index.html` for *directory* requests, so the router only ever ran
+  when navigating from `/` — refreshing the page on /inventory or /analytics,
+  or opening a bookmark to one, returned a bare `{"detail":"Not Found"}`. A
+  `SpaStaticFiles` subclass now falls back to the app shell for unmatched page
+  loads, while `api/`, `uploads/`, and `assets/` paths keep their real 404 so a
+  mistyped endpoint or a stale bundle can't come back as 200 + HTML. This also
+  unblocks the backlogged card-permalink item, which assumed deep links loaded.
+- Inventory stat tiles count copies instead of rows. `quantity` is how many
+  physical copies a row stands for, and the save-time "increase count" flow
+  makes multi-copy rows routinely — so Total Cards undercounted the collection
+  and Est. Active Value valued a qty-3 row at a single listed price. Counts and
+  active value are now quantity-weighted, with a "N rows" caption on Total
+  Cards whenever the two differ. Revenue stays per-row on purpose: `sold_price`
+  is what a sale actually brought in, and multiplying it would invent money.
+  The math moved into `lib/inventoryStats.js` so it's unit-tested.
+
+### Changed
+- Served uploads carry `Cache-Control: public, max-age=31536000, immutable`.
+  Stored names are uuid-hex, so the bytes behind a URL never change, but no
+  cache header meant every inventory render refetched every full-size photo.
+
+## 2026-08-14 — Daily-routine gate fixes (PR #39)
 
 ### Changed
 - The daily routine's build gate is now executable: it required a green
