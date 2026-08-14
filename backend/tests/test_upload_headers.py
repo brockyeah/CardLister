@@ -1,5 +1,6 @@
-"""Security headers on served uploads: nosniff everywhere; non-image files
-(PDFs) must download rather than render in the app's origin."""
+"""Headers on served uploads: nosniff everywhere; non-image files (PDFs) must
+download rather than render in the app's origin; stored names are content-stable
+so responses carry an immutable long-lived cache header."""
 import io
 
 from PIL import Image
@@ -39,6 +40,19 @@ def test_image_upload_served_inline_with_nosniff():
         assert r.headers["x-content-type-options"] == "nosniff"
         # Images stay inline so <img> thumbnails and direct viewing keep working.
         assert "attachment" not in r.headers.get("content-disposition", "")
+
+
+def test_uploads_carry_immutable_cache_headers():
+    # Upload URLs are uuid-hex, so the bytes behind one never change. Without
+    # this header every inventory render refetched every full-size photo.
+    with TestClient(app) as client:
+        path = _scan_upload(client, _auth(client), "front.png", _png_bytes(), "image/png")
+        r = client.get(path)
+        assert r.status_code == 200
+        cache_control = r.headers["cache-control"]
+        assert "public" in cache_control
+        assert "immutable" in cache_control
+        assert "max-age=31536000" in cache_control
 
 
 def test_pdf_upload_forced_to_download():
