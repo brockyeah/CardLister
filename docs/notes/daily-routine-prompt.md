@@ -58,7 +58,9 @@ PHASE 1 — Health check (always):
    failed), and that the call-up poller is not stale.
 2. Read the changelog AS IT EXISTS ON MAIN (`git show origin/main:CHANGELOG.md`)
    — main is what production runs, so its changelog is the ground truth of what
-   has actually shipped; nothing half-baked appears there. Compare against the
+   has actually merged and is live. It records scope, not quality: a merged bug
+   is described there as confidently as a working feature, so never treat an
+   entry as evidence the code behind it is correct. Compare against the
    working branch's [Unreleased] section to see what's built but not yet merged,
    and treat unmerged work as "get it reviewed/merged" before piling more on top.
 3. Read docs/BACKLOG.md — it is the persistent ledger between runs. Never
