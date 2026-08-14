@@ -82,8 +82,11 @@ PHASE 2 — Ideas (always):
 
 PHASE 3 — Build (standing authorization):
 7. Implement the top 1–2 quick wins from the backlog without asking. Gates: full
-   backend suite green (`python -m pytest backend/tests -q` from the repo root)
-   and frontend build green, then commit per feature and push to the working
+   backend suite green and frontend build green. Run the suite from the repo
+   root as `python3 -m pytest backend/tests -q` (locally, where the repo-root
+   venv exists, `.venv/bin/python -m pytest backend/tests -q`). The module form
+   is required either way — there is no pytest config, so bare `pytest` can't
+   resolve the `backend.` import path. Then commit per feature and push to the working
    branch. In the same push: update the backlog's Shipped section with a date AND
    add a CHANGELOG.md entry under [Unreleased] for every shipped feature — a
    feature without a changelog entry is not done. Never edit dated (merged)

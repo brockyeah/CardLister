@@ -35,7 +35,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   here (the lockfiles are `package-lock.json`), and the frontend glob covered
   `ts`/`tsx`, which don't exist in this repo.
 
-## 2026-08-12 — CLAUDE.md and README refresh (PR #36)
+## 2026-08-12 — Integration of PRs #29–#32 (PR #33)
 
 ### Added
 - Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores a mis-clicked
@@ -89,7 +89,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   suggested price. Lookups now carry a monotonic id and only the latest may
   write state; save/discard/new-scan invalidate anything in flight. (PR #32)
 
-## [Unreleased] — branch `docs/refresh-readme`
+## 2026-08-12 — CLAUDE.md and README refresh (PR #36)
 
 ### Added
 - `CLAUDE.md`: architecture guide for AI coding agents — the scan billing ladder,
