@@ -217,6 +217,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       update analytics MODEL_PRICES + Scanner labels in the same change
       (medium; implement directly, gated on a small accuracy eval; inline —
       touches claude_vision.py, analytics.py, Scanner.jsx)
+- [ ] Research cheaper extraction paths than Claude vision: vision is the only
+      per-card cost that scales with the collection, and the preset item above
+      only shops within the Claude lineup. Survey the alternatives on the same
+      corrected-scan sample — cheaper vision models from other providers, plain
+      OCR (Tesseract/PaddleOCR, or a cloud OCR) feeding a *text*-only model,
+      card-database lookup by set + card # (TCDB/Sportlots/Beckett) with vision
+      reduced to reading the number off the card, and a local model on the
+      Railway container. Score each on per-card cost, accuracy vs. the
+      Corrections table, latency, and setup burden; a hybrid is the likely
+      answer (cheap path first, escalate to Claude when confidence is low or
+      the user hits Re-scan). Output is a findings note in `docs/notes/`, not
+      code (medium; research spike — write the note before any implementation
+      item is opened; pairs with the preset-refresh item above)
 
 ## Later
 
