@@ -10,7 +10,32 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/happy-ramanujan-z9nq0x` (integrates PRs #29–#32)
+## [Unreleased] — branch `docs/routine-prompts`
+
+### Changed
+- `docs/notes/daily-routine-prompt.md` now documents all three scheduled
+  routines instead of one: the daily build session (updated for CLAUDE.md,
+  `.coderabbit.yaml`, branch-freshness before building, and all three
+  reviewers), a new Sunday deep review that hunts what diff-scoped PR review
+  structurally can't see, and a new Sunday design session that turns parked
+  "large / design first" backlog items into approved specs and plans. The
+  routines live in the cloud and aren't readable from a local session, so this
+  file is their only record — it now says so, and warns against renaming the
+  file whose path is hard-coded inside the daily prompt.
+
+## 2026-08-14 — CodeRabbit config (PR #37)
+
+### Added
+- `.coderabbit.yaml`: CodeRabbit review config whose path instructions carry
+  this repo's real invariants (auth sweep, `_COLUMN_MIGRATIONS`, append-only
+  `SHEET_HEADERS`, literal routes above `/{card_id}`, the `" (subscription)"`
+  cost suffix, the Scanner `pricingSeq` guard) so automated review catches what
+  fails silently in production rather than generic lint. Two fixes to the
+  starting template: the lockfile filter was `!**/*.lock`, which matches nothing
+  here (the lockfiles are `package-lock.json`), and the frontend glob covered
+  `ts`/`tsx`, which don't exist in this repo.
+
+## 2026-08-12 — CLAUDE.md and README refresh (PR #36)
 
 ### Added
 - Unmark-sold undo: `POST /api/cards/{id}/unmark-sold` restores a mis-clicked
