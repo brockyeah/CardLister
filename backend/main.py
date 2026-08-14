@@ -178,21 +178,24 @@ class SpaStaticFiles(StaticFiles):
     card permalink) fell through to a bare `{"detail":"Not Found"}` 404 — the
     router only ever ran when navigating from `/`.
 
-    Unknown paths under the API prefixes keep their 404: an API client that
+    Unknown paths under the API roots keep their 404: an API client that
     typo'd an endpoint must not get 200 + HTML back, and neither must a missing
-    upload, which `serve_upload` 404s deliberately. `assets/` is excluded for
+    upload, which `serve_upload` 404s deliberately. `assets` is excluded for
     the same reason — Vite's bundles live there under content-hashed names, and
     answering a stale bundle request with HTML turns a bad deploy into an
     unreadable JS syntax error instead of a clean 404.
     """
 
-    NON_SPA_PREFIXES = ("api/", "uploads/", "assets/")
+    NON_SPA_ROOTS = ("api", "uploads", "assets")
 
     def _is_page_load(self, path, scope) -> bool:
-        # Case-folded so /API/nope 404s like /api/nope. Routing itself stays
-        # case-sensitive; this only decides shell-vs-404 for paths that already
-        # missed, and anything shaped like an API path should never render HTML.
-        if path.lower().startswith(self.NON_SPA_PREFIXES):
+        # Match the first path segment so both the bare root (/api) and every
+        # descendant (/api/nope) are excluded, while a client route that merely
+        # starts with the same letters (/apikeys) is not. Case-folded so
+        # /API/nope 404s like /api/nope: routing itself stays case-sensitive,
+        # but this only decides shell-vs-404 for paths that already missed, and
+        # anything shaped like an API path should never render HTML.
+        if path.lower().split("/", 1)[0] in self.NON_SPA_ROOTS:
             return False
         # Only GET/HEAD can be a page load; a POST to a bad path stays a 404.
         return scope.get("method") in ("GET", "HEAD")

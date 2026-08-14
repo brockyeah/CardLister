@@ -337,7 +337,11 @@ export default function Inventory() {
         <StatTile
           label="Total Cards"
           value={stats.total}
-          hint={stats.total !== stats.rowCount ? `${stats.rowCount} rows` : null}
+          hint={
+            stats.total !== stats.rowCount
+              ? `${stats.rowCount} ${stats.rowCount === 1 ? 'row' : 'rows'}`
+              : null
+          }
         />
         <StatTile label="Listed" value={stats.listed} />
         <StatTile label="Sold" value={stats.sold} />

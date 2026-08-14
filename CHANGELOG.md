@@ -27,8 +27,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   and Est. Active Value valued a qty-3 row at a single listed price. Counts and
   active value are now quantity-weighted, with a "N rows" caption on Total
   Cards whenever the two differ. Revenue stays per-row on purpose: `sold_price`
-  is what a sale actually brought in, and multiplying it would invent money.
-  The math moved into `lib/inventoryStats.js` so it's unit-tested.
+  is what a sale actually brought in, and multiplying it would invent money —
+  but it is now restricted to sold rows, since the CSV importer fills
+  `sold_price` from the "Sale Price" column whatever the row's status, so an
+  imported active row carrying one used to be counted as revenue for a card
+  still on the shelf. The math moved into `lib/inventoryStats.js` so it's
+  unit-tested.
 
 ### Changed
 - Served uploads carry `Cache-Control: public, max-age=31536000, immutable`.

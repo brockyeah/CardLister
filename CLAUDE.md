@@ -104,7 +104,7 @@ These have no compile-time or test-time guard unless noted — they fail in prod
 8. **`MAX_DIMENSION_PX = 2000` in `downscaleImage.js` shadows the `accuracy` preset.** Raising the preset above 2000 does nothing until the client cap moves too.
 9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers.
 10. **Never add a `startCommand` to `railway.toml`** — Railway passes it literally and won't expand `$PORT`; the Dockerfile's `sh -c` does.
-11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix that isn't in `SpaStaticFiles.NON_SPA_PREFIXES` (`api/`, `uploads/`, `assets/`) returns 200 + HTML instead of 404 on a typo'd path.
+11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment, so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
 
 ## Testing notes
 

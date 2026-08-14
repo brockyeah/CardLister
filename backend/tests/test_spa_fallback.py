@@ -31,7 +31,17 @@ def client(tmp_path):
         yield c
 
 
-@pytest.mark.parametrize("path", ["/", "/inventory", "/analytics", "/inventory?card=123"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/",
+        "/inventory",
+        "/analytics",
+        "/inventory?card=123",
+        # Shares a prefix with an excluded root but is a distinct segment.
+        "/apikeys",
+    ],
+)
 def test_page_loads_serve_the_spa_shell(client, path):
     r = client.get(path)
     assert r.status_code == 200
@@ -54,6 +64,10 @@ def test_real_assets_still_win_over_the_fallback(client):
         # Case-folded: an API path is an API path however it's typed.
         "/API/nope",
         "/Uploads/missing.png",
+        # Bare roots, not just descendants.
+        "/api",
+        "/uploads",
+        "/assets",
     ],
 )
 def test_api_upload_and_asset_paths_keep_their_404(client, path):

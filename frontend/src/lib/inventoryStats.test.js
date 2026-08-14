@@ -15,6 +15,13 @@ describe('cardQuantity', () => {
     expect(cardQuantity({ quantity: 3 })).toBe(3)
     expect(cardQuantity({ quantity: '5' })).toBe(5)
   })
+
+  it('never floors a positive fraction down to zero copies', () => {
+    // The API enforces an integer >= 1, but flooring 0.5 to 0 would silently
+    // erase a real card rather than degrade to the documented default of 1.
+    expect(cardQuantity({ quantity: 0.5 })).toBe(1)
+    expect(cardQuantity({ quantity: 2.7 })).toBe(2)
+  })
 })
 
 describe('computeInventoryStats', () => {
@@ -41,6 +48,17 @@ describe('computeInventoryStats', () => {
   it('leaves revenue per-row — sold_price is what the sale brought in', () => {
     const s = computeInventoryStats(cards)
     expect(s.revenue).toBe(40) // not 40 * 2
+  })
+
+  it('counts revenue only from sold rows', () => {
+    // The CSV importer fills sold_price from the "Sale Price" column whatever
+    // the row's status, so an active row can carry one; counting it would
+    // report revenue from a card still sitting in the box.
+    const s = computeInventoryStats([
+      ...cards,
+      { status: 'active', listed_price: 12, sold_price: 999 },
+    ])
+    expect(s.revenue).toBe(40)
   })
 
   it('treats an empty or non-array input as zeroes', () => {
