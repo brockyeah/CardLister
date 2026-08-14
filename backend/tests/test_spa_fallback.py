@@ -46,7 +46,15 @@ def test_real_assets_still_win_over_the_fallback(client):
 
 @pytest.mark.parametrize(
     "path",
-    ["/api/nope", "/api/cards/999999", "/uploads/missing.png", "/assets/index-deadbeef.js"],
+    [
+        "/api/nope",
+        "/api/cards/999999",
+        "/uploads/missing.png",
+        "/assets/index-deadbeef.js",
+        # Case-folded: an API path is an API path however it's typed.
+        "/API/nope",
+        "/Uploads/missing.png",
+    ],
 )
 def test_api_upload_and_asset_paths_keep_their_404(client, path):
     r = client.get(path)

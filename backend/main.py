@@ -189,7 +189,10 @@ class SpaStaticFiles(StaticFiles):
     NON_SPA_PREFIXES = ("api/", "uploads/", "assets/")
 
     def _is_page_load(self, path, scope) -> bool:
-        if path.startswith(self.NON_SPA_PREFIXES):
+        # Case-folded so /API/nope 404s like /api/nope. Routing itself stays
+        # case-sensitive; this only decides shell-vs-404 for paths that already
+        # missed, and anything shaped like an API path should never render HTML.
+        if path.lower().startswith(self.NON_SPA_PREFIXES):
             return False
         # Only GET/HEAD can be a page load; a POST to a bad path stays a 404.
         return scope.get("method") in ("GET", "HEAD")
