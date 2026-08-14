@@ -58,7 +58,9 @@ PHASE 1 — Health check (always):
    failed), and that the call-up poller is not stale.
 2. Read the changelog AS IT EXISTS ON MAIN (`git show origin/main:CHANGELOG.md`)
    — main is what production runs, so its changelog is the ground truth of what
-   has actually shipped; nothing half-baked appears there. Compare against the
+   has actually merged and is live. It records scope, not quality: a merged bug
+   is described there as confidently as a working feature, so never treat an
+   entry as evidence the code behind it is correct. Compare against the
    working branch's [Unreleased] section to see what's built but not yet merged,
    and treat unmerged work as "get it reviewed/merged" before piling more on top.
 3. Read docs/BACKLOG.md — it is the persistent ledger between runs. Never
@@ -84,9 +86,13 @@ PHASE 2 — Ideas (always):
 
 PHASE 3 — Build (standing authorization):
 7. Implement the top 1–2 quick wins from the backlog without asking. Gates: full
-   backend suite green and frontend build green. Run the suite from the repo
+   backend suite green and frontend build green. Backend: run from the repo
    root as `python3 -m pytest backend/tests -q` (locally, where the repo-root
-   venv exists, `.venv/bin/python -m pytest backend/tests -q`). The module form
+   venv exists, `.venv/bin/python -m pytest backend/tests -q`). Frontend:
+   `cd frontend && npm ci && npm test && npm run build` — the `npm ci` matters
+   in a fresh checkout, which has no node_modules. Both gates apply whenever
+   either side changed; a backend-only diff still needs the frontend build if
+   it touched a shared fixture. The pytest module form
    is required either way — there is no pytest config, so bare `pytest` can't
    resolve the `backend.` import path. Then commit per feature and push to the working
    branch. In the same push: update the backlog's Shipped section with a date AND
@@ -130,11 +136,14 @@ PHASE 4 — Report (always):
   after the fact. Now every idea carries an effort/planning/execution verdict.
 - **Persistent state.** Without `docs/BACKLOG.md`, each run re-derives the project state
   from scratch and can re-pitch already-shipped ideas. The backlog is the memory.
-- **Changelog as prod ground truth.** `main` is continuously deployed, so the changelog
-  as it reads on `origin/main` describes exactly what production runs — bad or unmerged
-  implementations never appear there. Reading it first (instead of raw git log) gives
-  the run an instant, curated picture of recent shipped work, and the branch's
-  [Unreleased] diff against it shows what's still awaiting review/merge.
+- **Changelog as prod ground truth — of scope, not of quality.** `main` is continuously
+  deployed, so the changelog as it reads on `origin/main` describes exactly what
+  production is running; unmerged or abandoned work never appears there. Reading it
+  first (instead of raw git log) gives the run an instant, curated picture of recent
+  shipped work, and the branch's [Unreleased] diff against it shows what's still
+  awaiting review/merge. It is not evidence that the shipped code is *correct* — a
+  merged bug is described there just as confidently as a working feature. Correctness
+  comes from the health check, the test suites, and review findings.
 - **Standing build authorization.** The review-only loop wastes the run; pre-approving
   gated quick wins (tests + build + push) turns the routine from a reporter into a
   contributor while keeping risky work behind plan docs.
