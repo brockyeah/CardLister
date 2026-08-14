@@ -10,7 +10,23 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `docs/routine-prompts`
+## [Unreleased] — branch `docs/routine-gate-fixes`
+
+### Changed
+- The daily routine's build gate is now executable: it required a green
+  frontend build but supplied only the backend test command, so a run could
+  satisfy every written instruction and never build the frontend. Now spells
+  out `cd frontend && npm ci && npm test && npm run build` (the `npm ci`
+  matters — a fresh checkout has no `node_modules`) and notes that both gates
+  apply even for a backend-only diff, since the eBay title fixture is read by
+  both suites.
+- Corrected the changelog rationale in the same doc: it claimed bad
+  implementations never reach main's changelog, which is false — a merged bug
+  is described there as confidently as a working feature. It is evidence of
+  shipped *scope*; correctness comes from the health check, the test suites,
+  and review findings.
+
+## 2026-08-14 — All three scheduled routines documented (PR #38)
 
 ### Changed
 - `docs/notes/daily-routine-prompt.md` now documents all three scheduled
