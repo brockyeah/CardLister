@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ["main"]
+  path_filters:
+    # Lockfiles here are package-lock.json (root + frontend), not *.lock.
+    - "!**/package-lock.json"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!**/*.min.js"
+    # Built frontend copied into the image; generated, never hand-edited.
+    - "!backend/static/**"
+    - "!**/__pycache__/**"
+    - "!**/*.db"
+    - "!uploads/**"
+  path_instructions:
+    - path: "backend/**/*.py"
+      instructions: >
+        FastAPI + SQLAlchemy + SQLite backend, single uvicorn worker on Railway.
+        Flag unvalidated request bodies, missing Pydantic models, blocking I/O
+        in async handlers (long calls belong in run_in_threadpool), unhandled
+        exceptions on external API calls, and secrets read from anywhere but
+        env vars.
+
+        Repo-specific invariants that fail silently in production — flag any
+        change that violates one:
+        - New routers must carry dependencies=[Depends(require_auth)]. A
+          genuinely public route also needs PUBLIC/PUBLIC_PREFIXES updated in
+          backend/tests/test_auth_sweep.py.
+        - New columns on EXISTING tables need a _COLUMN_MIGRATIONS entry in
+          backend/database.py; create_all() never ALTERs, so without it the
+          column exists only on fresh databases. New tables need nothing.
+        - SHEET_HEADERS in services/google_sheets.py is append-only, with a
+          matching trailing element in _card_to_row. It is a shared contract
+          with CSV export and CSV import; inserting mid-list misaligns every
+          already-synced sheet row.
+        - Literal-path GET routes in routers/cards.py must be declared above
+          GET /{card_id}, or they 422 against the int path param.
+        - The " (subscription)" model suffix is load-bearing: analytics.py
+          _cost() prices that exact suffix at $0.00.
+        - Pricing sources must never raise; each degrades to ([], None, note).
+        - Changing routers/ebay.py build_title is a three-file change
+          (build_title, frontend/src/lib/ebayTitle.js, and regenerated
+          expected values in backend/tests/fixtures/ebay_title_cases.json).
+        Also flag anything that would increase Anthropic token spend without
+        saying so — larger images, higher thinking effort, extra model calls.
+    - path: "backend/tests/**/*.py"
+      instructions: >
+        pytest suite, run as `python -m pytest backend/tests` from the repo
+        root. conftest.py sets env before any backend import because
+        database.py binds DB_PATH into the engine at import time — flag any
+        module-level import added above those lines. Endpoint tests need the
+        context-manager form `with TestClient(app) as client:` so the startup
+        hook runs. Patch module attributes, not bound imports. A new model
+        that needs per-test isolation must be added to the db_session
+        fixture's delete list.
+    - path: "frontend/src/**/*.{js,jsx}"
+      instructions: >
+        React 19 + React Router 8 + Vite + Tailwind v3. There is no
+        TypeScript in this repo. Import router APIs from 'react-router';
+        'react-router-dom' is not installed.
+
+        Flag missing useEffect cleanup, unstable dependency arrays, unhandled
+        fetch/axios rejections, and state updates after unmount.
+
+        Repo-specific: any new async state write in pages/Scanner.jsx must
+        carry the monotonic pricingSeq guard (bail if a newer lookup started)
+        — dropping it reintroduces a shipped race where a stale comps
+        response overwrites the newer card. The two blob download helpers in
+        api.js synthesize an <a download> because a plain href cannot carry
+        the Bearer header; do not simplify them into links. MAX_DIMENSION_PX
+        in lib/downscaleImage.js must stay >= the largest max_px in the
+        backend PRESETS. Prefer the shared component classes in index.css
+        (.btn-primary, .card-panel, .input, .label) and the ink/emerald
+        Tailwind tokens over re-inlined utility strings.
+    - path: ".github/workflows/**"
+      instructions: >
+        Flag unpinned action versions, secrets exposed in logs, and missing
+        permissions blocks. The dependency-audit job is intentionally
+        non-blocking (warning annotation, never exit 1) — do not suggest
+        making it gate merges.
+    - path: "CHANGELOG.md"
+      instructions: >
+        Work lands under [Unreleased] on the branch and moves under a dated
+        heading with its PR number when merged. Flag edits to existing dated
+        sections — those are the record of what production already runs.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto
