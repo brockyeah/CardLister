@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
 import { cardMatchesSearch, sortCards } from '../lib/sortCards'
+import { computeInventoryStats } from '../lib/inventoryStats'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
-function StatTile({ label, value }) {
+function StatTile({ label, value, hint }) {
   return (
     <div className="card-panel">
       <div className="text-xs uppercase tracking-wide text-gray-400">{label}</div>
       <div className="text-2xl font-black text-gray-100 mt-1">{value}</div>
+      {hint ? <div className="text-xs text-gray-500 mt-1">{hint}</div> : null}
     </div>
   )
 }
@@ -262,16 +264,8 @@ export default function Inventory() {
     ))
   }
 
-  const stats = useMemo(() => {
-    const total = cards.length
-    const listed = cards.filter((c) => c.status === 'active').length
-    const sold = cards.filter((c) => c.status === 'sold').length
-    const revenue = cards.reduce((sum, c) => sum + (c.sold_price || 0), 0)
-    const activeValue = cards
-      .filter((c) => c.status === 'active')
-      .reduce((sum, c) => sum + (c.listed_price || 0), 0)
-    return { total, listed, sold, revenue, activeValue }
-  }, [cards])
+  // Copy-aware: a qty-3 row is three cards worth three listed prices.
+  const stats = useMemo(() => computeInventoryStats(cards), [cards])
 
   const onMarkSold = (card) => setSoldModalCard(card)
   const onAttachEbay = (card) => setAttachModalCard(card)
@@ -340,7 +334,15 @@ export default function Inventory() {
       <h1 className="text-2xl font-bold">Inventory</h1>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatTile label="Total Cards" value={stats.total} />
+        <StatTile
+          label="Total Cards"
+          value={stats.total}
+          hint={
+            stats.total !== stats.rowCount
+              ? `${stats.rowCount} ${stats.rowCount === 1 ? 'row' : 'rows'}`
+              : null
+          }
+        />
         <StatTile label="Listed" value={stats.listed} />
         <StatTile label="Sold" value={stats.sold} />
         <StatTile label="Revenue" value={`$${stats.revenue.toFixed(2)}`} />

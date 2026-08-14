@@ -5,6 +5,32 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Cache headers for the built frontend itself: the `StaticFiles` mount
+      sends no `Cache-Control`, so the browser revalidates every hashed bundle
+      on every load. Vite already content-hashes `/assets/*`, so those can be
+      `immutable` (same treatment `/uploads` just got) while `index.html` must
+      stay `no-cache` or a deploy never reaches an open tab (quick win;
+      implement directly; inline — pairs with the SPA fallback in `main.py`)
+- [ ] HEAD support on `/api/health` and `/uploads/{filename}`: FastAPI's
+      `@app.get` registers GET only (unlike Starlette's `Route`, which adds
+      HEAD), so both requests fall through to the static mount and answer 404.
+      A status-code-only uptime monitor configured with HEAD — the usual
+      default — reads healthy and unhealthy alike as 404, defeating the 503
+      the deep health check exists to return (quick win; implement directly;
+      inline)
+- [ ] Filter-aware inventory stat tiles: the tiles are computed from the full
+      card list while the table below shows the filtered set, so narrowing to
+      "sold" or searching a player leaves the tiles describing everything —
+      there is no way to ask "what are my Bowman autos worth". Feed
+      `computeInventoryStats` the filtered rows (or show both, filtered
+      alongside overall) (quick win; implement directly; inline —
+      Inventory.jsx only, the math already lives in `lib/inventoryStats.js`)
+- [ ] Drop the fail-open guards in `.github/workflows/ci.yml`: the backend-test
+      and frontend-test steps are wrapped in `if [ -f ... ]` checks added so CI
+      would pass on refs predating those suites. Both conditions are now
+      permanently true, and they fail open — renaming `ebayTitle.test.js`
+      silently stops the entire frontend suite from running while CI stays
+      green (quick win; implement directly; inline)
 - [ ] Batch scan front/back auto-pairing: uploading 20 images of 10 cards
       currently treats each image as its own card; match front+back pairs
       before extraction. Candidate signals: upload order/adjacency (phone
@@ -51,10 +77,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Partial-quantity mark-sold: selling 1 of a qty-3 row currently marks the whole
       row sold; should decrement quantity and record a sold row (medium; implement
       directly — no schema change, split logic in mark_sold; inline)
-- [ ] Quantity-aware inventory stats: the StatTiles count rows, not copies —
-      Total Cards ignores quantity and Est. Active Value is `listed_price × 1`
-      even for qty-3 rows, understating the collection (quick win; implement
-      directly; inline — pure frontend math in Inventory.jsx)
 - [ ] Days-to-sell analytics: avg/median `created_at → sold_at` interval plus a
       distribution view on Analytics, so pricing strategy gets feedback ("Bowman
       autos sell in 4 days, base sits for 60") (medium; implement directly;
@@ -172,11 +194,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       toggle filters next to the existing search box — search can't express
       "all my active autos" today (quick win; implement directly; inline —
       touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
-- [ ] Immutable cache headers on `/uploads`: stored names are uuid-hex so the
-      content behind a URL never changes, but `serve_upload` sends no
-      Cache-Control — every inventory render refetches full-size photos; add
-      `public, max-age=31536000, immutable` (quick win; implement directly;
-      inline — pairs with the server-side thumbnails item)
 - [ ] QR labels for physical storage: print a sheet of QR codes (selected rows
       or a filter) that deep-link back to the card in Inventory, so a physical
       box/toploader can be matched to its row; needs a card permalink/filter
@@ -282,6 +299,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-14 — SPA deep-link fallback: hard loads of /inventory, /analytics
+      and friends served the app shell instead of a 404, with `api/`,
+      `uploads/`, and `assets/` prefixes keeping their real 404s
+- [x] 2026-08-14 — Quantity-aware inventory stats: Total Cards / Listed / Sold
+      count copies and Est. Active Value multiplies by quantity, with a
+      "N rows" caption when rows and copies differ (revenue stays per-row)
+- [x] 2026-08-14 — Immutable cache headers on `/uploads` (uuid-hex names never
+      change content, so `public, max-age=31536000, immutable`)
 
 - [x] 2026-08-06 — Storage usage tiles on Analytics manage-data: DB file size +
       photo count/bytes via `GET /api/analytics/storage`, refreshed after

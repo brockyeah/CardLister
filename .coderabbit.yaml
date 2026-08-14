@@ -48,6 +48,13 @@ reviews:
         - The " (subscription)" model suffix is load-bearing: analytics.py
           _cost() prices that exact suffix at $0.00.
         - Pricing sources must never raise; each degrades to ([], None, note).
+        - The SpaStaticFiles mount at "/" is last in main.py and catches
+          everything, serving the SPA shell for unmatched GET/HEAD page loads.
+          A new URL prefix that should 404 rather than render the app (any new
+          API or file-serving prefix) must be added to
+          SpaStaticFiles.NON_SPA_ROOTS, which matches the whole first path
+          segment so the bare root and all descendants both bypass the SPA
+          fallback.
         - Changing routers/ebay.py build_title is a three-file change
           (build_title, frontend/src/lib/ebayTitle.js, and regenerated
           expected values in backend/tests/fixtures/ebay_title_cases.json).
