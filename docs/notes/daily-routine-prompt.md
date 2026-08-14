@@ -10,7 +10,7 @@ readable record of what they say, so it must be updated whenever a prompt change
 > silently breaks that instruction — the routine reads a missing file and
 > proceeds without its rationale.
 
-Last reconciled with the live routines: 2026-08-12.
+Last reconciled with the live routines: 2026-08-14.
 
 ## The weekly rhythm
 
@@ -21,10 +21,12 @@ Last reconciled with the live routines: 2026-08-12.
 | **C — Weekly deep-work design** | Sundays, 10:00 AM EDT | Turn one "large / design first" backlog item into an approved spec + plan |
 
 The division of labour: **A ships small things continuously. C unblocks the big
-things A can't touch. B checks that a week of A's output is actually sound.** A's
-own PRs are self-healing — the session stays subscribed to GitHub events and wakes
-to fix CI failures and answer review findings — so none of these routines exists to
-babysit a PR.
+things A can't touch. B checks that a week of A's output is actually sound.**
+
+Routine A owns its own PRs end to end: its session stays subscribed to GitHub
+events and wakes to fix CI failures and answer review findings until the PR is
+green. Routines B and C never babysit A's PRs — that is precisely why no separate
+PR-shepherd routine exists.
 
 Owner's only standing job: review and merge. No routine ever merges.
 
@@ -34,7 +36,7 @@ Owner's only standing job: review and merge. No routine ever merges.
 
 Runs daily at 9:00 AM EDT.
 
-```
+```text
 Daily project review + build session. Work through these phases in order.
 If any step needs more detail or context on WHY it exists, read
 docs/notes/daily-routine-prompt.md in the repo — it holds the canonical version
@@ -109,7 +111,10 @@ PHASE 3 — Build (standing authorization):
     owner intervention. Do not block your Phase 4 report waiting on reviews that
     have not arrived yet; the session will wake when they do.
 11. Changelog housekeeping: when a previous PR has merged, move its [Unreleased]
-    entries under a dated heading with the PR number (this lands in the next PR).
+    entries under a dated heading with the PR number. Insert the new heading
+    ABOVE the entries — never overwrite the [Unreleased] line itself, or the
+    entries end up filed under the wrong PR while another stays stranded.
+    Verify afterward that every heading's (PR #N) tag matches its entries'.
 
 PHASE 4 — Report (always):
 12. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
@@ -165,11 +170,12 @@ PHASE 4 — Report (always):
 
 Runs Sundays at 9:00 PM EDT.
 
-```
-Weekly deep review. Three reviewers already covered every PR line-by-line this
-week (Claude Auto Review, CodeRabbit, Codex). Do NOT repeat that — you exist to
-find what diff-scoped review structurally cannot see. Read whole files and whole
-subsystems, not diffs.
+```text
+Weekly deep review. Every PR this week was already reviewed line-by-line by the
+Claude Auto Review Action and CodeRabbit — and possibly by Codex, which the owner
+runs outside GitHub and which leaves no record on the PR, so do not try to verify
+its coverage. Do NOT repeat diff-scoped review; you exist to find what it
+structurally cannot see. Read whole files and whole subsystems, not diffs.
 
 SCOPE: everything merged to main in the last 7 days
 (`git log origin/main --since=7.days`), plus any subsystem those commits touched.
@@ -245,7 +251,7 @@ justify the run.
 
 Runs Sundays at 10:00 AM EDT.
 
-```
+```text
 Weekly deep-work session. The daily routine only ships quick wins, so the
 large items never move. Your job is to unblock exactly one of them.
 
