@@ -97,7 +97,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Accuracy" button on the review form (medium; implement directly; inline)
 - [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
       those individually"); add a per-item back slot before scanning starts
-      (medium; implement directly; inline)
+      (medium; implement directly; inline) — **do not implement separately:
+      subsumed by the batch front/back auto-pairing design above**
+      (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`);
+      its review step is the per-item back slot
 - [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
       sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
       (quick win; implement directly; inline)
