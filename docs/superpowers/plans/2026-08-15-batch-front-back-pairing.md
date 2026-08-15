@@ -4,7 +4,10 @@
 (Approach A — client-side heuristic pairing + mandatory review step; Phase 1 is
 frontend-only, no backend/schema/auth changes).
 
-Steps are ordered and independently testable; each lands with its test. The
+Steps are ordered and independently testable; each lands with its validation
+gate — unit tests where the repo's node-only vitest setup can reach (Step 1),
+build + manual gates where it can't (Steps 2-3), ship-gate re-runs for docs
+(Step 4). The
 whole phase fits one PR, but every step leaves the app working if the PR is cut
 there.
 
@@ -22,13 +25,16 @@ repo's node-only vitest setup.
   (`type === 'application/pdf'`) is never paired, as front or back.
 - Operations, each returning a new pairs array: `swapPair(pairs, i)`,
   `splitPair(pairs, i)` (back becomes a trailing single), `attachBack(pairs,
-  singleIndex, targetIndex)` (only onto a card with no back), `allSingles(pairs)`,
+  singleIndex, targetIndex)` (only onto a card with no back; rejects a PDF as
+  either the source single or the target card, so the PDF-never-paired
+  invariant holds across every operation, not just the proposal), `allSingles(pairs)`,
   `pairAdjacent(pairs)` (re-propose from current order).
 
 **Test (this step):** `frontend/src/lib/pairImages.test.js` — proposal from
 sorted names; lastModified fallback when names are identical; selection-order
 fallback when both collide; odd count leaves a single; PDFs forced single in
-every position; swap/split/attach round-trips; all-singles ↔ pair-adjacent
+every position; attachBack rejects a PDF as source and as target;
+swap/split/attach round-trips; all-singles ↔ pair-adjacent
 toggle is lossless on ordering. Run: `cd frontend && npx vitest run
 src/lib/pairImages.test.js`.
 

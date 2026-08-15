@@ -62,9 +62,13 @@ When 2+ images are staged, propose a pairing before anything scans:
   at `Scanner.jsx:166-169`) and calls `scanCard(front, mode, back)`.
 
 All pairing logic lives in a pure module (`frontend/src/lib/pairImages.js`)
-operating on `{name, lastModified, type}` metadata — directly unit-testable
-under the repo's node-only vitest setup (no jsdom needed), unlike anything
-inside Scanner.jsx.
+operating on `{id, name, lastModified, type}` metadata, never File objects —
+directly unit-testable under the repo's node-only vitest setup (no jsdom
+needed), unlike anything inside Scanner.jsx. `id` is assigned by Scanner when
+the batch is staged (index-derived, same recipe as today's queue keys,
+`Scanner.jsx:119`), unique within the batch and stable for the life of the
+staging session; it is how proposed pairs map back to the actual File objects
+even when filenames and timestamps all collide.
 
 **Tradeoffs:** zero added API cost and zero backend change, but the heuristic
 is order-based only — it cannot *see* that an image is a back. A user who
@@ -108,8 +112,11 @@ non-negotiable under any approach, and once it exists the marginal value of
 vision classification is only "fewer manual corrections when upload order is
 unusual." Ship the heuristic + review UI, use it for a few real batches, and
 only build B if the proposal is wrong often enough to annoy. Phase 1 touches
-no backend code, no schema, no auth, and no money — the failure mode of a bad
-proposal is a drag in the review UI, not a wasted scan.
+no backend code, no schema, no auth, and no money. A bad proposal *caught in
+review* costs only a drag in the review UI; a wrong pair that survives review
+still spends one extraction and yields bad data (see "What could go wrong") —
+a residual risk classification would not remove either, since B's output feeds
+the same review step.
 
 ## What could go wrong
 
