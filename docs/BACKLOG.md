@@ -39,7 +39,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       preceding front; unpaired images fall back to single-sided scan. UI:
       pairing review step in the batch queue with drag-to-repair before
       Claude extraction runs (large; design first — touches Scanner queue,
-      /api/scan, and scan cost per card)
+      /api/scan, and scan cost per card) — **design + plan written 2026-08-15**
+      (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
+      `docs/superpowers/plans/2026-08-15-batch-front-back-pairing.md`):
+      Phase 1 is frontend-only (heuristic pairing + review step, $0 added
+      cost, ~40% cheaper on the target workload). **Approved by owner
+      2026-08-15 — Approach A, pairs proposed by default in front-then-back
+      order; cleared for implementation per the plan doc.** Subsumes the
+      "Batch-mode back images" item below.
 - [ ] Comps accuracy — parallel/variant contamination: suggested price
       factors in parallel + serialized listings when pricing a base card
       (and vice versa), skewing high, and it's worst on exactly the cards
@@ -92,7 +99,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Accuracy" button on the review form (medium; implement directly; inline)
 - [ ] Batch-mode back images: batch queue is front-only today (UI says "scan
       those individually"); add a per-item back slot before scanning starts
-      (medium; implement directly; inline)
+      (medium; implement directly; inline) — **do not implement separately:
+      subsumed by the batch front/back auto-pairing design above**
+      (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`);
+      its review step is the per-item back slot
 - [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
       sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
       (quick win; implement directly; inline)
@@ -233,6 +243,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Batch-pairing vision assist (rainy-day; explicitly deferred by owner
+      2026-08-15): one cheap Haiku call per batch classifying thumbnails as
+      front/back to improve the pairing proposal — Approach B in
+      `docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
+      <$0.01 per batch. Only worth building if the shipped order-based
+      heuristic proposes wrong pairs often in real use; needs its own design
+      pass (new authenticated endpoint, threadpool pattern, mock-mode
+      degrade, new UsageEvent kind) (medium; **plan doc first** — new
+      Anthropic call path; inline)
 - [ ] Offline scan queue (PWA): stage photos while offline (IndexedDB) and
       auto-upload when connectivity returns — card shows and garage sales have
       bad signal, and the PWA manifest already exists (long-term; **plan doc
