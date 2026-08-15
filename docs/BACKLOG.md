@@ -39,7 +39,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       preceding front; unpaired images fall back to single-sided scan. UI:
       pairing review step in the batch queue with drag-to-repair before
       Claude extraction runs (large; design first — touches Scanner queue,
-      /api/scan, and scan cost per card)
+      /api/scan, and scan cost per card) — **design + plan written 2026-08-15**
+      (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
+      `docs/superpowers/plans/2026-08-15-batch-front-back-pairing.md`):
+      Phase 1 is frontend-only (heuristic pairing + review step, $0 added
+      cost, ~40% cheaper on the target workload); awaiting owner approval
+      before implementation. Subsumes the "Batch-mode back images" item below.
 - [ ] Comps accuracy — parallel/variant contamination: suggested price
       factors in parallel + serialized listings when pricing a base card
       (and vice versa), skewing high, and it's worst on exactly the cards

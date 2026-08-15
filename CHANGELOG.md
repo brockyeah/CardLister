@@ -12,6 +12,18 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased]
 
+### Added
+- Design doc + implementation plan for batch scan front/back auto-pairing
+  (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
+  `docs/superpowers/plans/2026-08-15-batch-front-back-pairing.md`). Batch mode
+  scans every image as its own card, so a camera roll alternating front/back
+  yields double the rows, double the Opus spend, and none of the back-side
+  detail the extraction prompt itself says to read (year, full card number,
+  serial). The backend and API client already support paired scans — the
+  recommended Phase 1 is frontend-only: heuristic adjacent pairing plus a
+  mandatory review step before any tokens are spent. Docs only; implementation
+  awaits owner approval of the approach.
+
 ### Fixed
 - Hard loads of client routes no longer 404. `StaticFiles(html=True)` only
   serves `index.html` for *directory* requests, so the router only ever ran
