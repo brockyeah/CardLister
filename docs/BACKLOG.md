@@ -43,8 +43,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
       `docs/superpowers/plans/2026-08-15-batch-front-back-pairing.md`):
       Phase 1 is frontend-only (heuristic pairing + review step, $0 added
-      cost, ~40% cheaper on the target workload); awaiting owner approval
-      before implementation. Subsumes the "Batch-mode back images" item below.
+      cost, ~40% cheaper on the target workload). **Approved by owner
+      2026-08-15 — Approach A, pairs proposed by default in front-then-back
+      order; cleared for implementation per the plan doc.** Subsumes the
+      "Batch-mode back images" item below.
 - [ ] Comps accuracy — parallel/variant contamination: suggested price
       factors in parallel + serialized listings when pricing a base card
       (and vice versa), skewing high, and it's worst on exactly the cards
@@ -241,6 +243,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] Batch-pairing vision assist (rainy-day; explicitly deferred by owner
+      2026-08-15): one cheap Haiku call per batch classifying thumbnails as
+      front/back to improve the pairing proposal — Approach B in
+      `docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
+      <$0.01 per batch. Only worth building if the shipped order-based
+      heuristic proposes wrong pairs often in real use; needs its own design
+      pass (new authenticated endpoint, threadpool pattern, mock-mode
+      degrade, new UsageEvent kind) (medium; **plan doc first** — new
+      Anthropic call path; inline)
 - [ ] Offline scan queue (PWA): stage photos while offline (IndexedDB) and
       auto-upload when connectivity returns — card shows and garage sales have
       bad signal, and the PWA manifest already exists (long-term; **plan doc

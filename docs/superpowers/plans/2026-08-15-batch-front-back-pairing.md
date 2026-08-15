@@ -4,6 +4,12 @@
 (Approach A — client-side heuristic pairing + mandatory review step; Phase 1 is
 frontend-only, no backend/schema/auth changes).
 
+**Status: approved by owner 2026-08-15 — cleared for implementation.** Decided
+defaults: multi-file batches propose adjacent pairs in front-then-back order
+(matches how Alan uploads); the review step's all-singles toggle covers
+all-fronts batches. The Phase 2 vision-classification assist stays parked (see
+`docs/BACKLOG.md` Later).
+
 Steps are ordered and independently testable; each lands with its validation
 gate — unit tests where the repo's node-only vitest setup can reach (Step 1),
 build + manual gates where it can't (Steps 2-3), ship-gate re-runs for docs

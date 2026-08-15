@@ -1,6 +1,16 @@
 # Batch Scan Front/Back Auto-Pairing — Design
 
-**Date:** 2026-08-15 · **Status:** Proposed (awaiting owner approval — docs-only PR, no implementation yet)
+**Date:** 2026-08-15 · **Status:** Approved by owner 2026-08-15 (Approach A; implementation not yet started)
+
+**Owner decisions (2026-08-15, in chat):**
+1. Approach A approved — simple order-based pairing with the mandatory review
+   step; no vision classification pass.
+2. Default proposal mode: **propose adjacent pairs, front-then-back order** —
+   that matches how Alan (the second user) typically uploads. The all-singles
+   toggle stays one tap away in the review step.
+3. Approach B (Haiku classification assist) is parked as a rainy-day idea —
+   recorded in `docs/BACKLOG.md` under Later; do not build unless the ordering
+   heuristic proves annoying in real use.
 
 ## The problem, concretely
 
