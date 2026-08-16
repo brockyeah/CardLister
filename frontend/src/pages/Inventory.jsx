@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
 import { cardMatchesSearch, sortCards } from '../lib/sortCards'
 import { computeInventoryStats } from '../lib/inventoryStats'
+import { formatApiError } from '../lib/apiError.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value, hint }) {
@@ -89,8 +90,7 @@ function AttachEbayModal({ card, onClose, onConfirm }) {
       await onConfirm({ ebay_listing_id: id, ebay_listing_url: url.trim() })
       onClose()
     } catch (err) {
-      const detail = err.response?.data?.detail
-      setError(Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : (detail || err.message))
+      setError(formatApiError(err, err.message || 'Failed to attach listing.'))
     } finally {
       setSaving(false)
     }

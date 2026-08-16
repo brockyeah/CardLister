@@ -4,6 +4,7 @@ import CardForm from '../components/CardForm.jsx'
 import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
 import { downscaleImage } from '../lib/downscaleImage'
+import { formatApiError } from '../lib/apiError.js'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -180,7 +181,7 @@ export default function Scanner() {
 
       await fetchPricing(next)
     } catch (e) {
-      setError(e.response?.data?.detail || 'Scan failed. Try again.')
+      setError(formatApiError(e, 'Scan failed. Try again.'))
     } finally {
       setScanning(false)
     }
@@ -197,7 +198,7 @@ export default function Scanner() {
     downscaleImage(next.file)
       .then((file) => scanCard(file, mode))
       .then((result) => mark(next.key, { status: 'ready', result }))
-      .catch((e) => mark(next.key, { status: 'error', error: e.response?.data?.detail || 'Scan failed' }))
+      .catch((e) => mark(next.key, { status: 'error', error: formatApiError(e, 'Scan failed') }))
       .finally(() => { processingRef.current = false })
   }, [queue, mode])
 
@@ -270,7 +271,7 @@ export default function Scanner() {
       })
       setTimeout(() => setToast(null), 8000)
     } catch (e) {
-      setError(e.response?.data?.detail || 'Save failed.')
+      setError(formatApiError(e, 'Save failed.'))
     } finally {
       setSubmitting(false)
     }
@@ -304,7 +305,7 @@ export default function Scanner() {
       })
       setTimeout(() => setToast(null), 8000)
     } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to update card count.')
+      setError(formatApiError(e, 'Failed to update card count.'))
     } finally {
       setSubmitting(false)
     }
