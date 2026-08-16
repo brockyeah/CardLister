@@ -1,5 +1,6 @@
 """eBay account-deletion handshake + OAuth landing pages (all public, no auth)."""
 import hashlib
+import logging
 
 from fastapi.testclient import TestClient
 
@@ -50,6 +51,37 @@ def test_deletion_notice_acks_without_stored_data(db_session):
             "/api/ebay-compliance/account-deletion", content=b"not json",
             headers={"Content-Type": "application/json"},
         ).status_code == 200
+
+
+def test_deletion_notice_sanitizes_user_id_in_log(db_session, caplog):
+    # The body is unauthenticated; a crafted userId must not be able to inject
+    # fake log lines (newlines) or bloat the audit log. Guards the repr()+cap
+    # in the handler against a future "simplify" pass.
+    evil = "x\nFAKE LOG LINE injected\n" + "A" * 500
+    with TestClient(app) as client, caplog.at_level(logging.INFO):
+        r = client.post("/api/ebay-compliance/account-deletion", json={
+            "notification": {"data": {"userId": evil}}
+        })
+        assert r.status_code == 200
+    messages = [rec.getMessage() for rec in caplog.records
+                if "account-deletion notice" in rec.getMessage()]
+    assert len(messages) == 1
+    msg = messages[0]
+    assert "\nFAKE" not in msg          # newline neutralized by repr()
+    assert "\\nFAKE" in msg             # ...but the content is still auditable
+    assert len(msg) < 250               # 64-char cap held against the 500-char pad
+
+
+def test_deletion_notice_rejects_oversized_body(db_session):
+    # Unauthenticated route on a single-worker container: cap the body read so
+    # a giant POST can't balloon memory. Real notices are ~1 KB.
+    big = b'{"pad": "' + b"A" * (128 * 1024) + b'"}'
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/ebay-compliance/account-deletion", content=big,
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 413
 
 
 def test_oauth_and_privacy_pages_are_public(db_session):
