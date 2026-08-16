@@ -47,7 +47,9 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    onSubmit?.(data)
+    // quantity is non-Optional server-side (default 1, ge=1), but clearing the
+    // input stores null mid-edit — coerce at submit so the save can't 422.
+    onSubmit?.({ ...data, quantity: data.quantity ?? 1 })
   }
 
   const preview = buildEbayTitle(data)

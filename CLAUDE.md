@@ -32,7 +32,7 @@ cd frontend && npx vitest run -t "returns PDFs untouched"
 cd frontend && npm run build        # → frontend/dist
 ```
 
-Must be `python -m pytest` from the repo root — there is no `pytest.ini`/`pyproject.toml`, so bare `pytest` fails to resolve `backend.`. CI and the Dockerfile pin Python 3.11; the local venv is 3.12.
+Must be `python -m pytest` from the repo root — there is no `pytest.ini`/`pyproject.toml`, so bare `pytest` fails to resolve `backend.`. CI, the Dockerfile, and the local venv are all Python 3.11.
 
 **There is no linter or formatter in this repo** (no eslint/prettier/ruff/black). A stray `eslint-disable` comment in `CardForm.jsx` reads to nothing.
 
@@ -48,9 +48,9 @@ The 15–30s Anthropic call is sync, so `scan.py` wraps it in `run_in_threadpool
 
 ### Pricing chain (`routers/pricing.py`)
 
-Tries in order, each returning a median of up to 10 comps: **eBay Browse API** (only when `EBAY_APP_ID` + `EBAY_CERT_ID` are set) → 130point → Mavin → eBay HTML scrape → mock $9.99. Notes from every attempted source are joined with ` | ` and surfaced in the UI.
+Tries in order, each returning a median of up to 10 comps: **eBay Browse API** (only when `EBAY_APP_ID` + `EBAY_CERT_ID` are set) → 130point → Mavin → eBay HTML scrape → mock $9.99. When a source succeeds, its fixed note is what the UI shows; only the final all-failed mock branch joins every attempted source's note with ` | `.
 
-Critical distinction: the Browse API returns **active listings (asking prices), not sales**. True sold comps need eBay's gated Marketplace Insights API. So the highest-priority source is structurally the least accurate comp type, while the scrapers return real sold prices — and the scrapers routinely 403 from a datacenter IP. Every source is written to never raise; each degrades to `([], None, note)`.
+Critical distinction: the Browse API returns **active listings (asking prices), not sales**. True sold comps need eBay's gated Marketplace Insights API. So the highest-priority source is structurally the least accurate comp type, while the scrapers return real sold prices — and the scrapers routinely 403 from a datacenter IP. Every source is written to never raise; each degrades to empty comps + a note (most return `([], None, note)`; Mavin returns a 4-tuple `(comps, price, source, note)`).
 
 ### Learning from corrections (`services/learning.py`)
 
@@ -104,7 +104,8 @@ These have no compile-time or test-time guard unless noted — they fail in prod
 8. **`MAX_DIMENSION_PX = 2000` in `downscaleImage.js` shadows the `accuracy` preset.** Raising the preset above 2000 does nothing until the client cap moves too.
 9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers.
 10. **Never add a `startCommand` to `railway.toml`** — Railway passes it literally and won't expand `$PORT`; the Dockerfile's `sh -c` does.
-11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment, so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
+11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment (case-folded), so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
+12. **The year-long `immutable` cache on `/uploads` and `/assets` depends on names never being reused.** Uploads are minted as `uuid.uuid4().hex` in `routers/scan.py` and Vite content-hashes bundle names — any future change that derives a filename from user input, reuses a name, or rewrites a file in place (e.g. a server-side thumbnail/re-encode pass) will serve year-stale bytes with no error anywhere. `index.html` is the deliberate exception: `SpaStaticFiles` stamps it `no-cache` so a cached shell can't outlive its bundles across a deploy.
 
 ## Testing notes
 

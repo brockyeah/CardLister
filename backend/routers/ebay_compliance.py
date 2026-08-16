@@ -28,6 +28,7 @@ Env:
                            portal exactly).
 """
 import hashlib
+import json
 import logging
 import os
 
@@ -63,6 +64,11 @@ def account_deletion_challenge(challenge_code: str = ""):
     return {"challengeResponse": digest}
 
 
+# Real deletion notices are ~1 KB; anything bigger is not eBay. The route is
+# unauthenticated, so never buffer an arbitrary-size body on the lone worker.
+_MAX_NOTICE_BYTES = 64 * 1024
+
+
 @router.post("/account-deletion")
 async def account_deletion_notice(request: Request):
     """Ack an account-deletion notice.
@@ -71,16 +77,27 @@ async def account_deletion_notice(request: Request):
     tokens land (draft-listing feature), this handler must delete the
     matching user's tokens. Log enough to audit that duty later.
     """
+    # Check before buffering: chunk sizes come from the ASGI server, so an
+    # oversized chunk must be rejected without ever being copied in.
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > _MAX_NOTICE_BYTES:
+            raise HTTPException(status_code=413, detail="Body too large")
+        body.extend(chunk)
     try:
-        payload = await request.json()
+        payload = json.loads(body)
         user_id = (payload.get("notification", {}).get("data", {}) or {}).get("userId")
     except Exception:
         user_id = None
     # repr() + cap: the body is unauthenticated, so never let a crafted
     # userId inject newlines (fake log lines) or bloat into the audit log.
+    # Signature presence is recorded because notices are NOT verified yet —
+    # verification (eBay's X-EBAY-SIGNATURE, ECDSA) is a hard prerequisite of
+    # ever acting on a notice; see the backlog item.
     log.info(
-        "eBay account-deletion notice received (userId=%s) — no eBay user data stored",
+        "eBay account-deletion notice received (userId=%s, signature=%s, unverified) — no eBay user data stored",
         repr(str(user_id)[:64]) if user_id is not None else None,
+        "present" if request.headers.get("x-ebay-signature") else "absent",
     )
     return {"ack": True}
 

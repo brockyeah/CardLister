@@ -51,6 +51,23 @@ def test_cheatsheet_dedupes_identical_rules(db_session):
     assert sheet.count("\n") == 0  # 40 identical rules collapse to one line
 
 
+def test_cheatsheet_caps_distinct_rules_at_max(db_session):
+    # 40 *distinct* corrections must still clamp at CHEATSHEET_MAX_RULES —
+    # this cap is what keeps per-scan prompt tokens at a plateau instead of
+    # growing with every correction ever recorded.
+    from backend.services.learning import CHEATSHEET_MAX_RULES
+
+    for i in range(40):
+        db_session.add(Correction(
+            username="tester", year=2024, brand="Bowman", set_name=f"Set {i}",
+            card_number=f"BCP-{i}",
+            diff_json=json.dumps({"set_name": {"from": f"Set {i}", "to": f"Set {i} Prospects"}}),
+        ))
+    db_session.commit()
+    sheet = build_cheatsheet(db_session)
+    assert sheet.count("\n") == CHEATSHEET_MAX_RULES - 1
+
+
 def test_create_card_with_scan_id_records_correction(db_session):
     from backend.main import app
 

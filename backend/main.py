@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -49,7 +50,10 @@ async def _callup_poller():
         try:
             db = SessionLocal()
             try:
-                result = run_poll_cycle(db)
+                # run_poll_cycle does sync network I/O (MLB fetch + email send,
+                # up to ~35s of timeouts) — keep it off the single event loop
+                # so requests don't stall while a cycle runs.
+                result = await run_in_threadpool(run_poll_cycle, db)
                 if result["new"] or result["emailed"]:
                     logger.info("Call-up poll: %s", result)
             finally:
@@ -208,9 +212,21 @@ class SpaStaticFiles(StaticFiles):
         except StarletteHTTPException as exc:
             if exc.status_code != 404 or not self._is_page_load(path, scope):
                 raise
-            return await super().get_response("index.html", scope)
-        if response.status_code == 404 and self._is_page_load(path, scope):
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
+        else:
+            if response.status_code == 404 and self._is_page_load(path, scope):
+                response = await super().get_response("index.html", scope)
+        if response.status_code == 200:
+            if str(getattr(response, "path", "")).endswith("index.html"):
+                # The shell must revalidate on every load: a heuristically
+                # cached shell outlives its hashed bundles across a deploy and
+                # white-screens on the (deliberate) /assets 404. The ETag
+                # Starlette already sets makes revalidation a cheap 304.
+                response.headers["Cache-Control"] = "no-cache"
+            elif path.split("/", 1)[0] == "assets":
+                # Vite bundle names are content-hashed — same forever-cache
+                # rule as /uploads.
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
 
