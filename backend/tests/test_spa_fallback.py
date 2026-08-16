@@ -48,10 +48,26 @@ def test_page_loads_serve_the_spa_shell(client, path):
     assert "CardLister" in r.text
 
 
+def test_head_requests_are_page_loads_too(client):
+    # Link previews and uptime checks HEAD deep links; they must get the shell.
+    r = client.head("/inventory")
+    assert r.status_code == 200
+
+
 def test_real_assets_still_win_over_the_fallback(client):
     r = client.get("/assets/index-abc123.js")
     assert r.status_code == 200
     assert "bundle" in r.text
+
+
+def test_shell_revalidates_but_hashed_assets_cache_forever(client):
+    # A heuristically cached shell outlives its bundles across a deploy and
+    # white-screens on the /assets 404 — the shell must always revalidate.
+    for path in ("/", "/inventory"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
+    # Bundle names are content-hashed, so they get the /uploads treatment.
+    r = client.get("/assets/index-abc123.js")
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 @pytest.mark.parametrize(
