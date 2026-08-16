@@ -5,12 +5,24 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
-- [ ] Cache headers for the built frontend itself: the `StaticFiles` mount
-      sends no `Cache-Control`, so the browser revalidates every hashed bundle
-      on every load. Vite already content-hashes `/assets/*`, so those can be
-      `immutable` (same treatment `/uploads` just got) while `index.html` must
-      stay `no-cache` or a deploy never reaches an open tab (quick win;
-      implement directly; inline — pairs with the SPA fallback in `main.py`)
+- [ ] eBay deletion-notice signature verification: the account-deletion
+      endpoint acks any POST — eBay signs notices with `X-EBAY-SIGNATURE`
+      (ECDSA, public key from the Notification API) and the handler never
+      checks it, so the log it keeps as the future audit trail is forgeable by
+      anyone with the URL. Harmless while nothing is stored, but a **hard
+      prerequisite** of the draft-listing/OAuth feature: once seller tokens
+      exist, an unverified notice becomes an unauthenticated "delete this
+      user's tokens" request (medium; **design first** — key fetch + cache +
+      verify, still 2xx on failure per eBay retry semantics; found by the
+      2026-08-16 weekly deep review)
+- [ ] SPA mount wiring test: `test_spa_fallback.py` exercises `SpaStaticFiles`
+      on a throwaway app over a temp dir, and `backend/static` doesn't exist
+      in CI — so reverting `main.py`'s mount to plain `StaticFiles(html=True)`
+      passes the whole suite. Cleanest fix is an app-factory refactor so a
+      test can build the app with a temp static dir; note the prefix check
+      also runs on the normalized path, so raw `/api/..`-style requests get
+      the shell (cosmetic — browsers normalize before sending) (medium;
+      implement directly; inline — found by the 2026-08-16 weekly deep review)
 - [ ] HEAD support on `/api/health` and `/uploads/{filename}`: FastAPI's
       `@app.get` registers GET only (unlike Starlette's `Route`, which adds
       HEAD), so both requests fall through to the static mount and answer 404.
@@ -75,9 +87,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Scan-accuracy report on Analytics: Corrections table already stores
       extracted-vs-corrected diffs — chart correction rate over time and
       most-corrected fields (medium; implement directly; inline; dataviz skill first)
-- [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler pattern; Phase 2 stub in `backend/routers/ebay.py`)
-- [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all exist)
-- [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit by player/brand)
+- [ ] eBay Orders API polling → auto-mark cards sold (reuses call-up scheduler
+      pattern; Phase 2 stub in `backend/routers/ebay.py`) (large; design first —
+      needs eBay OAuth + a second poller concern, see invariant #9)
+- [ ] Stale-listing reprice digest (scheduler + mailer + pricing chain all
+      exist) (medium; implement directly; inline)
+- [ ] Inventory value / P&L dashboard on Analytics (est. value, realized profit
+      by player/brand) (medium; implement directly; inline; dataviz skill first)
 - [ ] Edit saved cards from Inventory: after save the only mutable field is price via
       the Comps modal — typos require delete + rescan; reuse CardForm in a modal
       (medium; implement directly; inline)
@@ -104,8 +120,8 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`);
       its review step is the per-item back slot
 - [ ] Remember inventory sort choice in localStorage (builds on the 2026-07-28
-      sortable columns; touches Inventory.jsx so wait for PR #18 to merge)
-      (quick win; implement directly; inline)
+      sortable columns; touches Inventory.jsx) (quick win; implement directly;
+      inline)
 - [ ] CSV import dry-run preview: run the 2026-07-30 import parser without
       committing and show would-be created/skipped counts before the real import
       (quick win; implement directly; inline)
@@ -116,7 +132,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Scan history browser: the Scans table keeps every real extraction + photos,
       but nothing surfaces them — list past scans and allow saving one that was
       never saved as a card (medium; implement directly; inline; UI as its own
-      panel so it doesn't collide with Scanner.jsx changes in PR #19)
+      panel so it doesn't collide with in-flight Scanner.jsx work)
 - [ ] Weekly inventory digest email: Sunday summary via the existing mailer —
       cards added, scans + est. API cost, actives missing a listing URL, stale
       actives (medium; **plan doc first** — touches 3 subsystems: scheduler,
@@ -129,7 +145,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Bulk row selection in Inventory: checkbox column + bulk mark-sold /
       delete / copy-listing-text over the selection; today every action is
       one row at a time, which hurts at 100+ cards (medium; implement
-      directly; inline — builds on CardTable.jsx after PR #18 lands)
+      directly; inline — builds on CardTable.jsx)
 - [ ] Photo backup zip: the SQLite snapshot backs up the database only — card
       photos on the Railway volume still have no backup story; add
       `GET /api/analytics/backup-photos.zip` streaming all card-referenced
@@ -137,8 +153,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Server-side thumbnails: the inventory table's `<img>` cells load the
       original scan photos; generate a ~256px thumbnail at upload time (Pillow
       already a dependency) and serve that in `CardTable`, keeping the original
-      for the lightbox (medium; implement directly; inline — touches CardTable,
-      wait for the open PR queue to land)
+      for the lightbox (medium; implement directly; inline — touches CardTable;
+      NOTE: thumbnails must be new files, never in-place rewrites — invariant
+      #12, /uploads is cached immutable)
 - [ ] Backend error visibility: unhandled 500s only live in Railway logs; add
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
@@ -152,11 +169,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (defaults "NM"), so typos like "nm "/"Near Mint" fragment the data; replace
       with a select (RAW, GEM-MT, NM-MT, NM, EX, VG, POOR) and normalize known
       variants on CSV import (quick win; implement directly; inline — touches
-      CardForm.jsx, land after the open PR queue clears)
+      CardForm.jsx)
 - [ ] Scanner batch-review keyboard shortcuts: Enter = save & advance, ←/→ move
       through the queue — batch review is the highest-repetition flow in the app
       and is entirely mouse-driven today (quick win–medium; implement directly;
-      inline — touches Scanner.jsx, land after the open PR queue clears)
+      inline — touches Scanner.jsx)
 - [ ] Monthly scan-cost budget alert: usage table already tracks est. cost per
       scan; add an env-configurable monthly cap with an Analytics banner and the
       existing ntfy push when 80% / 100% is crossed, checked in the poll cycle
@@ -169,7 +186,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the row (clearing the search/filters if they hide it) — the QR-labels
       item below explicitly needs a permalink first, and shared links/bookmarks
       get it for free (quick win; implement directly; inline — touches
-      Inventory.jsx only, land after the open PR queue merges)
+      Inventory.jsx only)
 - [ ] Player-name autocomplete in CardForm: a `<datalist>` fed from existing
       inventory player names, so repeat players are picked instead of retyped —
       free-text typos ("Jackson Holiday") fragment search and the planned
@@ -195,7 +212,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       row and CardTable renders them all — payload and DOM both grow unbounded
       with the collection; add `limit`/`offset` (or cursor) + a "load more" or
       windowing on the table (medium; implement directly; inline — touches
-      Inventory.jsx, land after PR #29 merges)
+      Inventory.jsx)
 - [ ] Scanner drag-and-drop + paste-from-clipboard upload: staging photos is
       file-picker/camera only; accept dropped files on the stage area and
       Ctrl+V image paste for desktop workflows (quick win; implement directly;
@@ -203,7 +220,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Inventory filter chips: status / RC / Auto / 1st Bowman / Refractor
       toggle filters next to the existing search box — search can't express
       "all my active autos" today (quick win; implement directly; inline —
-      touches Inventory.jsx + CardTable.jsx, land after PR #29 merges)
+      touches Inventory.jsx + CardTable.jsx)
 - [ ] QR labels for physical storage: print a sheet of QR codes (selected rows
       or a filter) that deep-link back to the card in Inventory, so a physical
       box/toploader can be matched to its row; needs a card permalink/filter
@@ -219,7 +236,7 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Scanner pricing panel and the Comps modal — a zero-API sanity check on
       the five-source pricing chain, especially when it quietly falls back to
       mock (quick win; implement directly; inline — touches Scanner.jsx +
-      Inventory comps modal, land after PR #29 merges)
+      Inventory comps modal)
 - [ ] Scan preset refresh to the current model lineup: PRESETS pin Sonnet 4.6 /
       Opus 4.7 and the Scanner mode cards hardcode the same names — evaluate
       newer models (e.g. Haiku 4.5 for Cost, current Sonnet/Opus for
@@ -263,7 +280,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       inline)
 - [ ] Login rate limiting on `/api/auth/login`: sliding window per IP+username —
       currently unlimited attempts (quick win–medium; **plan doc first** — touches
-      auth; inline)
+      auth; inline). Same pass should cap the request body: login shares the
+      unbounded-buffer exposure the compliance endpoint closed 2026-08-16
+      (pydantic buffers the whole body before validating).
 - [ ] Early request-body size reject on `/api/scan`: the 25 MB per-file cap
       (2026-08-01) stops oversized files landing in `uploads/`, but Starlette's
       multipart parser still receives/spools the whole request body before the
@@ -281,11 +300,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       because 7.12.0–8.2.0 carries an unpatched RSC-CSRF advisory; 8.3.0 clears
       every react-router advisory (npm audit: 0 vulnerabilities). React 19 was
       required by v8's peer range.
-- [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see monetization notes Phase A)
+- [ ] eBay OAuth + Sell API direct draft creation (replaces clipboard flow — see
+      monetization notes Phase A) (large; design first — prerequisites: the
+      deletion-notice signature verification item in Now/next, and note the
+      `oauth/accepted` landing receives `?code=…` which lands in access logs
+      today; the token exchange must address that) (2026-08-16 weekly review)
 - [ ] PSA/BGS grade slab detection in vision + grade-aware pricing queries
-- [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced with news/call-ups
-- [ ] Sold-comp price history per card (store lookups over time, sparkline in inventory)
-- [ ] Production/multi-tenant track — see `docs/notes/2026-07-25-production-monetization.md`
+      (large; design first — touches vision prompts + pricing chain)
+- [ ] Prospect watchlist: players whose 1st Bowmans you own, cross-referenced
+      with news/call-ups (medium; implement directly; inline)
+- [ ] Sold-comp price history per card (store lookups over time, sparkline in
+      inventory) (large; design first — new table/schema)
+- [ ] Production/multi-tenant track — see
+      `docs/notes/2026-07-25-production-monetization.md` (large; design first)
 - [ ] Auth on `/uploads` photo serving: `/uploads/{filename}` is deliberately
       unauthenticated and relies on unguessable uuid names (capability URLs) —
       a leaked URL (browser history, pasted link) exposes the photo forever,
@@ -313,9 +340,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 - [ ] Cost basis (`purchase_price`) field on cards: record what was paid so the
       planned P&L dashboard can show true realized profit instead of revenue only
       (medium; **plan doc first** — schema change; inline)
-- [ ] Record the Railway production URL in README (owner input needed — the
-      README now has a placeholder next to the deploy steps; the deep health
-      endpoint shipped 2026-07-29)
 - [ ] Pricing-source telemetry: the comps chain silently falls through five
       sources to a $9.99 mock, so a blocked scraper looks like "pricing works
       but is weird" — log source/hit/latency per lookup and chart hit rates on
@@ -331,6 +355,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-16 — Cache headers for the built frontend: `index.html` is
+      `no-cache` (a cached shell could outlive its bundles across a deploy and
+      white-screen), Vite's content-hashed `/assets/*` bundles are immutable
+      like `/uploads` (weekly deep review PR)
+- [x] 2026-08-16 — Railway production URL recorded in README (was a
+      placeholder; the daily-routine doc already pinged it)
 
 - [x] 2026-08-14 — SPA deep-link fallback: hard loads of /inventory, /analytics
       and friends served the app shell instead of a 404, with `api/`,

@@ -47,7 +47,12 @@ reviews:
           GET /{card_id}, or they 422 against the int path param.
         - The " (subscription)" model suffix is load-bearing: analytics.py
           _cost() prices that exact suffix at $0.00.
-        - Pricing sources must never raise; each degrades to ([], None, note).
+        - Pricing sources must never raise; each degrades to empty comps + a
+          note (Mavin's signature is a 4-tuple: comps, price, source, note).
+        - Files under /uploads and /assets are cached immutable for a year, so
+          stored filenames must never be reused or rewritten in place
+          (uploads are uuid-hex, bundles are content-hashed). index.html is
+          deliberately no-cache.
         - The SpaStaticFiles mount at "/" is last in main.py and catches
           everything, serving the SPA shell for unmatched GET/HEAD page loads.
           A new URL prefix that should 404 rather than render the app (any new

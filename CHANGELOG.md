@@ -12,6 +12,41 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased]
 
+### Fixed
+- The SPA shell now ships `Cache-Control: no-cache` and Vite's content-hashed
+  bundles under `/assets/` get the same year-long immutable header as uploads.
+  Neither carried any cache header, so browsers applied heuristic freshness to
+  the shell — a cached copy could outlive its bundles across a deploy, request
+  a hashed bundle that no longer exists, hit the (deliberate) `/assets` 404,
+  and white-screen. The shell revalidating every load (a cheap 304 via the
+  existing ETag) closes the very failure PR #40's fallback work reasoned
+  about, and immutable bundles drop a 304 round-trip per file per navigation.
+- Clearing the Quantity field no longer white-screens the Scanner on save.
+  An emptied number input stored `null`, the server 422'd it (`quantity` is
+  non-Optional, `ge=1`), and the FastAPI validation *array* in `detail` was
+  rendered directly into JSX — React throws on object children, losing the
+  reviewed form. Quantity now coerces to 1 at submit, and a shared
+  `lib/apiError.js` formatter normalizes every API error to a string across
+  Scanner and Inventory.
+- The call-up poller no longer blocks the event loop. Each cycle did sync
+  network I/O (MLB fetch + digest email, up to ~35s of timeouts) directly on
+  the loop of the single worker, stalling every request — including saves and
+  scans — while it ran. The cycle now runs via `run_in_threadpool`, same as
+  the vision call.
+
+### Changed
+- The public eBay account-deletion endpoint caps its request body at 64 KB
+  (413 above it). Real notices are ~1 KB; the route is unauthenticated, so an
+  arbitrary-size POST could balloon memory on the lone worker.
+- New tests pin previously unguarded invariants: `_cost()`'s subscription-$0
+  rule and pricing table (CLAUDE.md invariant #2 had no test), the cheatsheet's
+  30-rule cap with *distinct* corrections (the cap is what keeps per-scan
+  prompt tokens at a plateau), the compliance log sanitization (`repr()` + cap
+  could be "simplified" away silently), and HEAD requests in the SPA
+  page-load contract.
+
+## 2026-08-15 — Batch front/back pairing design (PR #42)
+
 ### Added
 - Design doc + implementation plan for batch scan front/back auto-pairing
   (`docs/superpowers/specs/2026-08-15-batch-front-back-pairing-design.md`,
@@ -23,6 +58,8 @@ only in `[Unreleased]` on a branch is not in prod yet.
   recommended Phase 1 is frontend-only: heuristic adjacent pairing plus a
   mandatory review step before any tokens are spent. Docs only; implementation
   awaits owner approval of the approach.
+
+## 2026-08-14 — SPA deep links, copy-counting stats, upload caching (PR #40)
 
 ### Fixed
 - Hard loads of client routes no longer 404. `StaticFiles(html=True)` only

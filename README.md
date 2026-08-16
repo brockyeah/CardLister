@@ -139,8 +139,8 @@ docker run --rm -p 8000:8000 \
    - `DB_PATH=/data/cardlister.db`
 5. Deploy. Railway exposes the URL — log in with your password.
 
-**Production URL:** _not recorded yet — after deploying, paste the Railway URL
-here so tooling (e.g. the daily review routine) can ping `GET /api/health`._
+**Production URL:** `https://cardlister-production.up.railway.app` (the daily
+review routine pings `GET /api/health` there).
 The health endpoint is unauthenticated and reports DB reachability, the
 deployed revision, and the call-up poller heartbeat; it returns 503 when the
 database is unreachable so any HTTP uptime monitor can alert on status alone.
@@ -168,7 +168,10 @@ If sync fails for any reason it is logged but never blocks the API request — S
 
 ## Sheet Column Order
 
-`Player | Year | Brand | Set | Card # | Team | RC | Auto | Patch | Condition | Listed Price | eBay URL | Status | Date Listed | Date Sold | Sale Price | Notes`
+`Player | Year | Brand | Set | Card # | Team | RC | Auto | Patch | Condition | Listed Price | eBay URL | Status | Date Listed | Date Sold | Sale Price | Notes | Quantity | 1st Bowman | Parallel | Serial # | Refractor`
+
+(Source of truth is `SHEET_HEADERS` in `backend/services/google_sheets.py` —
+append-only; new columns go at the end.)
 
 ---
 
@@ -201,8 +204,9 @@ Look for `# TODO (Phase 2)` comments throughout the codebase:
 
 - **eBay OAuth + Sell API** — direct listing creation, replaces the pre-fill URL flow.
 - **eBay Orders API polling cron** — auto-mark cards sold when they sell on eBay.
-- **Bulk CSV import** — migrate existing inventory in one shot.
 - **PSA/BGS grade detection** — vision step extracts grade slab info if present.
+
+(Bulk CSV import shipped 2026-07-30 as `POST /api/cards/import.csv` — PR #24.)
 
 ---
 
