@@ -69,7 +69,10 @@ def test_deletion_notice_sanitizes_user_id_in_log(db_session, caplog):
     msg = messages[0]
     assert "\nFAKE" not in msg          # newline neutralized by repr()
     assert "\\nFAKE" in msg             # ...but the content is still auditable
-    assert len(msg) < 250               # 64-char cap held against the 500-char pad
+    # The 64-char cap: the evil prefix is 25 chars, so exactly 39 of the 500
+    # pad "A"s survive the truncation.
+    assert "A" * 39 in msg
+    assert "A" * 40 not in msg
 
 
 def test_deletion_notice_rejects_oversized_body(db_session):

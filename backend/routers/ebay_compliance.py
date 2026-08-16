@@ -77,11 +77,13 @@ async def account_deletion_notice(request: Request):
     tokens land (draft-listing feature), this handler must delete the
     matching user's tokens. Log enough to audit that duty later.
     """
-    body = b""
+    # Check before buffering: chunk sizes come from the ASGI server, so an
+    # oversized chunk must be rejected without ever being copied in.
+    body = bytearray()
     async for chunk in request.stream():
-        body += chunk
-        if len(body) > _MAX_NOTICE_BYTES:
+        if len(body) + len(chunk) > _MAX_NOTICE_BYTES:
             raise HTTPException(status_code=413, detail="Body too large")
+        body.extend(chunk)
     try:
         payload = json.loads(body)
         user_id = (payload.get("notification", {}).get("data", {}) or {}).get("userId")
