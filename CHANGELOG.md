@@ -34,6 +34,17 @@ only in `[Unreleased]` on a branch is not in prod yet.
   tile can't be mistaken for a data bug, and a badge by the heading names how
   many rows the totals cover (or says plainly that nothing matched, so a $0
   tile reads as an empty filter rather than lost data).
+- Monday dependency pass clears a new high-severity advisory:
+  GHSA-2v37-7h3g-55p8 (nanoid below 3.3.18 can loop indefinitely in a custom
+  generator when size is zero), which reaches the frontend transitively via
+  postcss — so the fix is a lockfile bump rather than a dependency change.
+  Taken with the rest of the semver-compatible drift (axios 1.18.1 → 1.19.0,
+  vite 8.1.5 → 8.2.1, `@vitejs/plugin-react` 6.0.4 → 6.0.5, postcss
+  8.5.23 → 8.5.26), so `package.json` is untouched and only the lockfile moves.
+  `npm audit` is back to zero. Tailwind 3.4 → 4.x remains the only outstanding
+  drift and stays deferred — it is a major with a config/PostCSS pipeline
+  change. `pip-audit` is unchanged: ecdsa PYSEC-2026-1325 still has no fixed
+  release upstream and the app signs HS256, so its ECDSA paths stay unused.
 - CI no longer fails open on a missing test suite. The backend-test and
   frontend-test steps were wrapped in `if [ -f … ]` / `if [ -d … ]` guards
   added so CI would pass on refs predating those suites; both conditions have
