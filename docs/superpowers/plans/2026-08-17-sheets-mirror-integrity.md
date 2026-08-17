@@ -33,25 +33,36 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
   tell "nothing happened" from "the tab was cleared but not rewritten" — they
   need different recovery.
 - Never clear row 1.
-- Guard against an overlapping per-card sync: a module-level
-  rewrite-in-progress flag plus a generation counter, checked by `sync_card`
-  before it writes. A save that read its `sheets_row` before the rewrite must
-  not write afterwards, or it lands on a row the rewrite gave to another card.
+- Serialize every Sheet write behind a module-level `threading.Lock` in
+  `google_sheets.py`. `sync_card`, `rewrite_all_rows`, and the delete-path blank
+  all take it. There is exactly one process (invariant #9), so a lock is both
+  simpler and genuinely atomic — a generation counter is neither, since
+  check-then-write leaves the window open and skipping a save loses that card's
+  edit entirely.
+- `sync_card` must be modified to re-read the card's `sheets_row` *inside* the
+  lock rather than trusting a value read before it. A save that arrives
+  mid-rewrite then blocks briefly and writes to the row the rewrite assigned it
+  — nothing is dropped, so no retry queue is needed.
 
 ## Step 2 — `resync_all` uses it (`routers/sheets.py`)
 
 - Replace the per-card loop with a single `rewrite_all_rows(cards)` call over
-  `db.query(Card).order_by(Card.created_at.asc())` — the ordering already used,
-  so existing row positions stay broadly stable.
+  `db.query(Card).order_by(Card.created_at.asc(), Card.id.asc())`. The `id`
+  tiebreaker is required, not cosmetic: `created_at` alone is not a total order
+  (a CSV import stamps many rows in the same instant), so two runs could assign
+  different rows and break the idempotence this whole step is for.
 - Commit `sheets_row` re-stamps **only** after a successful update.
-- Handle both partial-failure orders explicitly — nulling every `sheets_row` is
-  the safe move in each, because a null index means "append" and the next
-  resync is idempotent:
-  - *Cleared but not rewritten:* null every `sheets_row` in one commit, so each
-    card re-appends instead of writing into a blank tab at a position nothing
-    occupies any more.
-  - *Rewritten but the commit failed:* same — the DB's old positions no longer
-    describe the sheet.
+- Handle both partial-failure orders explicitly. They are **not** symmetric —
+  null only when the sheet is empty, never when it is full:
+  - *Cleared but not rewritten (sheet empty):* null every `sheets_row` in one
+    commit, so each card re-appends instead of writing into a blank tab at a
+    position nothing occupies any more.
+  - *Rewritten but the commit failed (sheet full and correct):* do **not** null.
+    The positions are deterministic (`index + 2`), so retry the commit. If that
+    also fails, leave the indices alone and report divergence — nulling here
+    would make every card append a second copy of itself, recreating the exact
+    duplication this change exists to remove, and duplicates have to be deleted
+    by hand whereas stale indices are repaired by the next resync.
 - Report divergence in the response rather than swallowing it. This is the one
   Sheets path that must not fail silently: it is the repair tool, and a silent
   failure here is what produced the mess it exists to clean up.
@@ -67,6 +78,9 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
   `_sync_card_to_sheets`: takes a plain int, opens nothing, swallows failures)
   writing empty strings across `A{row}:{END_COL}{row}`.
 - Skip entirely when `sheets_row` is falsy (never-mirrored card).
+- Take the same lock as the rewrite, and re-check that the captured row is still
+  the one to clear. Without it, a resync landing between the delete and the
+  background blank leaves the task erasing a row now owned by a *live* card.
 - Do not attempt row removal or index re-stamping — see approach B in the design
   doc for why that is worse than the bug.
 
@@ -109,8 +123,12 @@ bound import, per the repo's testing note.
 - **Residue invisible to an A-only probe:** a row with an empty column A but
   stale data in a later mirror column must still fall inside the clear range.
 - **Overlapping save and resync:** a `sync_card` that read its `sheets_row`
-  before the rewrite reassigned it must not write afterwards, and the rewritten
-  row must still belong to the card the rewrite assigned it.
+  before the rewrite reassigned it must not write to the stale row, and must
+  still land its update on the card's new row — assert the save is not lost.
+- **Overlapping delete and resync:** a queued `_blank_sheets_row` must not erase
+  a row the rewrite reassigned to a live card.
+- **Equal `created_at`:** several cards sharing a timestamp must land in the
+  same rows across two resyncs (the `id` tiebreaker); without it this is flaky.
 - **Import then resync:** exactly one row per card.
 - Add `Card` to the `db_session` fixture's cleanup list if the new module needs
   isolation beyond what exists.

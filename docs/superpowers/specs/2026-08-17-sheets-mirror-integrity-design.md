@@ -72,11 +72,17 @@ Write empty values across `A{row}:{END_COL}{row}` instead of removing the row.
 
 ### C. Clear-then-rewrite the whole tab (recommended for the repair path)
 
-Replace `resync_all`'s per-card append loop with two calls:
+Replace `resync_all`'s per-card append loop with three calls:
 
+0. a read of the tab's used range across `A:{END_COL}` (see "What could go
+   wrong" — column A alone is not enough to find the last used row).
 1. `values().clear()` over `A2:{END_COL}` — data rows only, never the header.
 2. one `values().update()` writing every card's row in a deterministic order,
-   re-stamping `sheets_row = index + 2` for each.
+   re-stamping `sheets_row = index + 2` for each. "Deterministic" has to mean a
+   *total* order: `created_at` alone is not one, since a CSV import stamps many
+   rows in the same instant, and two runs could then order them differently and
+   assign different rows — which would break the very idempotence this
+   recommendation rests on. Order by `created_at` then `id`.
 
 - **Fixes all three defects when combined with A** (see the recommendation
   below). On its own, C ends duplication because the clear precedes the write,
@@ -85,7 +91,7 @@ Replace `resync_all`'s per-card append loop with two calls:
   ordinary delete update the sheet — that is what A is for.
 - **Makes the repair tool idempotent** — running it twice is a no-op. That is
   the defining property a repair tool must have and the one today's lacks.
-- **Fewer API calls than today**, not more: two, versus one append per card.
+- **Fewer API calls than today**, not more: three, versus one append per card.
 - **Self-healing for existing damage.** The first run cleans up whatever
   duplicate blocks past resyncs already left behind.
 - It is a destructive write to a user-visible document, which is the reason this
@@ -118,11 +124,29 @@ now the correct, safe answer.
   This is worse than the "briefly stale" framing it deserves: the sheet ends up
   holding one card's data under another card's row, silently. The window is
   narrow (single worker; resync is a manual, rare action) but the consequence is
-  corruption, so it needs a guard — just not a heavyweight one. A module-level
-  rewrite-in-progress flag plus a generation counter is enough: `sync_card`
-  re-reads `sheets_row` and skips the write if the generation moved while it was
-  working, leaving the row correct as the rewrite wrote it. No locking
-  infrastructure, no cross-process coordination — there is only one worker.
+  corruption, so it needs a real guard.
+
+  A generation counter alone is not enough, for two reasons. It is not atomic —
+  checking the generation and then writing leaves the same window open, just
+  narrower — and *skipping* a save that loses the race is not lossless: that
+  card's edit never reaches the mirror at all, and may not until someone happens
+  to edit it again, which could be never.
+
+  Because there is exactly one process (invariant #9 forbids a second worker),
+  a module-level `threading.Lock` is both simpler and genuinely atomic. Every
+  writer — `sync_card`, `rewrite_all_rows`, and the delete-path blank — takes it,
+  and each per-card writer re-reads its `sheets_row` *inside* the lock rather
+  than trusting a value captured before. A save that arrives mid-rewrite then
+  blocks briefly and writes to the row the rewrite just assigned it, instead of
+  being dropped. The rewrite holds the lock for its two or three API calls;
+  per-card syncs are already background tasks, so waiting costs nothing a user
+  can see.
+- **A delete racing the rewrite.** The same hazard, and easy to miss because the
+  delete path looks unrelated: `_blank_sheets_row` captures an absolute row
+  number before the background task runs, so a resync in between would leave it
+  blanking a row now owned by a different card — erasing a live card from the
+  mirror. It takes the same lock, and skips if the row it captured is no longer
+  the one it was told to clear.
 - **A sheet longer than the DB.** The clear must cover the tab's full used
   range, not `len(cards)` rows — otherwise rows below the rewritten block
   survive, which is the exact residue of the bug being fixed. Crucially, the
@@ -140,12 +164,20 @@ now the correct, safe answer.
     rather than write into a void, and surface the divergence to the caller
     instead of swallowing it the way `sync_card` does.
   - *`update()` succeeds, `db.commit()` fails.* SQLite keeps the old positions
-    while the sheet holds new ones. Same remedy: nulling the indices is always
-    safe, because a null index means "append", and the next resync is idempotent
-    anyway.
-  In both cases the response must say the mirror diverged rather than reporting
-  success — this is the one Sheets path that should *not* fail silently, because
-  it is the repair tool.
+    while the sheet holds new ones. **Here nulling would be actively harmful**,
+    and it is worth being explicit about why, because the symmetry is tempting:
+    the sheet is already correct and complete, so a null index would make every
+    card *append* a second copy of itself on its next save — reintroducing
+    exactly the duplication this whole design exists to remove. Retry the commit
+    instead; the positions are deterministic (`index + 2`), so they can be
+    recomputed rather than recovered. If the retry also fails, leave the indices
+    untouched and report divergence: stale indices point at rows that at least
+    exist, and the next resync — which clears first — repairs them, whereas
+    duplicates would have to be deleted by hand.
+  The asymmetry is the point: null when the sheet is *empty*, never when the
+  sheet is *full*. In both cases the response must say the mirror diverged
+  rather than reporting success — this is the one Sheets path that should *not*
+  fail silently, because it is the repair tool.
 - **Overwriting manual edits.** The rewrite discards anything typed directly
   into the tab. Already true of the existing per-card update path, and the sheet
   is documented as a mirror rather than a source of truth — but it must be
@@ -159,10 +191,13 @@ now the correct, safe answer.
 
 ## Cost impact (required check)
 
-No Anthropic calls; no change to scan cost. Sheets API usage strictly
-decreases: the repair path goes from *N* appends to two calls, and the delete
-path adds one call to a route that made none. Well inside the free quota at
-two-user scale.
+No Anthropic calls; no change to scan cost. Sheets API usage still drops
+sharply, though not to the two calls an earlier draft of this doc claimed —
+finding the used range needs its own read, so the repair path is a read, a
+clear and an update: **three requests**, plus the existing `_ensure_tab` /
+`_ensure_header` checks, against *N* appends today. The delete path adds one
+call to a route that made none. Comfortably inside the free quota at two-user
+scale.
 
 ## Verification
 
