@@ -43,6 +43,10 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
   lock rather than trusting a value read before it. A save that arrives
   mid-rewrite then blocks briefly and writes to the row the rewrite assigned it
   — nothing is dropped, so no retry queue is needed.
+- The lock must be held across **re-read → Sheet write → `sheets_row` commit**,
+  not just the API call. `_sync_card_to_sheets` commits the row index *after*
+  `sync_card` returns; releasing in between would let a rewrite restamp the card
+  and then have this session commit its stale index back over the new one.
 
 ## Step 2 — `resync_all` uses it (`routers/sheets.py`)
 
@@ -78,9 +82,15 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
   `_sync_card_to_sheets`: takes a plain int, opens nothing, swallows failures)
   writing empty strings across `A{row}:{END_COL}{row}`.
 - Skip entirely when `sheets_row` is falsy (never-mirrored card).
-- Take the same lock as the rewrite, and re-check that the captured row is still
-  the one to clear. Without it, a resync landing between the delete and the
-  background blank leaves the task erasing a row now owned by a *live* card.
+- Take the same lock as the rewrite, and verify **ownership**, not just the row
+  number — row 7 looks the same whether or not it changed hands. Under the lock,
+  blank row *N* only if no live card currently claims `sheets_row == N`; if one
+  does, a rewrite reassigned it and the blank is dropped. Without this, a resync
+  landing between the delete and the background blank erases a *live* card's row.
+- A failed blank is accepted, not retried: the card is gone, so there is no
+  record to retry from, and the residue is one stale row that the now-idempotent
+  resync sweeps away. Do not add an outbox or tombstone table for this — see the
+  design doc for why that trade is wrong at this scale.
 - Do not attempt row removal or index re-stamping — see approach B in the design
   doc for why that is worse than the bug.
 

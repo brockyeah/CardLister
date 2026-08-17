@@ -141,12 +141,34 @@ now the correct, safe answer.
   being dropped. The rewrite holds the lock for its two or three API calls;
   per-card syncs are already background tasks, so waiting costs nothing a user
   can see.
+
+  The lock must span **re-read → Sheet write → `sheets_row` commit**, not just
+  the API call. `_sync_card_to_sheets` writes the row index back to the DB after
+  `sync_card` returns; if the lock were released in between, a rewrite could
+  restamp that card and the background session would then commit its *old*
+  index over the new one — putting the stale ownership back in the database
+  after the sheet had already moved on.
 - **A delete racing the rewrite.** The same hazard, and easy to miss because the
   delete path looks unrelated: `_blank_sheets_row` captures an absolute row
   number before the background task runs, so a resync in between would leave it
   blanking a row now owned by a different card — erasing a live card from the
-  mirror. It takes the same lock, and skips if the row it captured is no longer
-  the one it was told to clear.
+  mirror.
+
+  A row number alone cannot answer this, which is the subtlety: row 7 looks
+  identical whether or not it changed hands. The check has to be about
+  *ownership*, and the deleted card is gone by the time the task runs, so
+  identity must be captured before the delete commits. Under the same lock, the
+  task blanks row *N* only if no live card currently claims `sheets_row == N`.
+  If one does, a rewrite reassigned it and the blank is silently dropped — the
+  row now holds data that belongs there.
+- **A blank that never lands.** If the Sheets call fails, the deleted card's row
+  stays behind and nothing retries it — the card is gone, so there is no record
+  left to retry *from*. That is an accepted degradation, not an oversight: the
+  outcome is one stale row, which is exactly what resync now sweeps away, and it
+  is the same failure the mirror has today for every delete. An outbox or
+  tombstone table would make it self-healing, but that is a schema change and a
+  new subsystem to earn one stale row on a rare path in a two-user tool — the
+  wrong trade here. If deletes ever become frequent, revisit it.
 - **A sheet longer than the DB.** The clear must cover the tab's full used
   range, not `len(cards)` rows — otherwise rows below the rewritten block
   survive, which is the exact residue of the bug being fixed. Crucially, the
