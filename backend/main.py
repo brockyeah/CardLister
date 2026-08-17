@@ -88,6 +88,12 @@ def login(payload: LoginRequest):
     return TokenResponse(token=create_token(username), username=username)
 
 
+# HEAD is a second registration rather than `methods=["GET", "HEAD"]` on one
+# route: FastAPI derives an operation id from the route's *first* method, so a
+# two-method route emits the same id twice and warns about a duplicate — which
+# also breaks OpenAPI client generators. Kept out of the schema because HEAD is
+# implied by GET there (and `test_auth_sweep.py` skips HEAD for that reason).
+@app.head("/api/health", include_in_schema=False)
 @app.get("/api/health")
 def health():
     """Deep health check for uptime monitors and the daily routine.
@@ -96,6 +102,15 @@ def health():
     DB reachability, the deployed revision (Railway injects the commit SHA),
     and the call-up poller heartbeat. Returns 503 when the DB is unreachable
     so HTTP-status-based monitors alert without parsing the body.
+
+    HEAD is registered explicitly: `@app.get` binds GET alone (unlike
+    Starlette's bare `Route`, which adds HEAD for free), so a HEAD probe fell
+    through to the static mount and — `api` being a non-SPA root — came back
+    404. Status-code-only uptime monitors default to HEAD, which made healthy
+    and DB-down deploys both read as 404 and defeated the 503 this endpoint
+    exists to return. The body is computed either way; uvicorn drops it off a
+    HEAD response at the protocol layer, so the headers still describe the
+    real check.
     """
     db_ok = True
     try:
@@ -147,6 +162,14 @@ app.include_router(news.router, prefix="/api/news", tags=["news"])
 INLINE_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
+# HEAD alongside GET for the same reason as /api/health: `@app.get` registers
+# GET only, so a HEAD request for a photo missed this route, fell through to the
+# static mount, and 404'd even for a file that exists — misreporting to anything
+# that probes an image URL without downloading it (link checkers, the CDN-style
+# freshness checks the immutable cache header invites). Starlette's FileResponse
+# already sends headers only when the request method is HEAD, so the
+# Content-Length/Cache-Control/Content-Disposition contract is unchanged.
+@app.head("/uploads/{filename}", include_in_schema=False)
 @app.get("/uploads/{filename}")
 def serve_upload(filename: str):
     # Strip any path traversal attempts; only allow the bare filename.

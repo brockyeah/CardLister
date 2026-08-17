@@ -23,26 +23,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       also runs on the normalized path, so raw `/api/..`-style requests get
       the shell (cosmetic — browsers normalize before sending) (medium;
       implement directly; inline — found by the 2026-08-16 weekly deep review)
-- [ ] HEAD support on `/api/health` and `/uploads/{filename}`: FastAPI's
-      `@app.get` registers GET only (unlike Starlette's `Route`, which adds
-      HEAD), so both requests fall through to the static mount and answer 404.
-      A status-code-only uptime monitor configured with HEAD — the usual
-      default — reads healthy and unhealthy alike as 404, defeating the 503
-      the deep health check exists to return (quick win; implement directly;
-      inline)
-- [ ] Filter-aware inventory stat tiles: the tiles are computed from the full
-      card list while the table below shows the filtered set, so narrowing to
-      "sold" or searching a player leaves the tiles describing everything —
-      there is no way to ask "what are my Bowman autos worth". Feed
-      `computeInventoryStats` the filtered rows (or show both, filtered
-      alongside overall) (quick win; implement directly; inline —
-      Inventory.jsx only, the math already lives in `lib/inventoryStats.js`)
-- [ ] Drop the fail-open guards in `.github/workflows/ci.yml`: the backend-test
-      and frontend-test steps are wrapped in `if [ -f ... ]` checks added so CI
-      would pass on refs predating those suites. Both conditions are now
-      permanently true, and they fail open — renaming `ebayTitle.test.js`
-      silently stops the entire frontend suite from running while CI stays
-      green (quick win; implement directly; inline)
 - [ ] Batch scan front/back auto-pairing: uploading 20 images of 10 cards
       currently treats each image as its own card; match front+back pairs
       before extraction. Candidate signals: upload order/adjacency (phone
@@ -355,6 +335,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-17 — HEAD support on `/api/health` and `/uploads/{filename}`:
+      `@app.get` registers GET only, so HEAD probes fell through to the static
+      mount and 404'd whether the app was healthy or not, defeating the deep
+      health check's 503 for the status-code-only monitors that default to HEAD
+- [x] 2026-08-17 — Filter-aware inventory stat tiles: totals describe the rows
+      the table is showing, with an "of N overall" caption on every narrowed
+      tile and a badge naming the matching row count
+- [x] 2026-08-17 — CI fail-open guards dropped: backend and frontend test steps
+      run unconditionally, so a moved test directory or a renamed test file
+      can't skip a whole suite while the job stays green
 
 - [x] 2026-08-16 — Cache headers for the built frontend: `index.html` is
       `no-cache` (a cached shell could outlive its bundles across a deploy and

@@ -13,6 +13,38 @@ only in `[Unreleased]` on a branch is not in prod yet.
 ## [Unreleased]
 
 ### Fixed
+- `/api/health` and `/uploads/{filename}` answer HEAD requests. FastAPI's
+  `@app.get` registers GET alone (unlike Starlette's bare `Route`, which adds
+  HEAD for free), so a HEAD probe missed both routes, fell through to the static
+  mount, and — `api` and `uploads` being non-SPA roots — came back 404. Uptime
+  monitors default to HEAD, which meant a healthy deploy and a database-down
+  deploy both reported 404: exactly the distinction the deep health check's 503
+  exists to make. Both are now registered for HEAD as well, kept out of the
+  OpenAPI schema (HEAD is implied by GET there, and the auth sweep skips it).
+  Registered as a second route rather than `methods=["GET", "HEAD"]` because
+  FastAPI derives an operation id from a route's first method, so one
+  two-method route emits a duplicate id and warns.
+
+### Changed
+- Inventory stat tiles describe whatever the table below is showing. The tiles
+  were computed from the full card list while the table showed the filtered
+  set, so narrowing to "sold" or searching a player left five tiles describing
+  the whole collection — there was no way to ask "what are my Bowman autos
+  worth". Filtered values now carry an "of N overall" caption so a narrowed
+  tile can't be mistaken for a data bug, and a badge by the heading names how
+  many rows the totals cover (or says plainly that nothing matched, so a $0
+  tile reads as an empty filter rather than lost data).
+- CI no longer fails open on a missing test suite. The backend-test and
+  frontend-test steps were wrapped in `if [ -f … ]` / `if [ -d … ]` guards
+  added so CI would pass on refs predating those suites; both conditions have
+  been permanently true for months, and the frontend guard keyed on one
+  specific test *filename* — renaming `ebayTitle.test.js` would have stopped
+  the entire frontend suite from running while the job stayed green. Both steps
+  now run unconditionally.
+
+## 2026-08-16 — Weekly deep review: caching, event loop, quantity crash (PR #43)
+
+### Fixed
 - The SPA shell now ships `Cache-Control: no-cache` and Vite's content-hashed
   bundles under `/assets/` get the same year-long immutable header as uploads.
   Neither carried any cache header, so browsers applied heuristic freshness to

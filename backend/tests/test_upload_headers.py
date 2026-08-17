@@ -55,6 +55,24 @@ def test_uploads_carry_immutable_cache_headers():
         assert "max-age=31536000" in cache_control
 
 
+def test_upload_answers_head_with_headers_and_no_body():
+    # `@app.get` registers GET only, so a HEAD probe for an existing photo used
+    # to miss this route, fall through to the static mount, and 404 — the same
+    # answer a genuinely missing file gives.
+    with TestClient(app) as client:
+        path = _scan_upload(client, _auth(client), "front.png", _png_bytes(), "image/png")
+        r = client.head(path)
+        assert r.status_code == 200
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert "immutable" in r.headers["cache-control"]
+        # FileResponse sends headers only for HEAD; Content-Length still
+        # describes the real file so a size probe stays meaningful.
+        assert r.content == b""
+        assert int(r.headers["content-length"]) > 0
+
+        assert client.head("/uploads/does-not-exist.png").status_code == 404
+
+
 def test_pdf_upload_forced_to_download():
     with TestClient(app) as client:
         pdf = io.BytesIO(b"%PDF-1.4 fake test document")

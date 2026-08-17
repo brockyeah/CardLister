@@ -31,6 +31,29 @@ def test_health_requires_no_auth(db_session):
         assert client.get("/api/health").status_code == 200
 
 
+def test_health_answers_head_with_the_same_status(db_session):
+    # Status-code-only uptime monitors default to HEAD. `@app.get` registers GET
+    # alone, so HEAD used to fall through to the static mount and 404 whether the
+    # app was healthy or not — which silently defeats the 503 below.
+    with TestClient(app) as client:
+        r = client.head("/api/health")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/json")
+
+
+def test_health_head_503_when_db_unreachable(db_session):
+    # The whole point of HEAD support: an unhealthy deploy must be
+    # distinguishable from a healthy one without parsing a body.
+    @contextmanager
+    def broken_connect():
+        raise RuntimeError("db down")
+        yield  # pragma: no cover
+
+    with TestClient(app) as client:
+        with patch.object(main.engine, "connect", broken_connect):
+            assert client.head("/api/health").status_code == 503
+
+
 def test_health_503_when_db_unreachable(db_session):
     @contextmanager
     def broken_connect():

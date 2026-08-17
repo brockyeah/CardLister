@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { cardQuantity, computeInventoryStats } from './inventoryStats'
+import {
+  cardQuantity,
+  computeInventoryStats,
+  copiesHint,
+  filteredScopeLabel,
+  joinHints,
+  overallHint,
+} from './inventoryStats'
 
 describe('cardQuantity', () => {
   it('defaults to 1 when quantity is missing, null, or unusable', () => {
@@ -77,5 +84,46 @@ describe('computeInventoryStats', () => {
     expect(s.activeValue).toBe(0)
     expect(s.revenue).toBe(0)
     expect(s.total).toBe(3)
+  })
+})
+
+describe('tile captions', () => {
+  const money = (v) => `$${v.toFixed(2)}`
+
+  it('captions a filtered value with the collection-wide one', () => {
+    expect(overallHint(3, 12)).toBe('of 12 overall')
+    expect(overallHint(40, 250.5, money)).toBe('of $250.50 overall')
+  })
+
+  it('stays silent when the filtered value already is the whole collection', () => {
+    expect(overallHint(12, 12)).toBe(null)
+    expect(overallHint(0, 0, money)).toBe(null)
+  })
+
+  it('captions rows only when copies and rows disagree', () => {
+    expect(copiesHint({ total: 5, rowCount: 3 })).toBe('3 rows')
+    expect(copiesHint({ total: 1, rowCount: 1 })).toBe(null)
+    expect(copiesHint({ total: 4, rowCount: 1 })).toBe('1 row')
+    expect(copiesHint(null)).toBe(null)
+  })
+
+  it('joins the captions that apply and returns null when none do', () => {
+    expect(joinHints('3 rows', 'of 12 overall')).toBe('3 rows · of 12 overall')
+    expect(joinHints(null, 'of 12 overall')).toBe('of 12 overall')
+    // `narrowed && overallHint(...)` yields false when not narrowed.
+    expect(joinHints(null, false)).toBe(null)
+  })
+})
+
+describe('filteredScopeLabel', () => {
+  it('names the matching row count', () => {
+    expect(filteredScopeLabel(3)).toBe('Totals cover 3 matching rows')
+    expect(filteredScopeLabel(1)).toBe('Totals cover 1 matching row')
+  })
+
+  it('says nothing matched instead of "0 matching rows"', () => {
+    // A tile reading $0 has to be legible as "nothing matched" rather than
+    // "the data vanished".
+    expect(filteredScopeLabel(0)).toBe('No rows match this filter — totals are zero')
   })
 })

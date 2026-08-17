@@ -18,20 +18,16 @@ jobs:
         with:
           python-version: "3.11"  # matches the production Dockerfile
       - run: pip install -r backend/requirements.txt
-      # The test suite (backend/tests + requirements-dev.txt) lands with the
-      # feedback-features PR — guard so CI also passes on refs from before it.
-      - name: Install dev requirements
-        run: |
-          if [ -f backend/requirements-dev.txt ]; then
-            pip install -r backend/requirements-dev.txt
-          fi
+      - run: pip install -r backend/requirements-dev.txt
+      # Unconditional on purpose. These two steps used to be wrapped in
+      # `if [ -f ... ]` / `if [ -d ... ]` guards, added so CI would also pass on
+      # refs predating the test suite. Both conditions have been permanently
+      # true for months, and they fail *open*: moving or renaming backend/tests
+      # would skip the entire backend suite while CI stayed green.
+      # `python -m pytest` from the repo root is required — there is no pytest
+      # config, so bare `pytest` cannot resolve the `backend.` import path.
       - name: Backend tests
-        run: |
-          if [ -d backend/tests ]; then
-            python -m pytest backend/tests -q
-          else
-            echo "::notice::backend/tests not on this ref yet — nothing to run"
-          fi
+        run: python -m pytest backend/tests -q
 
   # Non-blocking dependency audit: surfaces new advisories on every PR / push
   # to main instead of waiting for the Monday deep pass (repo has no
@@ -86,12 +82,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      # Also unconditional: the old guard keyed on one specific test filename,
+      # so renaming ebayTitle.test.js would have silently stopped the whole
+      # frontend suite from running while the job stayed green.
       - name: Frontend unit tests
-        run: |
-          if [ -f frontend/src/lib/ebayTitle.test.js ]; then
-            npm test --prefix frontend
-          else
-            echo "::notice::frontend tests not on this ref yet — nothing to run"
-          fi
+        run: npm test --prefix frontend
       - run: npm run build
         working-directory: frontend
