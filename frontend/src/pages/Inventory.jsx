@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import CardTable from '../components/CardTable.jsx'
-import { cardMatchesSearch, sortCards } from '../lib/sortCards'
-import { computeInventoryStats } from '../lib/inventoryStats'
+import { filterCards, isNarrowed, sortCards } from '../lib/sortCards'
+import {
+  computeInventoryStats,
+  copiesHint,
+  filteredScopeLabel,
+  joinHints,
+  overallHint,
+} from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
@@ -248,13 +254,10 @@ export default function Inventory() {
     reload()
   }, [])
 
-  const filtered = useMemo(() => {
-    const visible = cards.filter((c) => {
-      if (statusFilter && c.status !== statusFilter) return false
-      return cardMatchesSearch(c, search)
-    })
-    return sortCards(visible, sort.key, sort.dir)
-  }, [cards, search, statusFilter, sort])
+  const filtered = useMemo(
+    () => sortCards(filterCards(cards, { status: statusFilter, search }), sort.key, sort.dir),
+    [cards, search, statusFilter, sort],
+  )
 
   const onSort = (key) => {
     setSort((prev) => (
@@ -265,7 +268,19 @@ export default function Inventory() {
   }
 
   // Copy-aware: a qty-3 row is three cards worth three listed prices.
-  const stats = useMemo(() => computeInventoryStats(cards), [cards])
+  //
+  // The tiles describe whatever the table below is showing. Computed from the
+  // whole collection they answered a question nobody asked while the table
+  // showed a subset — there was no way to ask "what are my Bowman autos
+  // worth". `overall` stays alongside so a narrowed tile can caption the
+  // collection-wide number instead of just looking wrong.
+  const narrowed = isNarrowed({ status: statusFilter, search })
+  const overall = useMemo(() => computeInventoryStats(cards), [cards])
+  const stats = useMemo(
+    () => (narrowed ? computeInventoryStats(filtered) : overall),
+    [narrowed, filtered, overall],
+  )
+  const money = (v) => `$${v.toFixed(2)}`
 
   const onMarkSold = (card) => setSoldModalCard(card)
   const onAttachEbay = (card) => setAttachModalCard(card)
@@ -331,22 +346,41 @@ export default function Inventory() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Inventory</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold">Inventory</h1>
+        {narrowed && (
+          <span className="text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded px-2 py-1">
+            {filteredScopeLabel(filtered.length)}
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatTile
           label="Total Cards"
           value={stats.total}
-          hint={
-            stats.total !== stats.rowCount
-              ? `${stats.rowCount} ${stats.rowCount === 1 ? 'row' : 'rows'}`
-              : null
-          }
+          hint={joinHints(copiesHint(stats), narrowed && overallHint(stats.total, overall.total))}
         />
-        <StatTile label="Listed" value={stats.listed} />
-        <StatTile label="Sold" value={stats.sold} />
-        <StatTile label="Revenue" value={`$${stats.revenue.toFixed(2)}`} />
-        <StatTile label="Est. Active Value" value={`$${stats.activeValue.toFixed(2)}`} />
+        <StatTile
+          label="Listed"
+          value={stats.listed}
+          hint={narrowed ? overallHint(stats.listed, overall.listed) : null}
+        />
+        <StatTile
+          label="Sold"
+          value={stats.sold}
+          hint={narrowed ? overallHint(stats.sold, overall.sold) : null}
+        />
+        <StatTile
+          label="Revenue"
+          value={money(stats.revenue)}
+          hint={narrowed ? overallHint(stats.revenue, overall.revenue, money) : null}
+        />
+        <StatTile
+          label="Est. Active Value"
+          value={money(stats.activeValue)}
+          hint={narrowed ? overallHint(stats.activeValue, overall.activeValue, money) : null}
+        />
       </div>
 
       <div className="flex flex-col md:flex-row gap-3">

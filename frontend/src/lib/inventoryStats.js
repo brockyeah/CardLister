@@ -25,6 +25,41 @@ function sumQuantity(cards) {
   return cards.reduce((sum, c) => sum + cardQuantity(c), 0)
 }
 
+// Caption for a tile whose value describes the *filtered* rows: the
+// collection-wide number has to stay in view, or narrowing to "sold" leaves a
+// tile that simply looks wrong with no way to tell it apart from a data bug.
+// Returns null when the two agree so an unfiltered view stays uncluttered.
+export function overallHint(value, overallValue, format = String) {
+  const shown = format(overallValue)
+  // Compare what the reader will actually see, not the raw floats. The two
+  // sums reduce over differently-ordered arrays (the filtered list is sorted,
+  // the full one is in API order) and float addition is not associative, so a
+  // mathematically-equal revenue can differ by an epsilon — which would caption
+  // a tile with "of $60.00 overall" while the tile itself reads $60.00. The
+  // caption exists to flag a *visible* difference, so that is what to test.
+  if (format(value) === shown) return null
+  return `of ${shown} overall`
+}
+
+// Rows vs copies: only differs once something was quantity-merged.
+export function copiesHint(stats) {
+  if (!stats || stats.total === stats.rowCount) return null
+  return `${stats.rowCount} ${stats.rowCount === 1 ? 'row' : 'rows'}`
+}
+
+// Tile captions are built from several independent facts (rows-vs-copies, the
+// overall total); drop the ones that don't apply and join what's left.
+export function joinHints(...parts) {
+  return parts.filter(Boolean).join(' · ') || null
+}
+
+// Badge next to the heading whenever a filter is active, so a tile reading $0
+// is legible as "nothing matched" rather than "the data is gone".
+export function filteredScopeLabel(rowCount) {
+  if (!rowCount) return 'No rows match this filter — totals are zero'
+  return `Totals cover ${rowCount} matching ${rowCount === 1 ? 'row' : 'rows'}`
+}
+
 export function computeInventoryStats(cards) {
   const list = Array.isArray(cards) ? cards : []
   const active = list.filter((c) => c.status === 'active')

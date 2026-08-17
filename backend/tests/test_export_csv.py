@@ -60,3 +60,43 @@ def test_export_escapes_formula_cells(db_session):
         assert rows[1][SHEET_HEADERS.index("Serial #")] == "''-1/1 SP"
         # Ordinary cells are untouched.
         assert rows[1][SHEET_HEADERS.index("Status")] == "ACTIVE"
+
+
+def test_export_escapes_formulas_hidden_behind_leading_whitespace(db_session):
+    """A formula preceded by tab/CR/space must be escaped too.
+
+    Spreadsheets discard leading whitespace and control characters before
+    deciding whether a cell is a formula, so testing only for a leading
+    apostrophe let "\t=HYPERLINK(...)" through unescaped — Excel drops the tab
+    and evaluates the rest. The write path never normalizes strings, so such a
+    value reaches the CSV verbatim from POST /api/cards.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        client.post("/api/cards", json=dict(
+            player_name="\t=HYPERLINK(\"http://evil\",\"click\")",
+            notes="\r=1+1", condition=" =cmd|' /c calc'!A1",
+            team="\t'=1+1",
+        ), headers=headers)
+        r = client.get("/api/cards/export.csv", headers=headers)
+        rows = list(csv.reader(io.StringIO(r.text)))
+        assert rows[1][SHEET_HEADERS.index("Player")] == "'\t=HYPERLINK(\"http://evil\",\"click\")"
+        assert rows[1][SHEET_HEADERS.index("Notes")] == "'\r=1+1"
+        assert rows[1][SHEET_HEADERS.index("Condition")] == "' =cmd|' /c calc'!A1"
+        # Noise characters are a set, so any mix of them peels off.
+        assert rows[1][SHEET_HEADERS.index("Team")] == "'\t'=1+1"
+
+
+def test_export_leaves_harmless_whitespace_cells_alone(db_session):
+    """Widening the check must not escape every space-led cell — only the ones
+    that hide a formula character."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        client.post("/api/cards", json=dict(
+            player_name=" Bobby Witt Jr.", notes="\tsecond copy", condition="' ",
+        ), headers=headers)
+        r = client.get("/api/cards/export.csv", headers=headers)
+        rows = list(csv.reader(io.StringIO(r.text)))
+        assert rows[1][SHEET_HEADERS.index("Player")] == " Bobby Witt Jr."
+        assert rows[1][SHEET_HEADERS.index("Notes")] == "\tsecond copy"
+        assert rows[1][SHEET_HEADERS.index("Condition")] == "' "

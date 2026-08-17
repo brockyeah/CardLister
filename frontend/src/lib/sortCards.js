@@ -15,6 +15,25 @@ export function cardMatchesSearch(card, query) {
   })
 }
 
+// The exact set of rows the table shows, given the status dropdown and the
+// search box. Extracted from Inventory.jsx so the summary tiles and the table
+// can be driven from one definition of "visible" — the tiles used to describe
+// every card while the table below showed a subset.
+export function filterCards(cards, { status = '', search = '' } = {}) {
+  const list = Array.isArray(cards) ? cards : []
+  return list.filter((c) => {
+    if (status && c.status !== status) return false
+    return cardMatchesSearch(c, search)
+  })
+}
+
+// Whether the filters actually narrow anything — a blank search box and "All
+// statuses" leave the tiles describing the whole collection, so there is
+// nothing to caption.
+export function isNarrowed({ status = '', search = '' } = {}) {
+  return Boolean(status || search.trim())
+}
+
 // Stable sort with nulls/blanks always last regardless of direction.
 // Strings compare case-insensitively and numerically ("BCP-9" < "BCP-100").
 export function sortCards(cards, key, dir) {

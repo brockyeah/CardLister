@@ -5,6 +5,120 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Analytics user-admin routes have no caller check (found by the
+      2026-08-17 Monday security pass; **confirmed by reproducing it against a
+      running app**): `POST /api/analytics/users/reassign` and
+      `DELETE /api/analytics/users/{username}/data` are guarded only by the
+      router-level `Depends(require_auth)`, which proves *some* configured user
+      is logged in and nothing more. Neither handler takes the caller's
+      username — available as a value dependency, the way `scan.py` and
+      `create_card` already use it — so either configured user can move the
+      other's `UsageEvent` rows onto them (the ledger the two users split API
+      spend with) or delete another user's usage/scan/**correction** history
+      outright. The `Correction` rows are the learning loop's training data, so
+      the delete is data loss, not just accounting. Cards are deliberately
+      shared; per-user attribution is deliberately not. The fix needs an owner
+      concept that does not exist yet (`CARDLISTER_USERS` has no roles), which
+      is the design question: a `CARDLISTER_OWNER` env var defaulting to the
+      first entry and 403 for everyone else, versus simply requiring
+      `from_user == caller` / `username == caller` so a user can only touch
+      their own attribution. Needs a test that a *second* configured user is
+      refused — `test_user_admin.py` only ever exercises one user, so today's
+      cross-user authority is unpinned either way (medium; **design first** —
+      touches auth; inline)
+- [ ] `CARDLISTER_USERS` parsing silently mangles passwords containing a comma
+      (found by the 2026-08-17 Monday security pass): `get_users()` splits the
+      whole variable on `,` before splitting each entry on `:`, and drops any
+      resulting fragment without a `:`. So `brock:a,B9xQ7` yields a
+      **one-character** password for `brock` with no warning, and
+      `validate_secrets()` waves it through because it only rejects empty or
+      literally-`changeme` passwords. Worse, a password containing both a comma
+      and a colon mints an unintended extra account: `brock:pa,ss:word` also
+      creates user `ss` with password `word`. Not remotely exploitable on its
+      own — it needs a specific password shape, and the owner's own login would
+      fail — but it is a config footgun that can quietly leave production with a
+      trivial credential or a phantom user. The fix is to fail loud rather than
+      degrade: treat an entry without a `:` as a `validate_secrets()` problem
+      instead of skipping it. A delimiter change (newline-separated entries, or
+      one env var per user) is the sturdier fix but needs a coordinated Railway
+      env-var migration, and the constraint should be documented in README and
+      `.env.example` either way (quick win–medium; **design first** — touches
+      auth and requires a deploy-config migration; inline)
+- [ ] Sheets mirror diverges permanently and the repair tool makes it worse
+      (found 2026-08-17): three compounding holes in one subsystem.
+      (a) `delete_card` (`routers/cards.py`) is the only mutating card route
+      with no `_sync_card_to_sheets` background task and no Sheets call at
+      all, so a deleted card's row survives in the mirror forever — the sheet
+      keeps selling a card that no longer exists. (b) `resync_all`
+      (`routers/sheets.py`) clears every `sheets_row` and calls `sync_card`,
+      which **appends** when `sheets_row` is falsy — so the one-click "full
+      resync" adds a second complete copy of the inventory each time it is
+      run. (c) CSV import deliberately skips the mirror, so an imported
+      collection is invisible in the sheet until each card is next edited,
+      which funnels the owner straight into the duplicating resync. The design
+      crux is that `Card.sheets_row` is a fixed row index: deleting a sheet row
+      shifts every row below it and invalidates every other card's stored
+      index, so the options are blank-in-place (leaves gaps, indexes stay
+      valid), delete-and-renumber (needs a bulk re-stamp in the same
+      transaction), or make resync a clear-then-rewrite of the whole tab
+      (simplest, and fixes all three at once) (medium; **plan doc first** —
+      row-index invalidation plus a destructive clear of a user-visible sheet;
+      inline) — **design + plan written 2026-08-17**
+      (`docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+      `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md`):
+      recommends clear-then-rewrite for the repair path — which makes
+      `resync_all` idempotent and self-healing for the damage past runs already
+      caused — plus blank-in-place on delete. Row removal with index
+      re-stamping is rejected: the two halves cannot be made atomic against a
+      mirror that swallows its own failures, so a partial failure would put
+      every later card one row off and silently overwrite its neighbour.
+      **Awaiting owner approval — the rewrite is a destructive write to a
+      user-visible sheet.**
+- [ ] Pricing lookups pay every source's timeout serially: `get_pricing`
+      (`routers/pricing.py`) tries eBay API → 130point → Mavin → eBay scrape
+      one after another, with per-source httpx timeouts of 15 + 20 + 15 + 15s.
+      The chain only expresses *preference* — no source's input depends on
+      another's output — but the user waits for the sum. On Railway, where
+      CLAUDE.md notes the scrapers routinely 403 from a datacenter IP, the
+      common case is the *worst* case: ~50s of spinner — 65s with eBay creds
+      set, or 80s when its cached OAuth token has expired, since that path makes
+      two sequential 15s calls (`_get_app_token` then the search) — before the
+      $9.99 mock lands, on every single card. Fan the
+      independent sources out concurrently and resolve by the same preference
+      order, keeping the note semantics exactly as they are (winning source →
+      its fixed note; all-failed → the joined notes). Worth deciding in the
+      same pass: parallel means always paying all four requests even when
+      130point answers first, so either accept that or keep a two-stage fan-out
+      (API + 130point, then the rest) — and add an overall deadline so a lookup
+      can never exceed it (medium; implement directly; inline — needs a test
+      that preference order and every note string survive)
+- [ ] Scanner loses reviewed work on a refresh or an accidental back/close: the
+      batch queue and the reviewed form live only in React state, and there is
+      no `beforeunload` guard anywhere in `frontend/src`. Every `ready` queue
+      item represents Opus tokens already spent, so a stray gesture on a phone
+      throws away both the review effort and real money. Register a
+      `beforeunload` handler while any queue item is unsaved or the form is
+      dirty (quick win; implement directly; inline — Scanner.jsx only)
+- [ ] Integration-configuration readout on Analytics manage-data: Sheets
+      (`_get_service` returns None with no credentials), the eBay Browse API
+      (`is_configured()`), the vision billing ladder (api key → subscription →
+      mock), and the email/ntfy alert paths all degrade to silent no-ops. A
+      save that never reaches the sheet looks exactly like a working save, and
+      a deploy running in mock mode looks like a deploy that is scanning. Add
+      an authenticated endpoint reporting configured/not for each integration
+      (never the secret values) plus a small panel — the pull-side complement
+      to the "Sheets sync failure visibility" item below, which reports errors
+      from syncs that were actually attempted (quick win–medium; implement
+      directly; inline)
+- [ ] `listed_at` timestamp on cards: the Sheets/CSV "Date Listed" column is
+      filled from `created_at` (`_card_to_row`), which is when the row was
+      saved, not when it went live on eBay — `attach_ebay_listing` stamps no
+      date at all. A card saved two weeks before it was listed reports the
+      wrong listing date in the mirror, and the planned days-to-sell analytics
+      inherits the same imprecision (it measures created→sold). Fold into the
+      same schema pass as the `previous_status` / soft-delete items in Later
+      (quick win once the column exists; **plan doc first** — schema change,
+      needs a `_COLUMN_MIGRATIONS` entry; inline)
 - [ ] eBay deletion-notice signature verification: the account-deletion
       endpoint acks any POST — eBay signs notices with `X-EBAY-SIGNATURE`
       (ECDSA, public key from the Notification API) and the handler never
@@ -23,26 +137,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       also runs on the normalized path, so raw `/api/..`-style requests get
       the shell (cosmetic — browsers normalize before sending) (medium;
       implement directly; inline — found by the 2026-08-16 weekly deep review)
-- [ ] HEAD support on `/api/health` and `/uploads/{filename}`: FastAPI's
-      `@app.get` registers GET only (unlike Starlette's `Route`, which adds
-      HEAD), so both requests fall through to the static mount and answer 404.
-      A status-code-only uptime monitor configured with HEAD — the usual
-      default — reads healthy and unhealthy alike as 404, defeating the 503
-      the deep health check exists to return (quick win; implement directly;
-      inline)
-- [ ] Filter-aware inventory stat tiles: the tiles are computed from the full
-      card list while the table below shows the filtered set, so narrowing to
-      "sold" or searching a player leaves the tiles describing everything —
-      there is no way to ask "what are my Bowman autos worth". Feed
-      `computeInventoryStats` the filtered rows (or show both, filtered
-      alongside overall) (quick win; implement directly; inline —
-      Inventory.jsx only, the math already lives in `lib/inventoryStats.js`)
-- [ ] Drop the fail-open guards in `.github/workflows/ci.yml`: the backend-test
-      and frontend-test steps are wrapped in `if [ -f ... ]` checks added so CI
-      would pass on refs predating those suites. Both conditions are now
-      permanently true, and they fail open — renaming `ebayTitle.test.js`
-      silently stops the entire frontend suite from running while CI stays
-      green (quick win; implement directly; inline)
 - [ ] Batch scan front/back auto-pairing: uploading 20 images of 10 cards
       currently treats each image as its own card; match front+back pairs
       before extraction. Candidate signals: upload order/adjacency (phone
@@ -355,6 +449,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-08-17 — `/uploads/{filename}` re-checks that the resolved path is
+      inside the uploads volume: `Path().name` blocked traversal but not a
+      symlink pointing out of the volume, which was served 200 with its
+      contents (found via a CodeQL path-injection alert on the route)
+- [x] 2026-08-17 — `/uploads/%2e` 404s instead of 500ing: an encoded dot segment
+      has an empty `Path().name`, so it resolved to the uploads directory and
+      raised inside `FileResponse` (Monday security pass)
+- [x] 2026-08-17 — CSV export escape widened to catch formulas hidden behind a
+      leading tab/CR/space/NUL, which spreadsheets discard before deciding a
+      cell is a formula (Monday security pass; import unescape kept symmetric)
+- [x] 2026-08-17 — HEAD support on `/api/health` and `/uploads/{filename}`:
+      `@app.get` registers GET only, so HEAD probes fell through to the static
+      mount and 404'd whether the app was healthy or not, defeating the deep
+      health check's 503 for the status-code-only monitors that default to HEAD
+- [x] 2026-08-17 — Filter-aware inventory stat tiles: totals describe the rows
+      the table is showing, with an "of N overall" caption on every narrowed
+      tile and a badge naming the matching row count
+- [x] 2026-08-17 — CI fail-open guards dropped: backend and frontend test steps
+      run unconditionally, so a moved test directory or a renamed test file
+      can't skip a whole suite while the job stays green
 
 - [x] 2026-08-16 — Cache headers for the built frontend: `index.html` is
       `no-cache` (a cached shell could outlive its bundles across a deploy and

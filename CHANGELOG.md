@@ -12,6 +12,100 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased]
 
+### Added
+- Design doc + implementation plan for Sheets mirror integrity
+  (`docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+  `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md`). Three defects
+  compound today: `delete_card` is the only mutating card route that never
+  touches the mirror, so deleted cards keep a row forever; `resync_all` clears
+  every `sheets_row` and then appends, so the one-click "full resync" adds a
+  complete second copy of the inventory each run — and it is the button the UI
+  offers precisely when the sheet looks wrong; and CSV import skips the mirror
+  entirely, which funnels an importer straight into that resync. The root cause
+  is that `sheets_row` is an absolute row index, so no operation in the current
+  model can remove a row without invalidating every later card's index. The
+  recommendation is clear-then-rewrite for the repair path (making it idempotent
+  and self-healing for existing damage) plus blank-in-place on delete. Docs only;
+  implementation awaits owner approval, since the rewrite is a destructive write
+  to a user-visible sheet.
+
+### Security
+- `/uploads/{filename}` proves the resolved path is inside the uploads volume
+  before serving it. `Path(filename).name` drops every directory component, so
+  traversal was already blocked — but `.name` says nothing about where the
+  resolved path *lands*, and a name that happened to be a symlink pointing out
+  of the volume was served with a 200 and its contents. Reproduced before
+  fixing, and the new test fails on revert. Both sides are now resolved and
+  containment re-checked. Note this does *not* clear the CodeQL
+  `py/path-injection` alerts on the route — the query models neither `.name` nor
+  `is_relative_to()` as a barrier, so the reported count actually rose from one
+  to two as the extra check added another path expression. Those alerts are a
+  modelling limitation rather than a defect and need dismissing as false
+  positives; the escape they were chased down to find was real, and is fixed.
+- CSV export escapes formulas hidden behind leading whitespace. The escape
+  tested `value.lstrip("'").startswith(("=", "+", "-", "@"))`, which strips
+  only apostrophes — so a cell beginning with a tab, CR, LF, space, or NUL had
+  its formula character one byte out of reach and was written unescaped. Excel
+  and Sheets discard exactly those leading characters before deciding whether a
+  cell is a formula, so a `"\t=HYPERLINK(…)"` saved in Notes evaluated on the
+  owner's machine when the exported inventory was opened. Nothing on the write
+  path normalizes strings, so such a value reached the CSV verbatim from
+  `POST /api/cards`. The check now peels the whole noise set (apostrophes plus
+  whitespace and control characters) before testing, in any mix or repetition,
+  and the import-side unescape stays symmetric so every value still
+  round-trips. Found by the Monday full-app security pass.
+
+### Fixed
+- `/uploads/%2e` answers 404 instead of 500. `Path(".").name` and
+  `Path("..").name` are both `""`, so an encoded dot segment resolved to the
+  uploads *directory*, satisfied the `exists()` check, and then raised inside
+  `FileResponse` ("is not a file") — an unhandled 500 with a traceback on a
+  public, unauthenticated route where 404 is the honest answer. The check is
+  now `is_file()`, which rejects the resolved uploads directory. No information was
+  disclosed (the generic 500 body carries no path), but the tracebacks were
+  noise in the logs that a real error would have to compete with.
+- `/api/health` and `/uploads/{filename}` answer HEAD requests. FastAPI's
+  `@app.get` registers GET alone (unlike Starlette's bare `Route`, which adds
+  HEAD for free), so a HEAD probe missed both routes, fell through to the static
+  mount, and — `api` and `uploads` being non-SPA roots — came back 404. Uptime
+  monitors default to HEAD, which meant a healthy deploy and a database-down
+  deploy both reported 404: exactly the distinction the deep health check's 503
+  exists to make. Both are now registered for HEAD as well, kept out of the
+  OpenAPI schema (HEAD is implied by GET there, and the auth sweep skips it).
+  Registered as a second route rather than `methods=["GET", "HEAD"]` because
+  FastAPI derives an operation id from a route's first method, so one
+  two-method route emits a duplicate id and warns.
+
+### Changed
+- Inventory stat tiles describe whatever the table below is showing. The tiles
+  were computed from the full card list while the table showed the filtered
+  set, so narrowing to "sold" or searching a player left five tiles describing
+  the whole collection — there was no way to ask "what are my Bowman autos
+  worth". Filtered values now carry an "of N overall" caption so a narrowed
+  tile can't be mistaken for a data bug, and a badge by the heading names how
+  many rows the totals cover (or says plainly that nothing matched, so a $0
+  tile reads as an empty filter rather than lost data).
+- Monday dependency pass clears a new high-severity advisory:
+  GHSA-2v37-7h3g-55p8 (nanoid below 3.3.18 can loop indefinitely in a custom
+  generator when size is zero), which reaches the frontend transitively via
+  postcss — so the fix is a lockfile bump rather than a dependency change.
+  Taken with the rest of the semver-compatible drift (axios 1.18.1 → 1.19.0,
+  vite 8.1.5 → 8.2.1, `@vitejs/plugin-react` 6.0.4 → 6.0.5, postcss
+  8.5.23 → 8.5.26), so `package.json` is untouched and only the lockfile moves.
+  `npm audit` is back to zero. Tailwind 3.4 → 4.x remains the only outstanding
+  drift and stays deferred — it is a major with a config/PostCSS pipeline
+  change. `pip-audit` is unchanged: ecdsa PYSEC-2026-1325 still has no fixed
+  release upstream and the app signs HS256, so its ECDSA paths stay unused.
+- CI no longer fails open on a missing test suite. The backend-test and
+  frontend-test steps were wrapped in `if [ -f … ]` / `if [ -d … ]` guards
+  added so CI would pass on refs predating those suites; both conditions have
+  been permanently true for months, and the frontend guard keyed on one
+  specific test *filename* — renaming `ebayTitle.test.js` would have stopped
+  the entire frontend suite from running while the job stayed green. Both steps
+  now run unconditionally.
+
+## 2026-08-16 — Weekly deep review: caching, event loop, quantity crash (PR #43)
+
 ### Fixed
 - The SPA shell now ships `Cache-Control: no-cache` and Vite's content-hashed
   bundles under `/assets/` get the same year-long immutable header as uploads.
