@@ -438,6 +438,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-17 — `/uploads/{filename}` re-checks that the resolved path is
+      inside the uploads volume: `Path().name` blocked traversal but not a
+      symlink pointing out of the volume, which was served 200 with its
+      contents (found via a CodeQL path-injection alert on the route)
 - [x] 2026-08-17 — `/uploads/%2e` 404s instead of 500ing: an encoded dot segment
       has an empty `Path().name`, so it resolved to the uploads directory and
       raised inside `FileResponse` (Monday security pass)

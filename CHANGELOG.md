@@ -13,6 +13,15 @@ only in `[Unreleased]` on a branch is not in prod yet.
 ## [Unreleased]
 
 ### Security
+- `/uploads/{filename}` proves the resolved path is inside the uploads volume
+  before serving it. `Path(filename).name` drops every directory component, so
+  traversal was already blocked — but `.name` says nothing about where the
+  resolved path *lands*, and a name that happened to be a symlink pointing out
+  of the volume was served with a 200 and its contents. Reproduced before
+  fixing, and the new test fails on revert. Both sides are now resolved and
+  containment re-checked, which also clears the CodeQL path-injection alert that
+  surfaced on this route: `.name` is a genuine sanitizer but not one the query
+  models, whereas resolve-and-contain is.
 - CSV export escapes formulas hidden behind leading whitespace. The escape
   tested `value.lstrip("'").startswith(("=", "+", "-", "@"))`, which strips
   only apostrophes — so a cell beginning with a tab, CR, LF, space, or NUL had

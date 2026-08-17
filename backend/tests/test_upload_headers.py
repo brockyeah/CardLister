@@ -117,3 +117,29 @@ def test_upload_path_resolving_to_the_directory_is_a_404_not_a_500():
             r = client.get(f"/uploads/{encoded}")
             assert r.status_code == 404, f"/uploads/{encoded} -> {r.status_code}"
             assert client.head(f"/uploads/{encoded}").status_code == 404
+
+
+def test_symlink_out_of_the_uploads_volume_is_not_served():
+    """`Path(filename).name` strips directory components but says nothing about
+    where the resolved path lands, so a name that is a symlink pointing out of
+    the uploads volume would still have been served. The containment re-check
+    (resolve both sides, require the file to sit under the uploads root) is what
+    actually closes that, so pin it."""
+    from backend.database import uploads_dir
+
+    with TestClient(app) as client:
+        uploads = uploads_dir()
+        uploads.mkdir(parents=True, exist_ok=True)
+        secret = uploads.parent / "outside-the-volume.txt"
+        secret.write_text("not a card photo")
+        link = uploads / "escape.png"
+        link.unlink(missing_ok=True)
+        link.symlink_to(secret)
+        try:
+            r = client.get("/uploads/escape.png")
+            assert r.status_code == 404, f"symlink escape served: {r.status_code}"
+            assert "not a card photo" not in r.text
+            assert client.head("/uploads/escape.png").status_code == 404
+        finally:
+            link.unlink(missing_ok=True)
+            secret.unlink(missing_ok=True)

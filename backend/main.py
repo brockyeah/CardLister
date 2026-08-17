@@ -174,12 +174,20 @@ INLINE_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 def serve_upload(filename: str):
     # Strip any path traversal attempts; only allow the bare filename.
     safe_name = Path(filename).name
-    file_path = uploads_dir() / safe_name
+    # Then prove the result really is inside the uploads volume. `.name` alone
+    # already drops every directory component, but it says nothing about where
+    # the *resolved* path lands — a name that happens to be a symlink out of the
+    # volume would still be served. Resolving both sides and re-checking
+    # containment is the barrier that holds regardless, and it is the shape
+    # static analysis recognizes (CodeQL flags `.name` sinks as path injection
+    # because it does not model `.name` as a sanitizer).
+    uploads_root = uploads_dir().resolve()
+    file_path = (uploads_root / safe_name).resolve()
     # is_file(), not exists(): `Path(".").name` and `Path("..").name` are both
     # "", so a request for /uploads/%2e resolved to the uploads *directory*,
     # passed exists(), and then raised inside FileResponse ("is not a file") —
     # a 500 with a traceback on a public route where 404 is the honest answer.
-    if not safe_name or not file_path.is_file():
+    if not file_path.is_relative_to(uploads_root) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
     # nosniff stops browsers second-guessing the declared content type.
     # Stored names are uuid-hex, so a given URL's bytes never change — cache
