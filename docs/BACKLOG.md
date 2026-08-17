@@ -438,6 +438,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-17 — `/uploads/%2e` 404s instead of 500ing: an encoded dot segment
+      has an empty `Path().name`, so it resolved to the uploads directory and
+      raised inside `FileResponse` (Monday security pass)
 - [x] 2026-08-17 — CSV export escape widened to catch formulas hidden behind a
       leading tab/CR/space/NUL, which spreadsheets discard before deciding a
       cell is a formula (Monday security pass; import unescape kept symmetric)

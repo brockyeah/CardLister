@@ -27,6 +27,14 @@ only in `[Unreleased]` on a branch is not in prod yet.
   round-trips. Found by the Monday full-app security pass.
 
 ### Fixed
+- `/uploads/%2e` answers 404 instead of 500. `Path(".").name` and
+  `Path("..").name` are both `""`, so an encoded dot segment resolved to the
+  uploads *directory*, satisfied the `exists()` check, and then raised inside
+  `FileResponse` ("is not a file") — an unhandled 500 with a traceback on a
+  public, unauthenticated route where 404 is the honest answer. The check is
+  now `is_file()` plus an explicit empty-name guard. No information was
+  disclosed (the generic 500 body carries no path), but the tracebacks were
+  noise in the logs that a real error would have to compete with.
 - `/api/health` and `/uploads/{filename}` answer HEAD requests. FastAPI's
   `@app.get` registers GET alone (unlike Starlette's bare `Route`, which adds
   HEAD for free), so a HEAD probe missed both routes, fell through to the static

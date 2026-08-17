@@ -102,3 +102,18 @@ def test_upload_save_failure_returns_generic_detail(monkeypatch):
         assert r.status_code == 500
         assert r.json()["detail"] == "Failed to save upload."
         assert "secret internal detail" not in r.text
+
+
+def test_upload_path_resolving_to_the_directory_is_a_404_not_a_500():
+    """`/uploads/%2e` decodes to "." and `Path(".").name` is "", so the path
+    resolved to the uploads *directory*, passed the old `exists()` check, and
+    raised inside FileResponse — a 500 with a traceback on a public route where
+    404 is the honest answer."""
+    # Encoded so the dot segment survives client-side URL normalization and
+    # actually reaches the route. (A bare `..` is resolved away before the
+    # request is sent, which is why this needed %2e to surface at all.)
+    with TestClient(app) as client:
+        for encoded in ("%2e", "%2e%2e", "%2e/"):
+            r = client.get(f"/uploads/{encoded}")
+            assert r.status_code == 404, f"/uploads/{encoded} -> {r.status_code}"
+            assert client.head(f"/uploads/{encoded}").status_code == 404
