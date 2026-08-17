@@ -10,7 +10,7 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased]
+## 2026-08-17 — Formula escaping, symlink containment, HEAD support, stat tiles (PR #44)
 
 ### Added
 - Design doc + implementation plan for Sheets mirror integrity
