@@ -8,7 +8,7 @@ user-visible sheet.**
 
 Order matters: step 1 is pure and testable with no API surface, step 2 makes the
 repair tool idempotent, step 3 stops new drift, step 4 makes the remaining gap
-visible.
+visible, and step 5 warns before the destructive action ships.
 
 ## Step 1 — `rewrite_all_rows(cards)` in `services/google_sheets.py`
 
@@ -17,27 +17,47 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
 - Build `[_card_to_row(c) for c in cards]` so the row layout stays the single
   `SHEET_HEADERS`-derived contract (invariant #1).
 - `_ensure_tab` + `_ensure_header` first, same as `sync_card`.
-- Determine the tab's **full used range** before clearing — read
-  `{SHEET_TAB}!A:A` and clear `A2:{END_COL}{max(used, len(rows) + 1)}`. Clearing
-  only `len(rows)` rows would leave the existing duplicate residue in place,
-  which is the bug.
+- Determine the tab's **full used range** before clearing, across **every mirror
+  column** — read `{SHEET_TAB}!A:{END_COL}` (or take `gridProperties` /
+  `dataRange` from `spreadsheets().get`) and take the last row with any
+  non-empty cell. Do **not** probe `A:A` alone: the API omits trailing empty
+  cells, so a residue row with an empty Player but stale data further right
+  would be invisible and survive the clear — precisely the bug being fixed.
+  Clear `A2:{END_COL}{max(used, len(rows) + 1)}`.
 - `values().clear()` on that range, then one `values().update()` at
   `{SHEET_TAB}!A2` with `valueInputOption="RAW"` (the mirror is exempt from the
   CSV formula escaping precisely because it is RAW — do not change this).
 - Return the list of assigned row numbers (`index + 2`), or `None` on any
-  failure, matching `sync_card`'s never-raise contract.
+  failure, matching `sync_card`'s never-raise contract. Distinguish the two
+  failure points in the return value (or a second element) so the caller can
+  tell "nothing happened" from "the tab was cleared but not rewritten" — they
+  need different recovery.
 - Never clear row 1.
+- Guard against an overlapping per-card sync: a module-level
+  rewrite-in-progress flag plus a generation counter, checked by `sync_card`
+  before it writes. A save that read its `sheets_row` before the rewrite must
+  not write afterwards, or it lands on a row the rewrite gave to another card.
 
 ## Step 2 — `resync_all` uses it (`routers/sheets.py`)
 
 - Replace the per-card loop with a single `rewrite_all_rows(cards)` call over
   `db.query(Card).order_by(Card.created_at.asc())` — the ordering already used,
   so existing row positions stay broadly stable.
-- Commit `sheets_row` re-stamps **only** after a non-`None` return. On `None`,
-  leave every `sheets_row` untouched and report the failure in the response, so
-  the DB never claims positions the sheet does not have.
-- Keep the response shape (`synced` / `skipped` / `total`) so the Analytics
-  manage-data panel needs no change.
+- Commit `sheets_row` re-stamps **only** after a successful update.
+- Handle both partial-failure orders explicitly — nulling every `sheets_row` is
+  the safe move in each, because a null index means "append" and the next
+  resync is idempotent:
+  - *Cleared but not rewritten:* null every `sheets_row` in one commit, so each
+    card re-appends instead of writing into a blank tab at a position nothing
+    occupies any more.
+  - *Rewritten but the commit failed:* same — the DB's old positions no longer
+    describe the sheet.
+- Report divergence in the response rather than swallowing it. This is the one
+  Sheets path that must not fail silently: it is the repair tool, and a silent
+  failure here is what produced the mess it exists to clean up.
+- Extend the response shape (`synced` / `skipped` / `total` plus a failure
+  reason) rather than replacing it, and surface the reason in the Analytics
+  manage-data panel.
 
 ## Step 3 — `delete_card` blanks its row (`routers/cards.py`)
 
@@ -56,7 +76,20 @@ New function beside `sync_card`; `sync_card` itself is untouched (hot path).
   not updated and that a full resync will mirror the imported rows. The
   skip-bulk-mirroring rationale stays; it just stops being silent.
 
-## Step 5 — Tests (`backend/tests/test_sheets_mirror.py`, new)
+## Step 5 — Destructive-action warning in the UI (`frontend/src/pages/Analytics.jsx`)
+
+Required, not optional — the design calls for it and this is the only cue the
+owner gets before a destructive action.
+
+- Next to the resync button on manage-data, state plainly that a resync
+  **rewrites the whole Inventory tab** and discards anything typed directly into
+  the sheet.
+- Surface the new failure reason from step 2 when a resync reports divergence,
+  rather than leaving it as a silent success.
+- This makes the change frontend-touching, so the frontend gate applies (see
+  Gates below).
+
+## Step 6 — Tests (`backend/tests/test_sheets_mirror.py`, new)
 
 Patch the module attribute `google_sheets._get_service` with a fake recording
 `clear`/`update`/`append` calls and their ranges — patch the attribute, not a
@@ -69,12 +102,20 @@ bound import, per the repo's testing note.
   range covers the full used range.
 - **Delete blanks one row:** exactly `A{row}:{END_COL}{row}` for the deleted
   card, nothing else; and no call at all when `sheets_row` is `None`.
-- **No commit on failure:** service raising → `sheets_row` values unchanged.
+- **Both partial-failure orders:** `clear` succeeding then `update` raising,
+  and `update` succeeding then the commit raising. In each, assert every
+  `sheets_row` ends up null (so no card writes into a row it no longer owns)
+  and the response reports divergence rather than success.
+- **Residue invisible to an A-only probe:** a row with an empty column A but
+  stale data in a later mirror column must still fall inside the clear range.
+- **Overlapping save and resync:** a `sync_card` that read its `sheets_row`
+  before the rewrite reassigned it must not write afterwards, and the rewritten
+  row must still belong to the card the rewrite assigned it.
 - **Import then resync:** exactly one row per card.
 - Add `Card` to the `db_session` fixture's cleanup list if the new module needs
   isolation beyond what exists.
 
-## Step 6 — Process
+## Step 7 — Process
 
 - `CHANGELOG.md` entry under `[Unreleased]`: prose on the prior pain — a repair
   button that duplicated the inventory, deletes that never reached the mirror.
@@ -89,13 +130,17 @@ bound import, per the repo's testing note.
 
 ## Gates
 
-Full backend suite green (`python3 -m pytest backend/tests -q` from the repo
-root). No frontend change, so no frontend gate unless step 2 alters the response
-shape — it should not.
+Full backend suite green, run from the repo root with the module form —
+`.venv/bin/python -m pytest backend/tests -q` (there is no `pytest.ini` /
+`pyproject.toml`, so bare `pytest` cannot resolve the `backend.` import path,
+and CLAUDE.md notes bare `python` may not be on PATH).
+
+Step 5 touches the frontend, so the frontend gate applies too:
+`cd frontend && npm ci && npm test && npm run build`.
 
 ## Estimated effort
 
-Half a day. Step 1 and step 5 carry the weight; steps 2–4 are small. No schema
+Half a day. Step 1 and step 6 carry the weight; steps 2–5 are small. No schema
 change, no migration, no new dependency.
 
 ## Explicitly out of scope

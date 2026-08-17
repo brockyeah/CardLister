@@ -80,8 +80,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       The chain only expresses *preference* — no source's input depends on
       another's output — but the user waits for the sum. On Railway, where
       CLAUDE.md notes the scrapers routinely 403 from a datacenter IP, the
-      common case is the *worst* case: ~50s (80s with eBay creds set) of
-      spinner before the $9.99 mock lands, on every single card. Fan the
+      common case is the *worst* case: ~50s of spinner — 65s with eBay creds
+      set, or 80s when its cached OAuth token has expired, since that path makes
+      two sequential 15s calls (`_get_app_token` then the search) — before the
+      $9.99 mock lands, on every single card. Fan the
       independent sources out concurrently and resolve by the same preference
       order, keeping the note semantics exactly as they are (winning source →
       its fixed note; all-failed → the joined notes). Worth deciding in the

@@ -78,9 +78,11 @@ Replace `resync_all`'s per-card append loop with two calls:
 2. one `values().update()` writing every card's row in a deterministic order,
    re-stamping `sheets_row = index + 2` for each.
 
-- **Fixes all three defects at once.** Deleted cards vanish because the rewrite
-  reflects the DB. Duplication ends because the clear precedes the write.
-  Imported cards get mirrored because they are simply part of the DB.
+- **Fixes all three defects when combined with A** (see the recommendation
+  below). On its own, C ends duplication because the clear precedes the write,
+  mirrors imported cards because they are simply part of the DB, and sweeps away
+  rows for already-deleted cards *whenever a resync is run*. It does not make an
+  ordinary delete update the sheet — that is what A is for.
 - **Makes the repair tool idempotent** — running it twice is a no-op. That is
   the defining property a repair tool must have and the one today's lacks.
 - **Fewer API calls than today**, not more: two, versus one append per card.
@@ -110,22 +112,46 @@ now the correct, safe answer.
 
 ## What could go wrong
 
-- **A save racing the rewrite.** A background `_sync_card_to_sheets` landing
-  mid-rewrite could write to a row the rewrite is about to reassign. Narrow
-  (single worker, and the rewrite re-stamps every index on completion) but real:
-  worst case one row is briefly stale until that card's next sync. Accept and
-  document; do not add locking for a two-user internal tool.
+- **A save racing the rewrite.** A background `_sync_card_to_sheets` task reads
+  a card's `sheets_row`, then writes to it. If a rewrite reassigns that row to a
+  *different* card in between, the late save overwrites the wrong card's row.
+  This is worse than the "briefly stale" framing it deserves: the sheet ends up
+  holding one card's data under another card's row, silently. The window is
+  narrow (single worker; resync is a manual, rare action) but the consequence is
+  corruption, so it needs a guard — just not a heavyweight one. A module-level
+  rewrite-in-progress flag plus a generation counter is enough: `sync_card`
+  re-reads `sheets_row` and skips the write if the generation moved while it was
+  working, leaving the row correct as the rewrite wrote it. No locking
+  infrastructure, no cross-process coordination — there is only one worker.
 - **A sheet longer than the DB.** The clear must cover the tab's full used
   range, not `len(cards)` rows — otherwise rows below the rewritten block
-  survive, which is the exact residue of the bug being fixed.
-- **Partial failure.** `sheets_row` re-stamps must be committed only after the
-  update call returns successfully, or the DB will claim positions the sheet
-  does not have. Prefer one `update` over chunked writes for that reason; if
-  inventory size later forces chunking, commit per chunk.
+  survive, which is the exact residue of the bug being fixed. Crucially, the
+  used range must be derived from **all** mirror columns (`A` through
+  `END_COL`), not column A alone: a residue row whose Player cell is empty but
+  which carries stale data further right would be invisible to an `A:A` probe
+  and survive the clear.
+- **Partial failure, in both orders.** These are two distinct bad states and
+  both need an answer:
+  - *`clear()` succeeds, `update()` fails.* The tab is now empty while every
+    card's `sheets_row` still points into it, so the mirror silently reports an
+    empty inventory and each card's next save writes one lonely row into a
+    blank sheet. The rewrite must therefore treat a failed update as a hard
+    failure: null every `sheets_row` in one commit so subsequent syncs re-append
+    rather than write into a void, and surface the divergence to the caller
+    instead of swallowing it the way `sync_card` does.
+  - *`update()` succeeds, `db.commit()` fails.* SQLite keeps the old positions
+    while the sheet holds new ones. Same remedy: nulling the indices is always
+    safe, because a null index means "append", and the next resync is idempotent
+    anyway.
+  In both cases the response must say the mirror diverged rather than reporting
+  success — this is the one Sheets path that should *not* fail silently, because
+  it is the repair tool.
 - **Overwriting manual edits.** The rewrite discards anything typed directly
   into the tab. Already true of the existing per-card update path, and the sheet
-  is documented as a mirror rather than a source of truth — but it should be
-  stated in the UI next to the button.
+  is documented as a mirror rather than a source of truth — but it must be
+  stated in the UI next to the button, and that warning ships *with* the change
+  rather than after it. It is the only cue the owner gets before a destructive
+  action, so the plan carries it as a required step, not a nicety.
 - **`SHEET_HEADERS` is append-only (invariant #1).** The rewrite derives every
   row from `_card_to_row`, so it inherits that contract rather than changing it.
   The clear range is derived from `END_COL`, which already tracks the header
@@ -147,5 +173,13 @@ two-user scale.
 - Assert `delete_card` blanks exactly `A{row}:{END_COL}{row}` for the deleted
   card's stored row and touches nothing else.
 - Assert import-then-resync yields exactly one row per card.
-- Assert every `sheets_row` after a rewrite matches the card's position, and
-  that nothing is committed when the update call raises.
+- Assert every `sheets_row` after a rewrite matches the card's position.
+- Cover both partial-failure orders: `clear` succeeding then `update` raising,
+  and `update` succeeding then the commit raising. In each case assert every
+  `sheets_row` ends up null (so no card can write into a row it no longer owns)
+  and that the response reports divergence rather than success.
+- Cover a residue row whose column A is empty but which carries stale data in a
+  later column — it must still fall inside the computed clear range.
+- Cover an overlapping save and resync: a `sync_card` that read a `sheets_row`
+  before a rewrite reassigned it must not write afterwards, and the rewritten
+  row must still belong to the card the rewrite assigned it to.

@@ -36,9 +36,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   resolved path *lands*, and a name that happened to be a symlink pointing out
   of the volume was served with a 200 and its contents. Reproduced before
   fixing, and the new test fails on revert. Both sides are now resolved and
-  containment re-checked, which also clears the CodeQL path-injection alert that
-  surfaced on this route: `.name` is a genuine sanitizer but not one the query
-  models, whereas resolve-and-contain is.
+  containment re-checked. Note this does *not* clear the CodeQL
+  `py/path-injection` alerts on the route — the query models neither `.name` nor
+  `is_relative_to()` as a barrier, so the reported count actually rose from one
+  to two as the extra check added another path expression. Those alerts are a
+  modelling limitation rather than a defect and need dismissing as false
+  positives; the escape they were chased down to find was real, and is fixed.
 - CSV export escapes formulas hidden behind leading whitespace. The escape
   tested `value.lstrip("'").startswith(("=", "+", "-", "@"))`, which strips
   only apostrophes — so a cell beginning with a tab, CR, LF, space, or NUL had
@@ -58,7 +61,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   uploads *directory*, satisfied the `exists()` check, and then raised inside
   `FileResponse` ("is not a file") — an unhandled 500 with a traceback on a
   public, unauthenticated route where 404 is the honest answer. The check is
-  now `is_file()` plus an explicit empty-name guard. No information was
+  now `is_file()`, which rejects the resolved uploads directory. No information was
   disclosed (the generic 500 body carries no path), but the tracebacks were
   noise in the logs that a real error would have to compete with.
 - `/api/health` and `/uploads/{filename}` answer HEAD requests. FastAPI's
