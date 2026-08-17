@@ -5,6 +5,69 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Sheets mirror diverges permanently and the repair tool makes it worse
+      (found 2026-08-17): three compounding holes in one subsystem.
+      (a) `delete_card` (`routers/cards.py`) is the only mutating card route
+      with no `_sync_card_to_sheets` background task and no Sheets call at
+      all, so a deleted card's row survives in the mirror forever — the sheet
+      keeps selling a card that no longer exists. (b) `resync_all`
+      (`routers/sheets.py`) clears every `sheets_row` and calls `sync_card`,
+      which **appends** when `sheets_row` is falsy — so the one-click "full
+      resync" adds a second complete copy of the inventory each time it is
+      run. (c) CSV import deliberately skips the mirror, so an imported
+      collection is invisible in the sheet until each card is next edited,
+      which funnels the owner straight into the duplicating resync. The design
+      crux is that `Card.sheets_row` is a fixed row index: deleting a sheet row
+      shifts every row below it and invalidates every other card's stored
+      index, so the options are blank-in-place (leaves gaps, indexes stay
+      valid), delete-and-renumber (needs a bulk re-stamp in the same
+      transaction), or make resync a clear-then-rewrite of the whole tab
+      (simplest, and fixes all three at once) (medium; **plan doc first** —
+      row-index invalidation plus a destructive clear of a user-visible sheet;
+      inline)
+- [ ] Pricing lookups pay every source's timeout serially: `get_pricing`
+      (`routers/pricing.py`) tries eBay API → 130point → Mavin → eBay scrape
+      one after another, with per-source httpx timeouts of 15 + 20 + 15 + 15s.
+      The chain only expresses *preference* — no source's input depends on
+      another's output — but the user waits for the sum. On Railway, where
+      CLAUDE.md notes the scrapers routinely 403 from a datacenter IP, the
+      common case is the *worst* case: ~50s (80s with eBay creds set) of
+      spinner before the $9.99 mock lands, on every single card. Fan the
+      independent sources out concurrently and resolve by the same preference
+      order, keeping the note semantics exactly as they are (winning source →
+      its fixed note; all-failed → the joined notes). Worth deciding in the
+      same pass: parallel means always paying all four requests even when
+      130point answers first, so either accept that or keep a two-stage fan-out
+      (API + 130point, then the rest) — and add an overall deadline so a lookup
+      can never exceed it (medium; implement directly; inline — needs a test
+      that preference order and every note string survive)
+- [ ] Scanner loses reviewed work on a refresh or an accidental back/close: the
+      batch queue and the reviewed form live only in React state, and there is
+      no `beforeunload` guard anywhere in `frontend/src`. Every `ready` queue
+      item represents Opus tokens already spent, so a stray gesture on a phone
+      throws away both the review effort and real money. Register a
+      `beforeunload` handler while any queue item is unsaved or the form is
+      dirty (quick win; implement directly; inline — Scanner.jsx only)
+- [ ] Integration-configuration readout on Analytics manage-data: Sheets
+      (`_get_service` returns None with no credentials), the eBay Browse API
+      (`is_configured()`), the vision billing ladder (api key → subscription →
+      mock), and the email/ntfy alert paths all degrade to silent no-ops. A
+      save that never reaches the sheet looks exactly like a working save, and
+      a deploy running in mock mode looks like a deploy that is scanning. Add
+      an authenticated endpoint reporting configured/not for each integration
+      (never the secret values) plus a small panel — the pull-side complement
+      to the "Sheets sync failure visibility" item below, which reports errors
+      from syncs that were actually attempted (quick win–medium; implement
+      directly; inline)
+- [ ] `listed_at` timestamp on cards: the Sheets/CSV "Date Listed" column is
+      filled from `created_at` (`_card_to_row`), which is when the row was
+      saved, not when it went live on eBay — `attach_ebay_listing` stamps no
+      date at all. A card saved two weeks before it was listed reports the
+      wrong listing date in the mirror, and the planned days-to-sell analytics
+      inherits the same imprecision (it measures created→sold). Fold into the
+      same schema pass as the `previous_status` / soft-delete items in Later
+      (quick win once the column exists; **plan doc first** — schema change,
+      needs a `_COLUMN_MIGRATIONS` entry; inline)
 - [ ] eBay deletion-notice signature verification: the account-deletion
       endpoint acks any POST — eBay signs notices with `X-EBAY-SIGNATURE`
       (ECDSA, public key from the Notification API) and the handler never
