@@ -63,7 +63,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       transaction), or make resync a clear-then-rewrite of the whole tab
       (simplest, and fixes all three at once) (medium; **plan doc first** —
       row-index invalidation plus a destructive clear of a user-visible sheet;
-      inline)
+      inline) — **design + plan written 2026-08-17**
+      (`docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+      `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md`):
+      recommends clear-then-rewrite for the repair path — which makes
+      `resync_all` idempotent and self-healing for the damage past runs already
+      caused — plus blank-in-place on delete. Row removal with index
+      re-stamping is rejected: the two halves cannot be made atomic against a
+      mirror that swallows its own failures, so a partial failure would put
+      every later card one row off and silently overwrite its neighbour.
+      **Awaiting owner approval — the rewrite is a destructive write to a
+      user-visible sheet.**
 - [ ] Pricing lookups pay every source's timeout serially: `get_pricing`
       (`routers/pricing.py`) tries eBay API → 130point → Mavin → eBay scrape
       one after another, with per-source httpx timeouts of 15 + 20 + 15 + 15s.

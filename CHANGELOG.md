@@ -12,6 +12,23 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased]
 
+### Added
+- Design doc + implementation plan for Sheets mirror integrity
+  (`docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+  `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md`). Three defects
+  compound today: `delete_card` is the only mutating card route that never
+  touches the mirror, so deleted cards keep a row forever; `resync_all` clears
+  every `sheets_row` and then appends, so the one-click "full resync" adds a
+  complete second copy of the inventory each run — and it is the button the UI
+  offers precisely when the sheet looks wrong; and CSV import skips the mirror
+  entirely, which funnels an importer straight into that resync. The root cause
+  is that `sheets_row` is an absolute row index, so no operation in the current
+  model can remove a row without invalidating every later card's index. The
+  recommendation is clear-then-rewrite for the repair path (making it idempotent
+  and self-healing for existing damage) plus blank-in-place on delete. Docs only;
+  implementation awaits owner approval, since the rewrite is a destructive write
+  to a user-visible sheet.
+
 ### Security
 - `/uploads/{filename}` proves the resolved path is inside the uploads volume
   before serving it. `Path(filename).name` drops every directory component, so
