@@ -10,6 +10,45 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `feat/sheets-mirror-integrity`
+
+### Fixed
+- The Google Sheet mirror no longer drifts permanently, and the button offered
+  to repair it no longer makes things worse. Three defects compounded: pressing
+  "resync" nulled every card's stored row index and re-synced, which took the
+  **append** branch and added a complete second copy of the inventory on every
+  press; `delete_card` was the only mutating card route that never touched the
+  mirror, so a deleted card's row survived in the sheet forever; and CSV import
+  skips the mirror by design but said nothing, so an importer saw an empty sheet
+  and reached for the duplicating resync. Resync is now a clear-then-rewrite of
+  the Inventory tab — running it twice produces the same sheet, which is the
+  property a repair tool needs and the old one lacked, and it uses three API
+  calls rather than one per card. Delete blanks its row in place rather than
+  removing it, because removing a row shifts every row below it and silently
+  invalidates every later card's stored index. Import now says plainly that its
+  cards need a resync to appear.
+- Concurrency: every Sheet write is serialized behind a module-level lock (the
+  app runs one worker by invariant). A save that read its row index before a
+  rewrite reassigned it now re-reads inside the lock and lands on the new row
+  instead of overwriting a different card's data — and is not dropped. The
+  delete-path blank checks row *ownership* under the same lock rather than
+  trusting the row number, so a resync landing between the delete and the
+  background task can't erase a live card's row.
+- The resync endpoint reports failures instead of swallowing them, and
+  distinguishes the two partial-failure orders because they need opposite
+  recovery: cleared-but-not-rewritten nulls every index (the sheet is empty, so
+  each card must re-append), while rewritten-but-not-recorded deliberately does
+  not (the sheet is correct and positions are deterministic — nulling there
+  would make every card append a second copy, recreating the exact duplication
+  this fixes).
+
+### Added
+- A "Resync sheet" button on the Analytics manage-data panel, with a
+  confirm dialog and copy stating that the tab is rewritten from the database
+  and anything typed directly into the sheet is discarded. The endpoint
+  previously had no UI at all, so the only way to mirror imported cards was a
+  manual API call — and the failure reason is now surfaced rather than silent.
+
 ## 2026-08-17 — Formula escaping, symlink containment, HEAD support, stat tiles (PR #44)
 
 ### Added

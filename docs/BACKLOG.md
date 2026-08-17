@@ -44,36 +44,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       env-var migration, and the constraint should be documented in README and
       `.env.example` either way (quick win–medium; **design first** — touches
       auth and requires a deploy-config migration; inline)
-- [ ] Sheets mirror diverges permanently and the repair tool makes it worse
-      (found 2026-08-17): three compounding holes in one subsystem.
-      (a) `delete_card` (`routers/cards.py`) is the only mutating card route
-      with no `_sync_card_to_sheets` background task and no Sheets call at
-      all, so a deleted card's row survives in the mirror forever — the sheet
-      keeps selling a card that no longer exists. (b) `resync_all`
-      (`routers/sheets.py`) clears every `sheets_row` and calls `sync_card`,
-      which **appends** when `sheets_row` is falsy — so the one-click "full
-      resync" adds a second complete copy of the inventory each time it is
-      run. (c) CSV import deliberately skips the mirror, so an imported
-      collection is invisible in the sheet until each card is next edited,
-      which funnels the owner straight into the duplicating resync. The design
-      crux is that `Card.sheets_row` is a fixed row index: deleting a sheet row
-      shifts every row below it and invalidates every other card's stored
-      index, so the options are blank-in-place (leaves gaps, indexes stay
-      valid), delete-and-renumber (needs a bulk re-stamp in the same
-      transaction), or make resync a clear-then-rewrite of the whole tab
-      (simplest, and fixes all three at once) (medium; **plan doc first** —
-      row-index invalidation plus a destructive clear of a user-visible sheet;
-      inline) — **design + plan written 2026-08-17**
-      (`docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
-      `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md`):
-      recommends clear-then-rewrite for the repair path — which makes
-      `resync_all` idempotent and self-healing for the damage past runs already
-      caused — plus blank-in-place on delete. Row removal with index
-      re-stamping is rejected: the two halves cannot be made atomic against a
-      mirror that swallows its own failures, so a partial failure would put
-      every later card one row off and silently overwrite its neighbour.
-      **Awaiting owner approval — the rewrite is a destructive write to a
-      user-visible sheet.**
 - [ ] Pricing lookups pay every source's timeout serially: `get_pricing`
       (`routers/pricing.py`) tries eBay API → 130point → Mavin → eBay scrape
       one after another, with per-source httpx timeouts of 15 + 20 + 15 + 15s.
@@ -450,6 +420,18 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-17 — Sheets mirror integrity: `resync_all` is now a
+      clear-then-rewrite of the Inventory tab (idempotent — running it twice
+      produces the same sheet, where the old per-card append loop added a
+      complete second copy of the inventory each press), `delete_card` blanks
+      its row in place, and CSV import says plainly that imported cards need a
+      resync to reach the mirror. Every Sheet write is serialized behind a
+      module-level lock, with `sync_card` re-reading its `sheets_row` inside it
+      and the delete-path blank checking row *ownership*, so a save or delete
+      racing a rewrite can neither be dropped nor erase a live card's row. The
+      resync button and its destructive-action warning are new — the endpoint
+      previously had no UI at all. Implements
+      `docs/superpowers/plans/2026-08-17-sheets-mirror-integrity.md` (PR #46).
 - [x] 2026-08-17 — `/uploads/{filename}` re-checks that the resolved path is
       inside the uploads volume: `Path().name` blocked traversal but not a
       symlink pointing out of the volume, which was served 200 with its

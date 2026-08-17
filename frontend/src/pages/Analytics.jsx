@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   getAnalytics, reassignUser, deleteUserData, getConfiguredUsers,
   downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
-  getStorageUsage,
+  getStorageUsage, resyncSheet,
 } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
@@ -273,6 +273,28 @@ function ManageData({ users, onDone }) {
     } finally { setBusy(false) }
   }
 
+  const resync = async () => {
+    // Destructive: the Inventory tab is cleared and rewritten from the database,
+    // so anything typed directly into the sheet is discarded.
+    const ok = window.confirm(
+      'Rewrite the Google Sheet from the database?\n\n' +
+      'The Inventory tab is cleared and rewritten, so anything typed directly ' +
+      'into the sheet is discarded. Running it twice is safe — it produces the ' +
+      'same result.',
+    )
+    if (!ok) return
+    setBusy(true); setMsg('')
+    try {
+      const r = await resyncSheet()
+      // The repair tool must not fail silently — a silent failure here is what
+      // produced the mess it exists to clean up.
+      setMsg(r.ok ? `Sheet rewritten: ${r.synced} row${r.synced === 1 ? '' : 's'}.`
+                  : r.detail || 'Resync failed.')
+    } catch (e) {
+      setMsg(e.response?.data?.detail || 'Resync failed.')
+    } finally { setBusy(false) }
+  }
+
   const cleanupPhotos = async () => {
     setBusy(true); setMsg('')
     try {
@@ -330,7 +352,16 @@ function ManageData({ users, onDone }) {
         <button onClick={cleanupPhotos} disabled={busy} className="btn-secondary">
           Clean up orphaned photos
         </button>
+        <button onClick={resync} disabled={busy} className="btn-secondary">
+          Resync sheet
+        </button>
       </div>
+      <p className="text-xs text-gray-500 mb-3">
+        <strong>Resync sheet</strong> rewrites the Google Sheet's Inventory tab from the
+        database — it clears the data rows and writes every card back, so anything typed
+        directly into the sheet is discarded. It's safe to run repeatedly (twice in a row
+        produces the same sheet), and it's how CSV-imported cards reach the mirror.
+      </p>
       <p className="text-xs text-gray-500 mb-3">
         Import expects the CSV export's column layout (columns matched by header name — extra
         columns are ignored, and Parallel / Serial # / Refractor columns are picked up if present).
