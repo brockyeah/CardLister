@@ -100,6 +100,15 @@ describe('tile captions', () => {
     expect(overallHint(0, 0, money)).toBe(null)
   })
 
+  it('compares what is rendered, so a float epsilon cannot caption a tile with its own value', () => {
+    // The two sums reduce over differently-ordered arrays, and float addition
+    // is not associative — 0.1+0.2 !== 0.3 exactly, but both render $0.30.
+    expect(0.1 + 0.2).not.toBe(0.3)
+    expect(overallHint(0.1 + 0.2, 0.3, money)).toBe(null)
+    // A difference that *is* visible still gets its caption.
+    expect(overallHint(0.3, 0.31, money)).toBe('of $0.31 overall')
+  })
+
   it('captions rows only when copies and rows disagree', () => {
     expect(copiesHint({ total: 5, rowCount: 3 })).toBe('3 rows')
     expect(copiesHint({ total: 1, rowCount: 1 })).toBe(null)

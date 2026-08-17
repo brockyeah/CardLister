@@ -30,8 +30,15 @@ function sumQuantity(cards) {
 // tile that simply looks wrong with no way to tell it apart from a data bug.
 // Returns null when the two agree so an unfiltered view stays uncluttered.
 export function overallHint(value, overallValue, format = String) {
-  if (value === overallValue) return null
-  return `of ${format(overallValue)} overall`
+  const shown = format(overallValue)
+  // Compare what the reader will actually see, not the raw floats. The two
+  // sums reduce over differently-ordered arrays (the filtered list is sorted,
+  // the full one is in API order) and float addition is not associative, so a
+  // mathematically-equal revenue can differ by an epsilon — which would caption
+  // a tile with "of $60.00 overall" while the tile itself reads $60.00. The
+  // caption exists to flag a *visible* difference, so that is what to test.
+  if (format(value) === shown) return null
+  return `of ${shown} overall`
 }
 
 // Rows vs copies: only differs once something was quantity-merged.
