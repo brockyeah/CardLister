@@ -258,3 +258,20 @@ def test_import_sold_row_defaults_missing_sold_date(db_session):
         assert body["created"] == 1
         assert any("Date Sold" in w for w in body["warnings"])
         assert db_session.query(Card).one().sold_at is not None
+
+
+def test_whitespace_hidden_formula_round_trips(db_session):
+    """The widened export escape must stay symmetric with the import unescape,
+    or a tab-hidden formula would come back with its apostrophe still attached."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        client.post("/api/cards", json=dict(
+            player_name="Jackson Holliday", notes="\t=SUM(A1:A9)",
+        ), headers=headers)
+        exported = client.get("/api/cards/export.csv", headers=headers).text
+        assert "'\t=SUM(A1:A9)" in exported
+
+        r = _post_csv(client, headers, exported)
+        assert r.status_code == 200, r.text
+        imported = db_session.query(Card).order_by(Card.id.desc()).first()
+        assert imported.notes == "\t=SUM(A1:A9)"

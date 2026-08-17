@@ -12,6 +12,20 @@ only in `[Unreleased]` on a branch is not in prod yet.
 
 ## [Unreleased]
 
+### Security
+- CSV export escapes formulas hidden behind leading whitespace. The escape
+  tested `value.lstrip("'").startswith(("=", "+", "-", "@"))`, which strips
+  only apostrophes — so a cell beginning with a tab, CR, LF, space, or NUL had
+  its formula character one byte out of reach and was written unescaped. Excel
+  and Sheets discard exactly those leading characters before deciding whether a
+  cell is a formula, so a `"\t=HYPERLINK(…)"` saved in Notes evaluated on the
+  owner's machine when the exported inventory was opened. Nothing on the write
+  path normalizes strings, so such a value reached the CSV verbatim from
+  `POST /api/cards`. The check now peels the whole noise set (apostrophes plus
+  whitespace and control characters) before testing, in any mix or repetition,
+  and the import-side unescape stays symmetric so every value still
+  round-trips. Found by the Monday full-app security pass.
+
 ### Fixed
 - `/api/health` and `/uploads/{filename}` answer HEAD requests. FastAPI's
   `@app.get` registers GET alone (unlike Starlette's bare `Route`, which adds

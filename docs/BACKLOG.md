@@ -5,6 +5,45 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Analytics user-admin routes have no caller check (found by the
+      2026-08-17 Monday security pass; **confirmed by reproducing it against a
+      running app**): `POST /api/analytics/users/reassign` and
+      `DELETE /api/analytics/users/{username}/data` are guarded only by the
+      router-level `Depends(require_auth)`, which proves *some* configured user
+      is logged in and nothing more. Neither handler takes the caller's
+      username — available as a value dependency, the way `scan.py` and
+      `create_card` already use it — so either configured user can move the
+      other's `UsageEvent` rows onto them (the ledger the two users split API
+      spend with) or delete another user's usage/scan/**correction** history
+      outright. The `Correction` rows are the learning loop's training data, so
+      the delete is data loss, not just accounting. Cards are deliberately
+      shared; per-user attribution is deliberately not. The fix needs an owner
+      concept that does not exist yet (`CARDLISTER_USERS` has no roles), which
+      is the design question: a `CARDLISTER_OWNER` env var defaulting to the
+      first entry and 403 for everyone else, versus simply requiring
+      `from_user == caller` / `username == caller` so a user can only touch
+      their own attribution. Needs a test that a *second* configured user is
+      refused — `test_user_admin.py` only ever exercises one user, so today's
+      cross-user authority is unpinned either way (medium; **design first** —
+      touches auth; inline)
+- [ ] `CARDLISTER_USERS` parsing silently mangles passwords containing a comma
+      (found by the 2026-08-17 Monday security pass): `get_users()` splits the
+      whole variable on `,` before splitting each entry on `:`, and drops any
+      resulting fragment without a `:`. So `brock:a,B9xQ7` yields a
+      **one-character** password for `brock` with no warning, and
+      `validate_secrets()` waves it through because it only rejects empty or
+      literally-`changeme` passwords. Worse, a password containing both a comma
+      and a colon mints an unintended extra account: `brock:pa,ss:word` also
+      creates user `ss` with password `word`. Not remotely exploitable on its
+      own — it needs a specific password shape, and the owner's own login would
+      fail — but it is a config footgun that can quietly leave production with a
+      trivial credential or a phantom user. The fix is to fail loud rather than
+      degrade: treat an entry without a `:` as a `validate_secrets()` problem
+      instead of skipping it. A delimiter change (newline-separated entries, or
+      one env var per user) is the sturdier fix but needs a coordinated Railway
+      env-var migration, and the constraint should be documented in README and
+      `.env.example` either way (quick win–medium; **design first** — touches
+      auth and requires a deploy-config migration; inline)
 - [ ] Sheets mirror diverges permanently and the repair tool makes it worse
       (found 2026-08-17): three compounding holes in one subsystem.
       (a) `delete_card` (`routers/cards.py`) is the only mutating card route
@@ -399,6 +438,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-17 — CSV export escape widened to catch formulas hidden behind a
+      leading tab/CR/space/NUL, which spreadsheets discard before deciding a
+      cell is a formula (Monday security pass; import unescape kept symmetric)
 - [x] 2026-08-17 — HEAD support on `/api/health` and `/uploads/{filename}`:
       `@app.get` registers GET only, so HEAD probes fell through to the static
       mount and 404'd whether the app was healthy or not, defeating the deep

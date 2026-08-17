@@ -70,12 +70,21 @@ def list_cards(
 # The Sheets mirror is unaffected (rows are written with valueInputOption=RAW).
 _FORMULA_CHARS = ("=", "+", "-", "@")
 
+# Leading characters a spreadsheet discards before deciding whether a cell is a
+# formula, so they must not hide one from the check either. Testing only for a
+# leading apostrophe let "\t=HYPERLINK(...)" and "\r=1+1" through unescaped:
+# Excel drops the tab/CR and evaluates the rest. Apostrophes stay in the set
+# for the round-trip reason below; whitespace, tab, CR/LF and NUL are the rest.
+_FORMULA_LEAD_NOISE = "'\t\r\n\v\f\x00 "
+
 
 def _needs_formula_escape(value: str) -> bool:
     # Apostrophe-lead values like "'-1/1 SP" must be escaped too — otherwise
     # the import-side unescape couldn't tell a user's literal apostrophe from
     # one the exporter added, and would strip it (round-trip corruption).
-    return value.lstrip("'").startswith(_FORMULA_CHARS)
+    # lstrip() takes a character *set*, so any mix and repetition of the noise
+    # characters is peeled off ("\t'=1+1" and "'\t=1+1" both reduce to "=1+1").
+    return value.lstrip(_FORMULA_LEAD_NOISE).startswith(_FORMULA_CHARS)
 
 
 def _escape_formula_cell(value):
