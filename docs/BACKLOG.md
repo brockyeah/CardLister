@@ -24,13 +24,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       win–medium; implement directly; inline — Scanner.jsx only)
 - [ ] `PricingResponse.comps` is an untyped `List[dict]` with no contract test:
       all four sources hand-build `{"title": …, "price": …}` and the frontend
-      reads both keys directly (`c.price.toFixed(2)` in CardForm, unguarded).
-      Nothing pins the key names, so a scraper refactor that renamed `price`
-      would pass the whole backend suite, render `$NaN` in the review form, and
-      break the median — with no error anywhere. Give comps a pydantic model
-      and add a parity test asserting every source's parser emits it, using the
-      saved fixture HTML the scraper tests already carry (medium; implement
-      directly; inline)
+      reads both keys directly. Nothing pins the key names, so a scraper
+      refactor that renamed `price` would pass the whole backend suite and
+      break the median with no error anywhere. Both render sites now coerce
+      with `Number(c.price)`, so a bad price degrades to a `$NaN` row instead
+      of throwing mid-render (2026-08-18) — that caps the blast radius but
+      pins nothing: the contract is still unenforced on either side. Give comps
+      a pydantic model and add a parity test asserting every source's parser
+      emits it, using the saved fixture HTML the scraper tests already carry
+      (medium; implement directly; inline)
 - [ ] Mark-sold date is computed in UTC, so it is off by a day for part of the
       day: `MarkSoldModal` defaults the picker to `new Date().toISOString()
       .slice(0, 10)` — the *UTC* date — so from 8pm EDT onward it pre-fills
