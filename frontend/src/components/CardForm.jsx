@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { buildEbayTitle, EBAY_TITLE_MAX } from '../lib/ebayTitle.js'
-import { formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
+import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 
 const FIELDS = [
   { key: 'player_name', label: 'Player', type: 'text', wide: true },
@@ -185,10 +185,10 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
             {comps.map((c, idx) => (
               <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
                 <span className="text-gray-300 truncate">{c.title}</span>
-                {/* Number() to match the Comps modal: comps are an untyped
-                    List[dict] server-side, and a string price here would throw
-                    inside render and take the whole reviewed card with it. */}
-                <span className="text-emerald-400 font-bold whitespace-nowrap">${Number(c.price).toFixed(2)}</span>
+                {/* Formatted through the same usable-price test the summary
+                    above applies, so the list can't show a price the range
+                    excluded — and a null can't render as a confident $0.00. */}
+                <span className="text-emerald-400 font-bold whitespace-nowrap">{formatCompPrice(c.price)}</span>
               </div>
             ))}
           </div>

@@ -26,11 +26,32 @@ export const WIDE_SPREAD_RATIO = 3
 // the warning.
 export const MIN_COMPS_FOR_SPREAD = 3
 
+// A price is usable if it is a real, positive amount. Sources hand-build their
+// comp dicts and nothing pins the shape, so a null or an unparseable string can
+// reach here.
+function isUsablePrice(n) {
+  return Number.isFinite(n) && n > 0
+}
+
 function usablePrices(comps) {
   return (comps || [])
     .map((c) => Number(c?.price))
-    .filter((p) => Number.isFinite(p) && p > 0)
+    .filter(isUsablePrice)
     .sort((a, b) => a - b)
+}
+
+/**
+ * One comp's price as money, or a marker when it is not usable.
+ *
+ * Shares `isUsablePrice` with the summary on purpose. A bare
+ * `Number(price).toFixed(2)` turns `null` into `$0.00` — a plausible-looking
+ * price that is simply wrong — and an unparseable string into `$NaN`, while
+ * the range and count above the list quietly exclude both. That leaves the
+ * list and its own summary disagreeing with nothing to explain the gap.
+ */
+export function formatCompPrice(price) {
+  const n = Number(price)
+  return isUsablePrice(n) ? `$${n.toFixed(2)}` : '—'
 }
 
 /**

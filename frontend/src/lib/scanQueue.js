@@ -15,6 +15,7 @@
 // Statuses whose work is unrecoverable if the queue is thrown away.
 const PAID_STATUSES = ['ready', 'scanning']
 
+/** How many queue items are currently in any of `statuses`. */
 export function countByStatus(queue, statuses) {
   const wanted = new Set(statuses)
   return (queue || []).filter((q) => wanted.has(q?.status)).length

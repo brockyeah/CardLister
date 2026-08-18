@@ -9,7 +9,7 @@ import {
   overallHint,
 } from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
-import { formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
+import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value, hint }) {
@@ -221,7 +221,7 @@ function CompsModal({ card, onClose, onApplyPrice }) {
                   {result.comps.slice(0, 8).map((c, idx) => (
                     <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
                       <span className="text-gray-300 truncate">{c.title}</span>
-                      <span className="text-emerald-400 font-bold whitespace-nowrap">${Number(c.price).toFixed(2)}</span>
+                      <span className="text-emerald-400 font-bold whitespace-nowrap">{formatCompPrice(c.price)}</span>
                     </div>
                   ))}
                 </div>

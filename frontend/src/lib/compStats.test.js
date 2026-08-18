@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   MIN_COMPS_FOR_SPREAD,
   WIDE_SPREAD_RATIO,
+  formatCompPrice,
   formatCompRange,
   spreadWarning,
   summarizeComps,
@@ -79,6 +80,27 @@ describe('formatCompRange', () => {
 
   it('renders nothing for an empty summary', () => {
     expect(formatCompRange(null)).toBe('')
+  })
+})
+
+describe('formatCompPrice', () => {
+  it('renders a usable price as money', () => {
+    expect(formatCompPrice(12.5)).toBe('$12.50')
+    expect(formatCompPrice('9.99')).toBe('$9.99')
+  })
+
+  it('marks a price the summary would have excluded as unavailable', () => {
+    // A bare Number(null).toFixed(2) renders "$0.00" — a confident-looking
+    // price that is simply wrong — while the range above the list excludes it.
+    for (const bad of [null, undefined, '', 'n/a', NaN, 0, -5]) {
+      expect(formatCompPrice(bad)).toBe('—')
+    }
+  })
+
+  it('agrees with summarizeComps about which prices count', () => {
+    const list = [{ price: 10 }, { price: null }, { price: 'n/a' }, { price: 20 }]
+    const rendered = list.map((c) => formatCompPrice(c.price))
+    expect(rendered.filter((r) => r !== '—')).toHaveLength(summarizeComps(list).count)
   })
 })
 

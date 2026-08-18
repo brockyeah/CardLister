@@ -48,9 +48,14 @@ only in `[Unreleased]` on a branch is not in prod yet.
   exercised end-to-end in a real browser against the running app.
 
 ### Changed
-- The review form's comp list renders prices through `Number()` like the Comps
-  modal already did. Comps are an untyped `List[dict]` server-side, and a string
-  price would have thrown inside render and taken the reviewed card with it.
+- Both comp lists now render each price through one formatter that applies the
+  same usable-price test the range above them uses, showing `—` for anything it
+  rejects. Comps are an untyped `List[dict]` server-side: the review form used
+  to call `c.price.toFixed(2)` directly, so a string price would have thrown
+  inside render and taken the reviewed card with it, and coercing with a bare
+  `Number()` traded that for a worse failure — `null` renders as a confident
+  `$0.00`, an unparseable value as `$NaN`, either one sitting in a list whose
+  own summary had silently excluded it.
 
 ## 2026-08-17 — Design docs: analytics owner gate, parallel pricing chain (PR #47)
 
