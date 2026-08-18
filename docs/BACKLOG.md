@@ -5,6 +5,43 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
+      silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
+      `createCard`, then `getEbayListingText`, and only then calls
+      `navigator.clipboard.writeText` and `window.open(EBAY_SELL_URL)`. Both
+      APIs are gated on *transient user activation*, which the click that
+      started the save has already spent by the time two network round trips
+      finish — Chrome's window is ~5s, and Safari requires a clipboard write in
+      the same task as the gesture. The app's whole payoff is "save copies the
+      listing text and opens eBay to paste", and this is the mobile flow (phone
+      camera → iOS Safari) where the restriction is strictest. The existing
+      `clipboardOk` fallback proves the clipboard half already fails sometimes;
+      the popup half has no fallback at all, so a blocked tab looks like
+      nothing happened. Fix by moving both behind a fresh gesture — fetch the
+      listing text with the card, then put "Copy text" and "Open eBay" buttons
+      in the success toast — rather than firing them from the async tail.
+      **Cannot be verified headlessly**; needs a real iOS Safari pass (quick
+      win–medium; implement directly; inline — Scanner.jsx only)
+- [ ] `PricingResponse.comps` is an untyped `List[dict]` with no contract test:
+      all four sources hand-build `{"title": …, "price": …}` and the frontend
+      reads both keys directly (`c.price.toFixed(2)` in CardForm, unguarded).
+      Nothing pins the key names, so a scraper refactor that renamed `price`
+      would pass the whole backend suite, render `$NaN` in the review form, and
+      break the median — with no error anywhere. Give comps a pydantic model
+      and add a parity test asserting every source's parser emits it, using the
+      saved fixture HTML the scraper tests already carry (medium; implement
+      directly; inline)
+- [ ] Mark-sold date is computed in UTC, so it is off by a day for part of the
+      day: `MarkSoldModal` defaults the picker to `new Date().toISOString()
+      .slice(0, 10)` — the *UTC* date — so from 8pm EDT onward it pre-fills
+      **tomorrow**, and a card sold in the evening gets stamped a day late
+      unless the user notices. On submit it does `new Date(date).toISOString()`,
+      and a bare `YYYY-MM-DD` parses as UTC midnight per spec, which renders as
+      the *previous* day anywhere west of UTC. Sold dates feed the Sheets "Date
+      Sold" column, the planned tax-year export, and days-to-sell analytics, so
+      the error propagates. Fix by composing the default from local date parts
+      and submitting local noon, in a tested pure helper (quick win; implement
+      directly; inline — Inventory.jsx plus a lib function)
 - [ ] Analytics user-admin routes have no caller check (found by the
       2026-08-17 Monday security pass; **confirmed by reproducing it against a
       running app**): `POST /api/analytics/users/reassign` and
@@ -291,10 +328,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       with the collection; add `limit`/`offset` (or cursor) + a "load more" or
       windowing on the table (medium; implement directly; inline — touches
       Inventory.jsx)
-- [ ] Scanner drag-and-drop + paste-from-clipboard upload: staging photos is
-      file-picker/camera only; accept dropped files on the stage area and
-      Ctrl+V image paste for desktop workflows (quick win; implement directly;
-      inline — Scanner.jsx only, no open-PR overlap)
+- [ ] Scanner paste-from-clipboard upload: accept Ctrl+V image paste on the
+      stage area for desktop workflows (quick win; implement directly; inline —
+      Scanner.jsx only, no open-PR overlap). **Corrected 2026-08-18:** this
+      item previously claimed staging was "file-picker/camera only" and asked
+      for drag-and-drop too — `Scanner.jsx` has had a working drop zone
+      (`dropRef`/`onDrop`/`stageFiles`) all along, so only the paste half is
+      outstanding. Note the drop zone renders only in stage 1
+      (`!isStaged && !isScanned && queue.length === 0`), so paste should be
+      bound to the same condition.
 - [ ] Inventory filter chips: status / RC / Auto / 1st Bowman / Refractor
       toggle filters next to the existing search box — search can't express
       "all my active autos" today (quick win; implement directly; inline —
@@ -434,6 +476,22 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-18 — Batch queue retry + clear-queue confirm: an errored batch
+      item was a one-way exit, so one transient failure in a twenty-card batch
+      meant clearing the queue and re-staging that photo by hand; errored items
+      now carry a Retry that sends them back to `queued`. "Clear queue" now
+      confirms when the queue holds scanned-but-unsaved (`ready`/`scanning`)
+      cards, counting those separately from still-waiting ones because only the
+      paid scans are unrecoverable. Logic lives in a tested
+      `frontend/src/lib/scanQueue.js`.
+- [x] 2026-08-18 — Comp spread readout: the suggested price is a median of up
+      to ten comps, and the UI showed the number with no sense of the
+      distribution behind it. The review form and the inventory Comps modal now
+      caption it with comp count and low–high range and warn when the top comp
+      is ≥3× the bottom — the signature of the parallel/variant contamination
+      that the "Comps accuracy" item above fixes properly. Deliberately does not
+      compute a rival median. Tested pure helper in
+      `frontend/src/lib/compStats.js`.
 - [x] 2026-08-17 — Sheets mirror integrity: `resync_all` is now a
       clear-then-rewrite of the Inventory tab (idempotent — running it twice
       produces the same sheet, where the old per-card append loop added a

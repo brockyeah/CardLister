@@ -10,7 +10,77 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `feat/sheets-mirror-integrity`
+## [Unreleased] — branch `claude/sweet-rubin-567i4v`
+
+### Fixed
+- A failed batch scan is no longer a dead end. The batch queue moves each photo
+  through `queued → scanning → ready → saved`, and `error` was a one-way exit
+  with no affordance attached to it — so a single transient failure in a
+  twenty-card batch (a dropped connection, a 500, an Anthropic timeout) meant
+  clearing the whole queue and re-staging that file by hand. Errored items now
+  carry a Retry button that sends them back to `queued`, which is all the
+  sequential processor needs to pick them up again; the failure message stays
+  visible next to it. Only `error` items are retryable — re-queueing a `ready`
+  item would quietly pay for the same extraction a second time.
+- "Clear queue" asks first when it would destroy work. A `ready` item is a
+  completed Opus extraction waiting to be reviewed, so discarding it throws
+  away tokens already spent as well as the review effort, and the button did it
+  on a single click with no confirm. The prompt counts the scanned-but-unsaved
+  cards separately from the ones still waiting, because only the first group is
+  unrecoverable.
+
+### Added
+- The suggested price now says what it was drawn from. It is the **median** of
+  up to ten comps, and a median cannot distinguish a set clustered at $8–$9
+  from one running $4, $6, $8, $70, $90 — yet the second is exactly where the
+  number is least trustworthy, because a wide spread usually means parallels,
+  serial-numbered or graded copies contaminated a base card's comps. The review
+  form and the inventory Comps modal now caption the price with its comp count
+  and low–high range, and raise a warning naming the multiple when the top comp
+  is 3× the bottom or more. Deliberately no second median is computed here: the
+  server's `suggested_price` is the one the form fills in and the one "Set Price
+  to $X" applies, and a locally-derived rival would eventually disagree with it
+  on screen with no way to tell which was real. The modal also now says when its
+  list is truncated to 8 of N, since the median is over all of them.
+- Two pure helpers with unit tests (`lib/scanQueue.js`, `lib/compStats.js`) —
+  the frontend suite is node-only with no jsdom, so behaviour is testable only
+  through the functions a component delegates to. Both features were also
+  exercised end-to-end in a real browser against the running app.
+
+### Changed
+- The review form's comp list renders prices through `Number()` like the Comps
+  modal already did. Comps are an untyped `List[dict]` server-side, and a string
+  price would have thrown inside render and taken the reviewed card with it.
+
+## 2026-08-17 — Design docs: analytics owner gate, parallel pricing chain (PR #47)
+
+### Added
+- Design doc for gating the analytics user-admin routes
+  (`docs/superpowers/specs/2026-08-18-analytics-owner-gate-design.md`).
+  `reassign` and `delete-user-data` are guarded only by "some user is logged
+  in", so either configured user can rewrite the cost ledger in either
+  direction or delete the other's usage/scan/**correction** history —
+  reproduced against a running app. Corrections are deliberately shared
+  training data, so that delete degrades both users' scans and cannot be
+  rebuilt, since the same call removes the scans it would be re-derived from.
+  Recommends a `CARDLISTER_OWNER` gate over caller-scoping, because the
+  panel's real purpose is merging a *ghost* username that can never be the
+  caller — and because caller-scoping would still permit pushing your own
+  spend onto the other user. Explicitly supersedes the July "any authenticated
+  user may act" decision for these routes only. Docs only; awaiting approval.
+- Design doc for running the pricing sources concurrently
+  (`docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`). The
+  chain expresses preference, not dependency, yet charges the user the sum of
+  every source's timeout — and on Railway, where the scrapers 403, the common
+  case is the worst case. Recommends full fan-out resolved in preference
+  order, and records three corrections proven against the runtime that the
+  obvious implementation gets wrong: `concurrent.futures.wait` defaults to
+  ALL_COMPLETED (which would make every lookup as slow as the slowest source),
+  a scalar `httpx` timeout is per-operation rather than a request budget, and a
+  module-level thread pool delays container shutdown. Docs only; awaiting
+  approval.
+
+## 2026-08-17 — Sheets mirror integrity (PR #46)
 
 ### Fixed
 - The Google Sheet mirror no longer drifts permanently, and the button offered
@@ -48,34 +118,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
   and anything typed directly into the sheet is discarded. The endpoint
   previously had no UI at all, so the only way to mirror imported cards was a
   manual API call — and the failure reason is now surfaced rather than silent.
-
-## [Unreleased] — branch `docs/auth-and-pricing-designs`
-
-### Added
-- Design doc for gating the analytics user-admin routes
-  (`docs/superpowers/specs/2026-08-18-analytics-owner-gate-design.md`).
-  `reassign` and `delete-user-data` are guarded only by "some user is logged
-  in", so either configured user can rewrite the cost ledger in either
-  direction or delete the other's usage/scan/**correction** history —
-  reproduced against a running app. Corrections are deliberately shared
-  training data, so that delete degrades both users' scans and cannot be
-  rebuilt, since the same call removes the scans it would be re-derived from.
-  Recommends a `CARDLISTER_OWNER` gate over caller-scoping, because the
-  panel's real purpose is merging a *ghost* username that can never be the
-  caller — and because caller-scoping would still permit pushing your own
-  spend onto the other user. Explicitly supersedes the July "any authenticated
-  user may act" decision for these routes only. Docs only; awaiting approval.
-- Design doc for running the pricing sources concurrently
-  (`docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`). The
-  chain expresses preference, not dependency, yet charges the user the sum of
-  every source's timeout — and on Railway, where the scrapers 403, the common
-  case is the worst case. Recommends full fan-out resolved in preference
-  order, and records three corrections proven against the runtime that the
-  obvious implementation gets wrong: `concurrent.futures.wait` defaults to
-  ALL_COMPLETED (which would make every lookup as slow as the slowest source),
-  a scalar `httpx` timeout is per-operation rather than a request budget, and a
-  module-level thread pool delays container shutdown. Docs only; awaiting
-  approval.
 
 ## 2026-08-17 — Formula escaping, symlink containment, HEAD support, stat tiles (PR #44)
 
