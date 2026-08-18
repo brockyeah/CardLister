@@ -26,10 +26,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       all four sources hand-build `{"title": …, "price": …}` and the frontend
       reads both keys directly. Nothing pins the key names, so a scraper
       refactor that renamed `price` would pass the whole backend suite and
-      break the median with no error anywhere. Both render sites now coerce
-      with `Number(c.price)`, so a bad price degrades to a `$NaN` row instead
-      of throwing mid-render (2026-08-18) — that caps the blast radius but
-      pins nothing: the contract is still unenforced on either side. Give comps
+      break the median with no error anywhere. Both render sites now go through
+      `formatCompPrice`, which shares its usable-price test with
+      `summarizeComps` and shows `—` for anything unusable (2026-08-18) — so a
+      bad price degrades visibly instead of throwing mid-render or posing as a
+      real `$0.00` sale. That caps the blast radius on the display side and
+      pins nothing on the wire: the contract is still unenforced. Give comps
       a pydantic model and add a parity test asserting every source's parser
       emits it, using the saved fixture HTML the scraper tests already carry
       (medium; implement directly; inline)
