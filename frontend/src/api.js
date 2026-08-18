@@ -69,6 +69,8 @@ export const cleanupUploadOrphans = () =>
   api.post('/api/analytics/uploads/cleanup').then((r) => r.data)
 export const getStorageUsage = () =>
   api.get('/api/analytics/storage').then((r) => r.data)
+export const resyncSheet = () =>
+  api.post('/api/sheets/resync').then((r) => r.data)
 
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)

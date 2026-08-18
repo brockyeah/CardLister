@@ -47,7 +47,10 @@ def test_export_import_round_trip(db_session):
         r = _post_csv(client, headers, exported)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body == {"created": 1, "skipped": [], "warnings": []}
+        assert body["created"] == 1 and body["skipped"] == []
+        # The only warning is the standing note that imported cards are not
+        # mirrored until a resync — no per-row problems in a clean round-trip.
+        assert len(body["warnings"]) == 1 and "Resync sheet" in body["warnings"][0]
 
         cards = db_session.query(Card).order_by(Card.id.asc()).all()
         assert len(cards) == 2
@@ -148,7 +151,8 @@ def test_import_drops_non_https_ebay_url_with_warning(db_session):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["created"] == 2
-        assert len(body["warnings"]) == 1 and "row 3" in body["warnings"][0]
+        row_warnings = [w for w in body["warnings"] if "Resync sheet" not in w]
+        assert len(row_warnings) == 1 and "row 3" in row_warnings[0]
         by_name = {c.player_name: c for c in db_session.query(Card).all()}
         assert by_name["Safe"].ebay_listing_url == "https://www.ebay.com/itm/123"
         assert by_name["Unsafe"].ebay_listing_url is None

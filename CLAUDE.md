@@ -66,6 +66,8 @@ Note the loop is inert in mock mode — no API key means no `Scan` row, so no `s
 
 CSV export escapes formula-leading cells (`=`, `+`, `-`, `@`, and apostrophe-led variants); import unescapes so values round-trip. The Sheets mirror is exempt — it writes `valueInputOption=RAW`.
 
+`POST /api/sheets/resync` is a **clear-then-rewrite** of the whole Inventory tab, so it is idempotent and safe to run repeatedly — that is what makes it a usable repair tool. Ordering is `created_at, id`; the `id` tiebreaker is load-bearing, since a CSV import stamps many rows in the same instant and without it two runs would assign different rows. `delete_card` **blanks** its row rather than removing it: removing a row shifts every row below it up and silently invalidates every later card's `sheets_row`. All three writers (`sync_card`, `rewrite_all_rows`, `blank_row`) serialize on a module-level `threading.Lock` and re-check their row *inside* it — dropping that guard lets a save or delete racing a resync write over another card's row.
+
 ### Auth (`auth.py`)
 
 `CARDLISTER_USERS="user:pass,user2:pass2"` parsed per-request (no caching, so env changes take effect live and removing a user invalidates their tokens immediately), falling back to a single `owner` user. HS256 JWT, 30-day TTL, `hmac.compare_digest`. `validate_secrets()` runs at startup and **refuses to boot** in production with default secrets.

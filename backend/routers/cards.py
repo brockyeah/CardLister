@@ -18,7 +18,7 @@ from ..schemas import (
     DuplicateCheckRequest, DuplicateCheckResponse,
     EbayListingUpdate, MarkSoldRequest,
 )
-from ..services.google_sheets import SHEET_HEADERS, _card_to_row, sync_card
+from ..services.google_sheets import SHEET_HEADERS, _card_to_row, blank_row, sync_card
 from ..services.learning import record_correction
 
 router = APIRouter(dependencies=[Depends(require_auth)])
@@ -37,10 +37,37 @@ def _sync_card_to_sheets(card_id: int) -> None:
         card = db.query(Card).filter(Card.id == card_id).first()
         if card is None:
             return
-        row = sync_card(card)
+        # Re-read sheets_row inside the Sheets lock: a resync running right now
+        # may reassign this card's row, and writing to the value read before
+        # the lock would land on whatever card the rewrite put there instead.
+        def _reread():
+            db.refresh(card)
+            return card.sheets_row
+
+        row = sync_card(card, reread_row=_reread)
         if row and card.sheets_row != row:
             card.sheets_row = row
             db.commit()
+    finally:
+        db.close()
+
+
+def _blank_sheets_row(row: int) -> None:
+    """Background task: blank a deleted card's row in the mirror.
+
+    Blanks rather than removes — deleting a row shifts every row below it up,
+    silently invalidating the stored sheets_row of every later card.
+
+    Ownership is re-checked under the Sheets lock rather than trusting the row
+    number: a resync landing between the delete and this task may have
+    reassigned row N to a live card, and row 7 looks identical either way.
+    """
+    db = SessionLocal()
+    try:
+        def _is_owned(r: int) -> bool:
+            return db.query(Card).filter(Card.sheets_row == r).first() is not None
+
+        blank_row(row, _is_owned)
     finally:
         db.close()
 
@@ -267,6 +294,15 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
         created += 1
 
     db.commit()
+    if created:
+        # The skip-bulk-mirroring rationale above stays valid, but it used to be
+        # silent: imported cards never appeared in the sheet until each was
+        # edited, so an importer saw an empty mirror and reached for resync.
+        noun = "card is" if created == 1 else "cards are"
+        warnings.append(
+            f"{created} imported {noun} not yet in the Google Sheet — "
+            "run 'Resync sheet' on this panel to mirror them."
+        )
     return {"created": created, "skipped": skipped, "warnings": warnings}
 
 
@@ -347,12 +383,18 @@ def update_card(card_id: int, payload: CardUpdate, background_tasks: BackgroundT
 
 
 @router.delete("/{card_id}")
-def delete_card(card_id: int, db: Session = Depends(get_db)):
+def delete_card(card_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+    # Capture before the delete — the attribute is gone afterwards. Delete was
+    # the only mutating card route that never touched the mirror, so a deleted
+    # card's row survived in the sheet forever.
+    sheets_row = card.sheets_row
     db.delete(card)
     db.commit()
+    if sheets_row:
+        background_tasks.add_task(_blank_sheets_row, sheets_row)
     return {"ok": True}
 
 
