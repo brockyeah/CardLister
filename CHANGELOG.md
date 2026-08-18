@@ -49,6 +49,34 @@ only in `[Unreleased]` on a branch is not in prod yet.
   previously had no UI at all, so the only way to mirror imported cards was a
   manual API call — and the failure reason is now surfaced rather than silent.
 
+## [Unreleased] — branch `docs/auth-and-pricing-designs`
+
+### Added
+- Design doc for gating the analytics user-admin routes
+  (`docs/superpowers/specs/2026-08-18-analytics-owner-gate-design.md`).
+  `reassign` and `delete-user-data` are guarded only by "some user is logged
+  in", so either configured user can rewrite the cost ledger in either
+  direction or delete the other's usage/scan/**correction** history —
+  reproduced against a running app. Corrections are deliberately shared
+  training data, so that delete degrades both users' scans and cannot be
+  rebuilt, since the same call removes the scans it would be re-derived from.
+  Recommends a `CARDLISTER_OWNER` gate over caller-scoping, because the
+  panel's real purpose is merging a *ghost* username that can never be the
+  caller — and because caller-scoping would still permit pushing your own
+  spend onto the other user. Explicitly supersedes the July "any authenticated
+  user may act" decision for these routes only. Docs only; awaiting approval.
+- Design doc for running the pricing sources concurrently
+  (`docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`). The
+  chain expresses preference, not dependency, yet charges the user the sum of
+  every source's timeout — and on Railway, where the scrapers 403, the common
+  case is the worst case. Recommends full fan-out resolved in preference
+  order, and records three corrections proven against the runtime that the
+  obvious implementation gets wrong: `concurrent.futures.wait` defaults to
+  ALL_COMPLETED (which would make every lookup as slow as the slowest source),
+  a scalar `httpx` timeout is per-operation rather than a request budget, and a
+  module-level thread pool delays container shutdown. Docs only; awaiting
+  approval.
+
 ## 2026-08-17 — Formula escaping, symlink containment, HEAD support, stat tiles (PR #44)
 
 ### Added

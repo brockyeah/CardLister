@@ -25,7 +25,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       their own attribution. Needs a test that a *second* configured user is
       refused — `test_user_admin.py` only ever exercises one user, so today's
       cross-user authority is unpinned either way (medium; **design first** —
-      touches auth; inline)
+      touches auth; inline) — **design written 2026-08-18**
+      (`docs/superpowers/specs/2026-08-18-analytics-owner-gate-design.md`):
+      recommends a `CARDLISTER_OWNER` gate and REJECTS caller-scoping, since
+      the panel exists to merge a ghost username that can never be the caller,
+      and caller-scoping still permits pushing your own spend onto the other
+      user. Also covers `uploads/cleanup` (the only unrecoverable route).
+      **Needs a plan doc next, then owner approval.**
 - [ ] `CARDLISTER_USERS` parsing silently mangles passwords containing a comma
       (found by the 2026-08-17 Monday security pass): `get_users()` splits the
       whole variable on `,` before splitting each entry on `:`, and drops any
@@ -61,7 +67,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       130point answers first, so either accept that or keep a two-stage fan-out
       (API + 130point, then the rest) — and add an overall deadline so a lookup
       can never exceed it (medium; implement directly; inline — needs a test
-      that preference order and every note string survive)
+      that preference order and every note string survive) — **design written
+      2026-08-18**
+      (`docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`):
+      recommends full fan-out resolved in preference order, and records three
+      runtime-proven traps — `concurrent.futures.wait` defaults to
+      ALL_COMPLETED (every lookup would become as slow as the slowest source),
+      a scalar httpx timeout is per-operation not a request budget, and a
+      module-level thread pool delays container shutdown. **Read the design
+      before implementing.**
 - [ ] Scanner loses reviewed work on a refresh or an accidental back/close: the
       batch queue and the reviewed form live only in React state, and there is
       no `beforeunload` guard anywhere in `frontend/src`. Every `ready` queue
