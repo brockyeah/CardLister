@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { buildEbayTitle, EBAY_TITLE_MAX } from '../lib/ebayTitle.js'
+import { formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 
 const FIELDS = [
   { key: 'player_name', label: 'Player', type: 'text', wide: true },
@@ -53,6 +54,10 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
   }
 
   const preview = buildEbayTitle(data)
+  // Suggested price is a median, so the spread it was drawn from is part of
+  // reading it — a 10× range usually means variants contaminated the comps.
+  const compSummary = summarizeComps(comps)
+  const compWarning = spreadWarning(compSummary)
 
   return (
     <form onSubmit={handleSubmit} className="card-panel space-y-5">
@@ -137,6 +142,14 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
             className="input bg-ink-700"
             readOnly
           />
+          {compSummary && (
+            <p className="text-xs text-gray-500 mt-1">
+              Median of {compSummary.count} comp{compSummary.count === 1 ? '' : 's'} spanning{' '}
+              <span className={compSummary.wide ? 'text-yellow-400 font-semibold' : 'text-gray-400'}>
+                {formatCompRange(compSummary)}
+              </span>
+            </p>
+          )}
         </div>
         <div>
           <label className="label">Your Listed Price (USD)</label>
@@ -165,11 +178,17 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
       {comps && comps.length > 0 && (
         <div>
           <label className="label">Recent Comps ({comps.length})</label>
+          {compWarning && (
+            <p className="text-xs text-yellow-400 mb-1.5">{compWarning}</p>
+          )}
           <div className="bg-ink-900 border border-ink-700 rounded-lg max-h-48 overflow-y-auto">
             {comps.map((c, idx) => (
               <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
                 <span className="text-gray-300 truncate">{c.title}</span>
-                <span className="text-emerald-400 font-bold whitespace-nowrap">${c.price.toFixed(2)}</span>
+                {/* Number() to match the Comps modal: comps are an untyped
+                    List[dict] server-side, and a string price here would throw
+                    inside render and take the whole reviewed card with it. */}
+                <span className="text-emerald-400 font-bold whitespace-nowrap">${Number(c.price).toFixed(2)}</span>
               </div>
             ))}
           </div>
