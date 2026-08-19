@@ -9,6 +9,7 @@ import {
   overallHint,
 } from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
+import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value, hint }) {
@@ -156,6 +157,10 @@ function CompsModal({ card, onClose, onApplyPrice }) {
 
   const suggested = result?.source !== 'mock' ? result?.suggested_price : null
   const delta = suggested != null && card.listed_price != null ? suggested - card.listed_price : null
+  // "Comps say" is a median; show the spread it came from so a contaminated
+  // set is visible before "Set Price to $X" is pressed.
+  const compSummary = summarizeComps(result?.comps)
+  const compWarning = spreadWarning(compSummary)
 
   const apply = async () => {
     setApplying(true)
@@ -197,18 +202,37 @@ function CompsModal({ card, onClose, onApplyPrice }) {
                     </span>
                   )}
                 </div>
+                {compSummary && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    {compSummary.count} comp{compSummary.count === 1 ? '' : 's'},{' '}
+                    <span className={compSummary.wide ? 'text-yellow-400 font-semibold' : 'text-gray-400'}>
+                      {formatCompRange(compSummary)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
+            {compWarning && <div className="text-xs text-yellow-400 mb-3">{compWarning}</div>}
+
             {result.comps?.length > 0 && (
-              <div className="bg-ink-900 border border-ink-700 rounded-lg max-h-40 overflow-y-auto mb-3">
-                {result.comps.slice(0, 8).map((c, idx) => (
-                  <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
-                    <span className="text-gray-300 truncate">{c.title}</span>
-                    <span className="text-emerald-400 font-bold whitespace-nowrap">${Number(c.price).toFixed(2)}</span>
+              <>
+                <div className={`bg-ink-900 border border-ink-700 rounded-lg max-h-40 overflow-y-auto ${result.comps.length > 8 ? 'mb-1' : 'mb-3'}`}>
+                  {result.comps.slice(0, 8).map((c, idx) => (
+                    <div key={idx} className="flex justify-between gap-3 px-3 py-2 border-b border-ink-700 last:border-b-0 text-sm">
+                      <span className="text-gray-300 truncate">{c.title}</span>
+                      <span className="text-emerald-400 font-bold whitespace-nowrap">{formatCompPrice(c.price)}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* The list is capped at 8 but the median is over all of them —
+                    say so, or the range above looks like it disagrees. */}
+                {result.comps.length > 8 && (
+                  <div className="text-xs text-gray-500 mb-3">
+                    Showing 8 of {result.comps.length} — the suggested price uses all of them.
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
             {result.source && result.source !== 'mock' && (
               <div className="text-xs text-emerald-400 mb-1">Source: {result.source === 'ebay_sold' ? 'eBay sold listings' : result.source}</div>
