@@ -127,6 +127,28 @@ These conventions are enforced by convention, not tooling, and the daily review 
 - **docs/BACKLOG.md**: persistent idea ledger, sections `Now / next` → `Later` → `Shipped`. **Move items to Shipped with a date instead of deleting** so runs don't re-propose them. Open items carry a sizing tag: `(medium; implement directly; inline)`, `(large; design first — …)`.
 - **A feature without a changelog entry is not done.** Ship gates: full backend suite green, frontend build green.
 - Anything touching schema, auth, money, or 3+ subsystems gets a design doc in `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/` before code.
+## Two agents work in this repo — stay out of each other's way
+
+Scheduled cloud routines and interactive sessions both commit here, and they
+cannot see each other's working trees. A routine's uncommitted work lives in its
+own sandbox and is unreachable from a local machine, so "leave it for the owner
+to push" does not work across the two.
+
+- **Branches named `claude/*` belong to the scheduled routines.** An interactive
+  session must not push to one, even to fix a real finding on its PR. Both
+  pushing to one branch is how the same fix gets written twice.
+- **To fix something on a routine's PR, branch off `main` instead** and open a
+  separate PR, or hand the finding to the owner to relay. The exception is the
+  owner explicitly saying the routine is stopped.
+- **Changelog housekeeping is idempotent — check before doing it.** Dating a
+  merged PR's `[Unreleased]` entries is the routine's step 11, but a conflict
+  resolution may need it too. Before adding a dated heading, check whether it
+  already exists on `main` or on another open branch; it has been done twice in
+  one day.
+- **Check `git log` on a branch before pushing to it.** A push rejected as
+  non-fast-forward usually means the other agent got there first — re-read
+  before re-applying, rather than force-pushing your version over theirs.
+
 - **Never merge PRs — that is the owner's call.** Open the PR, drive it to green, respond to the Claude auto-review action's findings (it exists to give a second opinion from a clean context; don't self-review in its place).
 
 **NOTE** Codex will review your output once you are done with any implementation. This happens outside GitHub — the owner runs Codex themselves and relays its findings back in chat. Nothing will appear on the PR, so don't wait for it, look for it in CI, or treat its absence as a pass. Expect follow-up concerns to arrive from the owner after work looks finished, and treat them as review feedback on code you already shipped.

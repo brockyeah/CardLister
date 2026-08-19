@@ -79,6 +79,22 @@ only in `[Unreleased]` on a branch is not in prod yet.
   no purchase price yet. Sits on the Analytics manage-data panel beside the
   backup and import tools.
 
+## [Unreleased] — branch `docs/agent-coordination`
+
+### Changed
+- CLAUDE.md records how the two agents that commit here stay out of each
+  other's way. On 2026-08-19 both an interactive session and the daily routine
+  pushed fixes to the same `claude/*` branch hours apart, and both then dated
+  PR #48's changelog entries independently — the same housekeeping written
+  twice. The rules: `claude/*` branches belong to the scheduled routines and an
+  interactive session does not push to them (branch off `main` and open a
+  separate PR instead); changelog housekeeping is idempotent, so check whether
+  a dated heading already exists before adding one; and check `git log` on a
+  branch before pushing, since a rejected push usually means the other agent
+  got there first. Also notes that a routine's uncommitted work lives in its
+  own sandbox and is unreachable from a local machine, so leaving changes
+  uncommitted for the owner to push does not work across the two.
+
 ## 2026-08-19 — Batch scan retry + comp spread readout (PR #48)
 
 ### Fixed
