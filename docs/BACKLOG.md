@@ -63,20 +63,41 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       out — the existing `BackgroundTask(os.unlink, …)` covers that, and moving
       the file onto the volume makes forgetting it much more expensive (quick
       win; implement directly; inline)
-- [ ] eBay title drops flags before team, which is backwards for search
-      (2026-08-19 review, deferred out of the truncation fix that shipped the
-      same day): title order is `year brand set player #num flags team`, so an
-      over-long title now correctly drops whole units — but it drops them
-      right-to-left, meaning `AUTO`, `/99`, `REFRACTOR` and the parallel colour
-      go **before** the team name does. Buyers search the flags; nobody
-      searches "Brewers" to find a specific card. A real 2023 Bowman Chrome
-      Prospects card loses its `/99` while keeping nothing of value in return.
-      The fix is to give units a priority for *dropping* that differs from
-      their order in the string (team first, then parallel colour, then the
-      lesser flags), which is a genuine **format change** — invariant #7, three
-      files plus regenerated fixtures — and the owner should sign off on the
-      drop order before it lands (medium; **design first** — changes what a
-      listing says; inline)
+- [ ] eBay title truncation cannot spare the flags, because it can only cut a
+      prefix (2026-08-19 review, deferred out of the truncation fix that
+      shipped the same day). **Current behaviour:** unit order is
+      `year brand set player #num flags team`, and `truncate_title` keeps a
+      prefix and discards everything from the first unit that doesn't fit
+      onward. The team is last, so it is always among the discarded — but the
+      flags sit immediately before it, so anything that costs the team its
+      place costs `/99`, `REFRACTOR`, `AUTO` and the parallel colour first.
+      A real 2023 Bowman Chrome Prospects card renders as
+      `2023 Bowman Chrome Prospects Jackson Chourio #BCP-100 RC 1ST BOWMAN
+      REFRACTOR`, having dropped both `/99` **and** `Brewers` together; there
+      is no cut that keeps the serial and drops only the team.
+      **Proposed change:** give units a drop *priority* independent of their
+      position in the string — team goes first, then the parallel colour, then
+      the lesser flags — so the high-value search terms survive a long set
+      name. Buyers search the flags; nobody searches "Brewers" to find a
+      specific card. That is a genuine **format change** (invariant #7 — three
+      files plus regenerated fixtures) and needs owner sign-off on the drop
+      order before it lands (medium; **design first** — changes what a listing
+      says; inline)
+- [ ] Unmount guards on Analytics' async state writes, applied consistently
+      (CodeRabbit on PR #49, deferred deliberately): `.coderabbit.yaml` asks
+      reviewers to flag "state updates after unmount", and `ManageData` has
+      five async paths that write state after an await — `getConfiguredUsers`,
+      `loadStorage`, `getSoldYears`, and the `exportSold`/`backup`/`importCsv`
+      handlers — none of which is guarded. The reviewer flagged only the two
+      the PR added; guarding those alone would leave the same component
+      half-converted, which is harder to reason about than either extreme.
+      Worth noting the impact is nil today: React 18 removed the
+      setState-after-unmount warning and such a write is a silent no-op, so
+      this is convention rather than a live defect. Do it in one pass over the
+      file (a single `mountedRef` set false in the effect's cleanup, checked
+      before each write) or decide the convention doesn't apply to React 19 and
+      amend `.coderabbit.yaml` instead — either is fine, but pick one (quick
+      win; implement directly; inline — Analytics.jsx only)
 - [ ] Analytics user-admin routes have no caller check (found by the
       2026-08-17 Monday security pass; **confirmed by reproducing it against a
       running app**): `POST /api/analytics/users/reassign` and
@@ -512,12 +533,18 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       drops any that doesn't fit whole, stopping at the first rather than
       skipping to a shorter one so the deliberate flag priority can't be
       reordered. A single unit longer than the cap still hard-slices — there is
-      no boundary to fall back to. Three-file change per invariant #7 with
+      no boundary to fall back to. The card number is one unit too, so
+      `#US 44` can't become `#US`. Three-file change per invariant #7 with
       regenerated fixtures; the form preview strikes through the dropped tail
-      as before, and still counts the full length against the limit.
+      as before, and still counts the full length against the limit — now in
+      code points, so an emoji no longer measures 2 in the preview and 1 in
+      the backend (CodeRabbit).
 - [x] 2026-08-19 — Sold-cards tax-year CSV export
-      (`GET /api/cards/export-sold.csv?year=`, plus `GET /api/cards/sold-years`
-      so the picker offers only years that have sales). Sold rows already left
+      (`GET /api/cards/export-sold.csv?year=`, or no `year` for every recorded
+      sale — offered as "All years" in the picker and named
+      `cardlister-sold-all.csv` rather than `-2026.csv` so the two can't be
+      confused once downloaded; plus `GET /api/cards/sold-years` so the picker
+      offers only years that have sales). Sold rows already left
       in the full inventory dump, but mixed with everything else and with no
       sale date to sort on, so preparing a return meant hand-filtering the
       whole collection. Ordered oldest-first with its own column set —

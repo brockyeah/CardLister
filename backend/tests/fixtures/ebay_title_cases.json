@@ -304,6 +304,82 @@
         "parallel_color": "Gold"
       },
       "expected": "2023 Bowman Chrome X X X X X X X X X X X X X X X X X X X Holliday #1 RC"
+    },
+    {
+      "name": "card number containing a space is dropped whole, not cut to a different number",
+      "card": {
+        "year": 2022,
+        "brand": "Topps",
+        "set_name": "Update Series Rookie Debut XXXXXXXXXXXXXXXXXXXX",
+        "player_name": "Julio Rodriguez",
+        "card_number": "US 44",
+        "team": "Mariners",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2022 Topps Update Series Rookie Debut XXXXXXXXXXXXXXXXXXXX Julio Rodriguez"
+    },
+    {
+      "name": "card number containing a space survives when it fits",
+      "card": {
+        "year": 2022,
+        "brand": "Topps",
+        "set_name": "Update",
+        "player_name": "Julio Rodriguez",
+        "card_number": "US 44",
+        "team": "Mariners",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2022 Topps Update Julio Rodriguez #US 44 Mariners"
+    },
+    {
+      "name": "non-BMP characters count as one character, as Python len does",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": null,
+        "player_name": "Shohei \ud83d\ude00 Ohtani",
+        "card_number": null,
+        "team": "Dodgers",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Shohei \ud83d\ude00 Ohtani Dodgers"
+    },
+    {
+      "name": "whitespace-only card number adds no bare hash",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Player",
+        "card_number": "   ",
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "Player"
     }
   ]
 }

@@ -61,6 +61,32 @@ def test_multi_word_flag_is_dropped_whole_rather_than_left_as_a_fragment():
     assert title.endswith("RC")  # the higher-priority flag still survives
 
 
+def test_card_number_with_a_space_is_dropped_whole():
+    # A card number is an identifier, not prose: "#US 44" cut to "#US" names a
+    # card the seller does not own, exactly like "/9" for a /99. Card numbers
+    # carrying a space are reachable — CSV import only strips the "Card #"
+    # column's outer whitespace, and vision reads the number as printed.
+    title = build_title(_card(
+        year=2022, brand="Topps", set_name="Update Series Rookie Debut " + "X" * 20,
+        player_name="Julio Rodriguez", card_number="US 44", team="Mariners",
+    ))
+    assert not title.endswith("#US")
+    assert "#" not in title
+
+
+def test_card_number_with_a_space_survives_when_it_fits():
+    title = build_title(_card(
+        year=2022, brand="Topps", set_name="Update",
+        player_name="Julio Rodriguez", card_number="US 44", team="Mariners",
+    ))
+    assert "#US 44" in title
+
+
+def test_whitespace_only_card_number_adds_no_bare_hash():
+    title = build_title(_card(player_name="Player", card_number="   "))
+    assert title == "Player"
+
+
 def test_short_titles_are_returned_untouched():
     units = ["2024", "Topps", "Chrome", "Player", "#1"]
     assert truncate_title(units) == "2024 Topps Chrome Player #1"

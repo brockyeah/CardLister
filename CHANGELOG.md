@@ -32,12 +32,32 @@ only in `[Unreleased]` on a branch is not in prod yet.
   through the dropped tail and still counts the *full* length against the
   limit, so the over-length warning does not disappear now that the rendered
   title comes in under it.
+- The card number is treated as one indivisible unit, so a card number
+  containing a space (`#US 44`) can no longer be cut to `#US` — a card number
+  the seller does not own, the same class of falsehood as `/9`. These are not
+  hypothetical: CSV import strips only the outer whitespace of the `Card #`
+  column, and vision reads the number off the card as printed. A
+  whitespace-only card number now contributes nothing rather than a bare `#`,
+  matching how the serial number field has always been normalized.
+- The title preview counts characters the way the backend does. Python's `len`
+  counts Unicode code points and JavaScript's `.length` counts UTF-16 code
+  units, so a single emoji in a player name measured 1 server-side and 2 in the
+  preview. The preview could therefore call a title over the limit, and
+  truncate it on screen, while the backend copied the whole thing to the
+  clipboard — and the shared parity fixture could not catch the disagreement,
+  because the two sides did not mean the same thing by "80". The mirror now
+  measures and slices by code point, which also stops a hard slice from landing
+  inside a surrogate pair.
 
 ### Added
 - Sold cards can be exported for one tax year:
   `GET /api/cards/export-sold.csv?year=2026`, with `GET /api/cards/sold-years`
   behind a picker so the UI offers only years that actually have sales rather
-  than a free-text box that can quietly produce an empty file. Sold rows did
+  than a free-text box that can quietly produce an empty file. Omitting `year`
+  exports every recorded sale instead, which the picker offers as "All years"
+  (the default when nothing has sold yet); the two modes are named apart on
+  disk as `cardlister-sold-2026.csv` and `cardlister-sold-all.csv`, so a year's
+  file can't be mistaken for the whole history once it is off the machine. Sold rows did
   already leave the app — mixed into the full inventory dump, with no sale date
   to sort or filter on — so preparing a return meant hand-filtering the whole
   collection every year. The file is ordered by sale date ascending, the order

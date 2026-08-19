@@ -37,22 +37,30 @@ def build_title(card: Card) -> str:
     if card.parallel_color:
         flags.append(card.parallel_color.upper())
 
-    card_no = f"#{card.card_number}" if card.card_number else ""
+    # Normalized the same way the serial number above is: a whitespace-only
+    # value contributes nothing rather than a bare "#".
+    card_no_value = " ".join((card.card_number or "").split())
+    card_no = f"#{card_no_value}" if card_no_value else ""
     # Units the title may be cut between, in title order. Free-text fields
     # contribute one unit per word (a prefix of a set or player name is still
-    # true of the card), while each flag is a single indivisible unit even when
-    # it contains a space — "1ST BOWMAN" cut to "1ST" is not a shorter way of
-    # saying it, just a fragment. Splitting here also collapses the internal
-    # whitespace the old " ".join(title.split()) pass did.
+    # true of the card), while identifiers stay single indivisible units even
+    # when they contain a space, because a prefix of an identifier names a
+    # *different* thing: "1ST BOWMAN" cut to "1ST" is not a shorter way of
+    # saying it, and card "#US 44" cut to "#US" is a card number the seller
+    # does not own. Card numbers carrying a space are not hypothetical — CSV
+    # import only strips the "Card #" column's outer whitespace, and vision
+    # reads the number off the card as printed. Splitting here also collapses
+    # the internal whitespace the old " ".join(title.split()) pass did.
     units = []
     for text in (
         str(card.year) if card.year else "",
         card.brand or "",
         card.set_name or "",
         card.player_name or "",
-        card_no,
     ):
         units.extend(text.split())
+    if card_no:
+        units.append(card_no)
     units.extend(" ".join(flag.split()) for flag in flags)
     units.extend((card.team or "").split())
     return truncate_title(units)

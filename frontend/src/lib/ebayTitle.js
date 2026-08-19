@@ -18,14 +18,19 @@ export function buildEbayTitle(card) {
   if (card.parallel_color) flags.push(String(card.parallel_color).toUpperCase())
 
   // Units the title may be cut between: free-text fields contribute one unit
-  // per word, each flag is indivisible even when it contains a space.
+  // per word, identifiers (each flag, and the card number) stay indivisible
+  // even when they contain a space.
   const words = (v) => String(v || '').split(/\s+/).filter(Boolean)
+  // Normalized like the serial above: whitespace-only contributes nothing
+  // rather than a bare "#".
+  const cardNoValue = words(card.card_number).join(' ')
+  const cardNo = cardNoValue ? `#${cardNoValue}` : ''
   const units = [
     ...words(card.year ? String(card.year) : ''),
     ...words(card.brand),
     ...words(card.set_name),
     ...words(card.player_name),
-    ...words(card.card_number ? `#${card.card_number}` : ''),
+    ...(cardNo ? [cardNo] : []),
     ...flags.map((f) => words(f).join(' ')),
     ...words(card.team),
   ]
@@ -33,9 +38,25 @@ export function buildEbayTitle(card) {
   return {
     title: truncateTitle(units),
     full,
-    truncated: full.length > EBAY_TITLE_MAX,
-    length: full.length,
+    truncated: titleLength(full) > EBAY_TITLE_MAX,
+    length: titleLength(full),
   }
+}
+
+/**
+ * Character count the way the backend measures it.
+ *
+ * Python's `len()` counts Unicode code points; JavaScript's `.length` counts
+ * UTF-16 code units, so a single non-BMP character (an emoji in a player name
+ * or note) counts as 1 in `build_title` and 2 here. Left alone, the preview
+ * would report a card as over the limit — and truncate it — while the backend
+ * copied the whole title to the clipboard, with the shared parity fixture
+ * unable to catch it because the two sides disagree about what "80" means.
+ * The backend is the source of truth (invariant #7), so the mirror adopts its
+ * unit of measure.
+ */
+function titleLength(text) {
+  return [...text].length
 }
 
 /**
@@ -49,9 +70,11 @@ export function truncateTitle(units) {
   let kept = ''
   for (const unit of units) {
     const candidate = kept ? `${kept} ${unit}` : unit
-    if (candidate.length > EBAY_TITLE_MAX) {
-      // A first unit over the cap has no boundary to fall back to.
-      return kept || unit.slice(0, EBAY_TITLE_MAX).replace(/\s+$/, '')
+    if (titleLength(candidate) > EBAY_TITLE_MAX) {
+      // A first unit over the cap has no boundary to fall back to. Slice by
+      // code point, not code unit, so the cut can't land inside a surrogate
+      // pair and leave a lone surrogate in the title.
+      return kept || [...unit].slice(0, EBAY_TITLE_MAX).join('').replace(/\s+$/, '')
     }
     kept = candidate
   }

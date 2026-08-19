@@ -70,4 +70,28 @@ describe('truncateTitle', () => {
   it('does not let a shorter later flag jump ahead of a dropped one', () => {
     expect(truncateTitle(['A'.repeat(70), '1ST BOWMAN', 'AUTO'])).toBe('A'.repeat(70))
   })
+
+  it('measures the cap in code points, the way Python len() does', () => {
+    // JS .length counts UTF-16 code units, so 80 emoji measure 160 there and
+    // 80 in the backend. Measuring differently would make the preview truncate
+    // a title the backend copies whole — and the shared fixture could not
+    // catch it, because the two sides would disagree about what "80" means.
+    const emoji = '😀'.repeat(EBAY_TITLE_MAX)
+    expect(emoji.length).toBe(EBAY_TITLE_MAX * 2) // guards the premise
+    expect(truncateTitle([emoji])).toBe(emoji)
+  })
+
+  it('never splits a surrogate pair when it has to hard-slice', () => {
+    const out = truncateTitle(['😀'.repeat(EBAY_TITLE_MAX + 10)])
+    expect([...out]).toHaveLength(EBAY_TITLE_MAX)
+    expect(/[\uD800-\uDFFF]/.test(out.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, ''))).toBe(false)
+  })
+})
+
+describe('length reporting', () => {
+  it('reports the code-point length so the warning matches the backend', () => {
+    const result = buildEbayTitle({ year: 2024, brand: 'Topps', player_name: 'Shohei 😀 Ohtani', team: 'Dodgers' })
+    expect(result.length).toBe([...result.full].length)
+    expect(result.truncated).toBe(false)
+  })
 })
