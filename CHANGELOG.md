@@ -39,6 +39,14 @@ only in `[Unreleased]` on a branch is not in prod yet.
   column, and vision reads the number off the card as printed. A
   whitespace-only card number now contributes nothing rather than a bare `#`,
   matching how the serial number field has always been normalized.
+- A whitespace-only Parallel Color no longer injects a stray space into the
+  title. Such a value is truthy, so it reached the flag list and then
+  normalized to an empty unit — producing a double space before the team, or a
+  trailing space with no team. The old implementation ended with
+  `" ".join(title.split())`, which scrubbed exactly this; unit-boundary
+  truncation removed that pass. Flags that normalize to nothing are now
+  dropped, matching the guards `serial_number` and `card_number` already have.
+  Pinned by a shared-fixture case, so both suites hold the two sides together.
 - The title preview counts characters the way the backend does. Python's `len`
   counts Unicode code points and JavaScript's `.length` counts UTF-16 code
   units, so a single emoji in a player name measured 1 server-side and 2 in the

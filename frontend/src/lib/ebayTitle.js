@@ -31,7 +31,7 @@ export function buildEbayTitle(card) {
     ...words(card.set_name),
     ...words(card.player_name),
     ...(cardNo ? [cardNo] : []),
-    ...flags.map((f) => words(f).join(' ')),
+    ...flags.map((f) => words(f).join(' ')).filter(Boolean),
     ...words(card.team),
   ]
   const full = units.join(' ')

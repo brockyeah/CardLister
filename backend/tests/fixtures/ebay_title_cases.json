@@ -380,6 +380,25 @@
         "parallel_color": null
       },
       "expected": "Player"
+    },
+    {
+      "name": "whitespace-only parallel adds no flag",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome",
+        "player_name": "Julio Rodriguez",
+        "card_number": "150",
+        "team": "Mariners",
+        "is_rookie": true,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "parallel_color": "   ",
+        "serial_number": null
+      },
+      "expected": "2024 Topps Chrome Julio Rodriguez #150 RC Mariners"
     }
   ]
 }

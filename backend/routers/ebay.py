@@ -61,7 +61,11 @@ def build_title(card: Card) -> str:
         units.extend(text.split())
     if card_no:
         units.append(card_no)
-    units.extend(" ".join(flag.split()) for flag in flags)
+    # Skip flags that normalize to nothing: a whitespace-only parallel_color
+    # is truthy, so it reached the flag list and then joined as "", which
+    # injected a stray space (the old trailing " ".join(title.split()) used
+    # to scrub that). serial_number and card_number already guard this.
+    units.extend(norm for norm in (" ".join(flag.split()) for flag in flags) if norm)
     units.extend((card.team or "").split())
     return truncate_title(units)
 
