@@ -5,7 +5,7 @@ import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
 import { downscaleImage } from '../lib/downscaleImage'
 import { formatApiError } from '../lib/apiError.js'
-import { queueLossSummary, retryQueueItem } from '../lib/scanQueue.js'
+import { queueLossSummary, retryQueueItem, scanResultPatch } from '../lib/scanQueue.js'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -198,7 +198,9 @@ export default function Scanner() {
     mark(next.key, { status: 'scanning' })
     downscaleImage(next.file)
       .then((file) => scanCard(file, mode))
-      .then((result) => mark(next.key, { status: 'ready', result }))
+      // A failed extraction arrives as a 200 with an `error` field, not a
+      // rejection — see scanResultPatch.
+      .then((result) => mark(next.key, scanResultPatch(result)))
       .catch((e) => mark(next.key, { status: 'error', error: formatApiError(e, 'Scan failed') }))
       .finally(() => { processingRef.current = false })
   }, [queue, mode])

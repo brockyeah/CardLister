@@ -15,6 +15,22 @@
 // Statuses whose work is unrecoverable if the queue is thrown away.
 const PAID_STATUSES = ['ready', 'scanning']
 
+/**
+ * The queue patch a finished scan should produce.
+ *
+ * A failed extraction is NOT an HTTP failure. `claude_vision` returns a blank
+ * card and `scan.py` sends it as a 200 carrying an `error` field, so it
+ * resolves like any success. Marking it `ready` would put a Review button over
+ * an empty form and hide the Retry affordance behind the one status that never
+ * shows it — and would count an unbilled scan as paid work in the clear-queue
+ * warning, since `scan.py` records a UsageEvent only when the call actually
+ * returned usage.
+ */
+export function scanResultPatch(result) {
+  if (result?.error) return { status: 'error', error: result.error }
+  return { status: 'ready', result }
+}
+
 /** How many queue items are currently in any of `statuses`. */
 export function countByStatus(queue, statuses) {
   const wanted = new Set(statuses)

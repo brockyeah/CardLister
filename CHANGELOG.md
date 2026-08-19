@@ -29,6 +29,17 @@ only in `[Unreleased]` on a branch is not in prod yet.
   cards separately from the ones still waiting, because only the first group is
   unrecoverable.
 
+### Fixed
+- Retry now appears for the failure it exists to handle. A failed Anthropic
+  extraction is not an HTTP failure — `claude_vision` returns a blank card and
+  `scan.py` sends it as a 200 carrying an `error` field — so the queue resolved
+  it as `ready` and offered a Review button over an empty form, with Retry
+  hidden behind the one status that never renders it. Clearing the whole queue
+  and re-staging the photo was the only way back, which is the dead end this
+  feature set out to remove. The same fix stops the clear-queue warning
+  claiming an unbilled scan was "paid for": `scan.py` records a UsageEvent only
+  when the call returned usage, and it returns none on that path.
+
 ### Added
 - The suggested price now says what it was drawn from. It is the **median** of
   up to ten comps, and a median cannot distinguish a set clustered at $8–$9

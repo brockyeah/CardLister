@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { countByStatus, queueLossSummary, retryQueueItem } from './scanQueue'
+import { countByStatus, queueLossSummary, retryQueueItem, scanResultPatch } from './scanQueue'
 
 const item = (key, status, extra = {}) => ({ key, status, result: null, error: null, ...extra })
 
@@ -84,5 +84,32 @@ describe('retryQueueItem', () => {
     const file = { name: 'front.jpg' }
     const queue = [item('a', 'error', { file, error: 'boom' })]
     expect(retryQueueItem(queue, 'a')[0].file).toBe(file)
+  })
+})
+
+describe('scanResultPatch', () => {
+  it('marks a failed extraction as error, not ready', () => {
+    // scan.py returns a blank card as 200 with an `error` field when the
+    // Anthropic call fails, so it resolves like a success. Marking it `ready`
+    // hid the Retry button behind the one status that never renders it.
+    const patch = scanResultPatch({ error: 'Anthropic call failed', player_name: '' })
+    expect(patch.status).toBe('error')
+    expect(patch.error).toBe('Anthropic call failed')
+  })
+
+  it('marks a clean result ready and keeps the payload', () => {
+    const result = { player_name: 'Elly De La Cruz', error: '' }
+    expect(scanResultPatch(result)).toEqual({ status: 'ready', result })
+  })
+
+  it('treats a missing result as ready rather than throwing', () => {
+    expect(scanResultPatch(undefined).status).toBe('ready')
+  })
+
+  it('an errored item is not counted as paid work', () => {
+    // scan.py records a UsageEvent only `if usage:`, and usage is None on the
+    // failed-extraction path — so the clear-queue warning must not claim it.
+    const queue = [{ key: 'a', status: scanResultPatch({ error: 'boom' }).status }]
+    expect(queueLossSummary(queue)).toBeNull()
   })
 })
