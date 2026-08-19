@@ -10,6 +10,33 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `feat/pricing-parallel-fanout`
+
+### Changed
+- Pricing sources now run concurrently instead of one after another. The chain
+  only ever expressed *preference* — no source's input comes from another's
+  output — yet the user waited for the sum of four timeouts (15 + 20 + 15 +
+  15s). On Railway the scrapers routinely 403, so the common case was the
+  worst case, on every card, and `Scanner.jsx` awaits one lookup per card, so a
+  twenty-card batch multiplied it. Measured on the real timeout values, an
+  all-fail lookup drops from 65s to about 20s — roughly the slowest single
+  source, which is the floor for this shape.
+- Resolution still walks the preference order and is **never** first-to-finish:
+  a fast weak source beating a slow strong one would return the wrong comp
+  under the wrong note and look perfectly healthy. Every note string is
+  unchanged — per-source on success, `" | "`-joined on the all-failed mock —
+  and an unconfigured eBay API still contributes nothing. `PRICING_DEADLINE_SECONDS`
+  caps the whole lookup on our own wall clock rather than trusting the
+  per-source `httpx` timeouts, which apply per connect/read/write/pool
+  operation rather than as a request budget.
+
+### Added
+- First tests for the pricing endpoint (`test_pricing_chain.py`, 12 cases),
+  which had none. The ten contract cases were written against the serial
+  implementation and pass unchanged after the refactor, so they pin the
+  behaviour rather than describing what it became; the two concurrency cases
+  fail against the old code.
+
 ## [Unreleased] — branch `fix/scan-nullish-result`
 
 ### Fixed

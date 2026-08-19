@@ -184,32 +184,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       env-var migration, and the constraint should be documented in README and
       `.env.example` either way (quick win–medium; **design first** — touches
       auth and requires a deploy-config migration; inline)
-- [ ] Pricing lookups pay every source's timeout serially: `get_pricing`
-      (`routers/pricing.py`) tries eBay API → 130point → Mavin → eBay scrape
-      one after another, with per-source httpx timeouts of 15 + 20 + 15 + 15s.
-      The chain only expresses *preference* — no source's input depends on
-      another's output — but the user waits for the sum. On Railway, where
-      CLAUDE.md notes the scrapers routinely 403 from a datacenter IP, the
-      common case is the *worst* case: ~50s of spinner — 65s with eBay creds
-      set, or 80s when its cached OAuth token has expired, since that path makes
-      two sequential 15s calls (`_get_app_token` then the search) — before the
-      $9.99 mock lands, on every single card. Fan the
-      independent sources out concurrently and resolve by the same preference
-      order, keeping the note semantics exactly as they are (winning source →
-      its fixed note; all-failed → the joined notes). Worth deciding in the
-      same pass: parallel means always paying all four requests even when
-      130point answers first, so either accept that or keep a two-stage fan-out
-      (API + 130point, then the rest) — and add an overall deadline so a lookup
-      can never exceed it (medium; implement directly; inline — needs a test
-      that preference order and every note string survive) — **design written
-      2026-08-18**
-      (`docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`):
-      recommends full fan-out resolved in preference order, and records three
-      runtime-proven traps — `concurrent.futures.wait` defaults to
-      ALL_COMPLETED (every lookup would become as slow as the slowest source),
-      a scalar httpx timeout is per-operation not a request budget, and a
-      module-level thread pool delays container shutdown. **Read the design
-      before implementing.**
 - [ ] Scanner loses reviewed work on a refresh or an accidental back/close: the
       batch queue and the reviewed form live only in React state, and there is
       no `beforeunload` guard anywhere in `frontend/src`. Every `ready` queue
@@ -569,6 +543,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-19 — Pricing sources run concurrently, resolved in preference
+      order: the chain expressed preference, not dependency, but charged the
+      user the sum of four timeouts (15 + 20 + 15 + 15s) — and on Railway,
+      where the scrapers 403, the common case was the worst case on every
+      card. Measured 65s → 20s for an all-fail lookup. Resolution walks the
+      preference order rather than taking the first finisher, and
+      `PRICING_DEADLINE_SECONDS` caps the whole lookup on our own wall clock.
+      First tests for this endpoint (`test_pricing_chain.py`, 12 cases) —
+      written against the serial code first so they pin the contract rather
+      than the refactor. Implements
+      `docs/superpowers/specs/2026-08-18-pricing-chain-parallel-design.md`.
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`
