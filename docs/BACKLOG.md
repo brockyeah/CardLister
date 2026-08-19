@@ -5,6 +5,78 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Pricing lookups are never cached, so the same card re-runs the whole
+      chain every time (2026-08-19 review): `get_pricing` takes a
+      `PricingRequest` and goes straight to the sources — no memoization
+      anywhere. Opening the Inventory Comps modal twice on one card, or
+      re-reviewing a batch item, pays the full serial chain again, and on
+      Railway (where the scrapers 403) that is the ~50s worst case *each
+      time*. A small TTL cache keyed on the normalized query
+      (player/year/brand/set/card #) would make a repeat lookup instant and
+      cut scraper traffic, which is also what makes the scrapers block. Two
+      decisions to make with it: how long a sold comp stays fresh (hours, not
+      minutes — these are completed sales, not live prices), and whether the
+      `mock` fallback is cached at all (it should not be, or a transient
+      scraper block pins $9.99 to a card for the whole TTL). **Sequence this
+      after or alongside the parallel fan-out item below — both restructure
+      the same function, and landing them separately means resolving the same
+      conflict twice** (medium; implement directly; inline)
+- [ ] Analytics day boundaries are UTC, so the owner's evening scans land on
+      the wrong day (2026-08-19 review): `_range_start` builds the `today` and
+      `month` windows from `datetime.utcnow()`, and `by_day` buckets on
+      `ev.created_at.strftime("%Y-%m-%d")` — both UTC. East-coast, that means
+      the day rolls over at 8pm EDT: a card scanned at 9pm appears on
+      *tomorrow's* bar in the daily cost chart, and the "Today" filter after
+      8pm reports a window that started yesterday evening. On the first of the
+      month the "This month" total is wrong for four hours. Same root cause as
+      the mark-sold UTC item above, and the fix should be the same one applied
+      once: a configured local timezone (`CARDLISTER_TZ`, defaulting to
+      America/New_York) with a shared helper, used by analytics windows,
+      mark-sold's default date, the Sheets "Date Listed"/"Date Sold" columns,
+      and the sold-cards tax export — a sale stamped in the wrong year is a
+      wrong tax return. Worth doing as one pass because a half-converted app
+      is harder to reason about than a consistently-UTC one (medium; **design
+      first** — a timezone change silently re-buckets every historical
+      analytics reading, and the choice of "what does a stored naive datetime
+      mean" has to be made explicitly; inline)
+- [ ] Listing text offers `$0.00` for a card with no price (2026-08-19
+      review): `ebay_listing_text` computes
+      `card.listed_price if not None else (card.suggested_price or 0)`, so a
+      card saved before pricing resolved yields `PRICE:\n$0.00` in the
+      clipboard block — pasted straight into eBay's sell form, which is the
+      entire point of the feature. `$0.00` is not a plausible typo a seller
+      catches on review the way a wrong player name is; it reads as a filled-in
+      field. Either omit the price section and say the card has no price yet,
+      or keep it but label it, and have the Scanner/Inventory copy buttons
+      surface that (quick win; implement directly; inline — `routers/ebay.py`
+      plus its test)
+- [ ] Backup snapshots are written to container-local disk, not the volume
+      (2026-08-19 review): `download_backup` calls `tempfile.mkstemp()`, which
+      lands in the container's `/tmp` rather than on the Railway volume that
+      holds the database. `VACUUM INTO` writes a full copy of the DB there, so
+      the one recovery tool the app has gets less reliable exactly as the
+      database it protects grows, and it fails with a bare 500 ("Backup
+      snapshot failed") that says nothing about disk. Point the temp file at
+      the DB's own directory (guaranteed to be sized for at least one copy of
+      it) or honour a `TMPDIR`, and distinguish "out of space" from "snapshot
+      failed" in the error. Note the export must still be deleted on the way
+      out — the existing `BackgroundTask(os.unlink, …)` covers that, and moving
+      the file onto the volume makes forgetting it much more expensive (quick
+      win; implement directly; inline)
+- [ ] eBay title drops flags before team, which is backwards for search
+      (2026-08-19 review, deferred out of the truncation fix that shipped the
+      same day): title order is `year brand set player #num flags team`, so an
+      over-long title now correctly drops whole units — but it drops them
+      right-to-left, meaning `AUTO`, `/99`, `REFRACTOR` and the parallel colour
+      go **before** the team name does. Buyers search the flags; nobody
+      searches "Brewers" to find a specific card. A real 2023 Bowman Chrome
+      Prospects card loses its `/99` while keeping nothing of value in return.
+      The fix is to give units a priority for *dropping* that differs from
+      their order in the string (team first, then parallel colour, then the
+      lesser flags), which is a genuine **format change** — invariant #7, three
+      files plus regenerated fixtures — and the owner should sign off on the
+      drop order before it lands (medium; **design first** — changes what a
+      listing says; inline)
 - [ ] Analytics user-admin routes have no caller check (found by the
       2026-08-17 Monday security pass; **confirmed by reproducing it against a
       running app**): `POST /api/analytics/users/reassign` and
@@ -256,10 +328,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       scan; add an env-configurable monthly cap with an Analytics banner and the
       existing ntfy push when 80% / 100% is crossed, checked in the poll cycle
       (medium; implement directly — reuses usage table + alerts, no schema; inline)
-- [ ] Sold-cards tax-year CSV export: `GET /api/cards/export-sold.csv?year=` with
-      sold date/price columns for tax reporting — sold data and the CSV writer
-      both exist, but sold rows only export mixed into the full inventory dump
-      (quick win; implement directly; inline)
 - [ ] Card permalink deep link: `/inventory?card=123` scrolls to and highlights
       the row (clearing the search/filters if they hide it) — the QR-labels
       item below explicitly needs a permalink first, and shared links/bookmarks
@@ -434,6 +502,29 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
+      an over-length title was cut with `title[:80]`, which sliced wherever the
+      80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`
+      into `REFRACTO` and `1ST BOWMAN` into a bare `1ST`. Those aren't shorter
+      titles, they're wrong ones: a `/9` listing advertises a card the seller
+      doesn't own. `build_title` now assembles the title from units (one per
+      word for free text, one per flag even when the flag contains a space) and
+      drops any that doesn't fit whole, stopping at the first rather than
+      skipping to a shorter one so the deliberate flag priority can't be
+      reordered. A single unit longer than the cap still hard-slices — there is
+      no boundary to fall back to. Three-file change per invariant #7 with
+      regenerated fixtures; the form preview strikes through the dropped tail
+      as before, and still counts the full length against the limit.
+- [x] 2026-08-19 — Sold-cards tax-year CSV export
+      (`GET /api/cards/export-sold.csv?year=`, plus `GET /api/cards/sold-years`
+      so the picker offers only years that have sales). Sold rows already left
+      in the full inventory dump, but mixed with everything else and with no
+      sale date to sort on, so preparing a return meant hand-filtering the
+      whole collection. Ordered oldest-first with its own column set —
+      deliberately not `SHEET_HEADERS`, which is the append-only mirror
+      contract and would drag every future mirror column into a tax report.
+      Same formula-injection escaping as the inventory export. Lives on the
+      Analytics manage-data panel beside the backup and import tools.
 - [x] 2026-08-17 — Sheets mirror integrity: `resync_all` is now a
       clear-then-rewrite of the Inventory tab (idempotent — running it twice
       produces the same sheet, where the old per-card append loop added a

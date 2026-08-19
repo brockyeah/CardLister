@@ -10,6 +10,47 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `claude/sweet-rubin-kp5kr6`
+
+### Fixed
+- An eBay title over the 80-character limit no longer says something false
+  about the card. The cap was applied with `title[:80]`, which slices wherever
+  the 80th character happens to land — so a `/99` serial rendered as `/9`,
+  `REFRACTOR` as `REFRACTO`, and `1ST BOWMAN` as a bare `1ST`. These are not
+  shortened titles; they are wrong ones, and the wrongness is invisible at the
+  point it matters, because the title goes on the clipboard and straight into
+  eBay's sell form. A buyer searching `/9` finds a listing for a card numbered
+  to 99 that the seller does not own. `build_title` now assembles the title
+  from units — one per word for free text like the set or player name, where a
+  prefix is still true of the card, and one per flag even when the flag
+  contains a space — and drops any unit that does not fit whole. It stops at
+  the first unit that doesn't fit rather than skipping ahead to a shorter one,
+  because keeping `AUTO` in place of a dropped `1ST BOWMAN` would silently
+  invert a flag priority that is deliberate. A single unit longer than the cap
+  still hard-slices: there is no boundary left to fall back to, and an empty
+  title would be worse. The form preview is unchanged in shape — it strikes
+  through the dropped tail and still counts the *full* length against the
+  limit, so the over-length warning does not disappear now that the rendered
+  title comes in under it.
+
+### Added
+- Sold cards can be exported for one tax year:
+  `GET /api/cards/export-sold.csv?year=2026`, with `GET /api/cards/sold-years`
+  behind a picker so the UI offers only years that actually have sales rather
+  than a free-text box that can quietly produce an empty file. Sold rows did
+  already leave the app — mixed into the full inventory dump, with no sale date
+  to sort or filter on — so preparing a return meant hand-filtering the whole
+  collection every year. The file is ordered by sale date ascending, the order
+  a return is prepared in, and carries its own column set rather than reusing
+  `SHEET_HEADERS`: that list is the Google Sheet round-trip contract and is
+  append-only, so binding a second consumer to it would mean every future
+  mirror column silently widening a tax report. Formula-leading cells are
+  escaped exactly as in the inventory export — this file is opened in a
+  spreadsheet by definition, and the player name is model-extracted from a
+  photo. Gross proceeds only, stated as such in the UI, because the app records
+  no purchase price yet. Sits on the Analytics manage-data panel beside the
+  backup and import tools.
+
 ## [Unreleased] — branch `feat/sheets-mirror-integrity`
 
 ### Fixed
