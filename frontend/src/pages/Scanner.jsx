@@ -5,6 +5,7 @@ import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
 import { downscaleImage } from '../lib/downscaleImage'
 import { formatApiError } from '../lib/apiError.js'
+import { queueLossSummary, retryQueueItem, scanResultPatch } from '../lib/scanQueue.js'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -197,10 +198,28 @@ export default function Scanner() {
     mark(next.key, { status: 'scanning' })
     downscaleImage(next.file)
       .then((file) => scanCard(file, mode))
-      .then((result) => mark(next.key, { status: 'ready', result }))
+      // A failed extraction arrives as a 200 with an `error` field, not a
+      // rejection — see scanResultPatch.
+      .then((result) => mark(next.key, scanResultPatch(result)))
       .catch((e) => mark(next.key, { status: 'error', error: formatApiError(e, 'Scan failed') }))
       .finally(() => { processingRef.current = false })
   }, [queue, mode])
+
+  // Re-queue a failed batch item. Scans fail for transient reasons (a dropped
+  // connection, a 500, an Anthropic timeout), and without this the only way
+  // back is to clear the whole queue and re-stage the file by hand.
+  const retryItem = (key) => {
+    setQueue((prev) => retryQueueItem(prev, key))
+  }
+
+  // Clearing the queue destroys any `ready` item — a completed extraction the
+  // user has paid Opus tokens for and not yet saved — so say so first.
+  const clearQueue = () => {
+    const loss = queueLossSummary(queue)
+    if (loss && !window.confirm(loss.message)) return
+    setQueue([])
+    setActiveKey(null)
+  }
 
   // Review a queue item (loads it into the existing form + fetches pricing):
   const reviewQueueItem = async (item) => {
@@ -378,7 +397,7 @@ export default function Scanner() {
             <button
               type="button"
               className="text-xs text-gray-400 underline"
-              onClick={() => { setQueue([]); setActiveKey(null) }}
+              onClick={clearQueue}
             >
               Clear queue
             </button>
@@ -389,7 +408,18 @@ export default function Scanner() {
                 <span className="flex-1 truncate text-gray-300">{q.file.name}</span>
                 {q.status === 'queued' && <span className="text-gray-500 text-xs">waiting…</span>}
                 {q.status === 'scanning' && <span className="text-yellow-400 text-xs">scanning…</span>}
-                {q.status === 'error' && <span className="text-red-400 text-xs">{q.error}</span>}
+                {q.status === 'error' && (
+                  <>
+                    <span className="text-red-400 text-xs truncate max-w-[45%]" title={q.error}>{q.error}</span>
+                    <button
+                      type="button"
+                      onClick={() => retryItem(q.key)}
+                      className="text-xs rounded px-2 py-1 bg-ink-700 text-gray-200 hover:bg-ink-600"
+                    >
+                      Retry
+                    </button>
+                  </>
+                )}
                 {q.status === 'saved' && <span className="text-emerald-500 text-xs">saved ✓</span>}
                 {q.status === 'ready' && (
                   <button
