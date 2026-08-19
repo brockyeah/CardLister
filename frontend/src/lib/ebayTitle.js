@@ -17,17 +17,43 @@ export function buildEbayTitle(card) {
   }
   if (card.parallel_color) flags.push(String(card.parallel_color).toUpperCase())
 
-  const parts = [
-    card.year ? String(card.year) : '',
-    card.brand || '',
-    card.set_name || '',
-    card.player_name || '',
-    card.card_number ? `#${card.card_number}` : '',
-    flags.join(' '),
-    card.team || '',
+  // Units the title may be cut between: free-text fields contribute one unit
+  // per word, each flag is indivisible even when it contains a space.
+  const words = (v) => String(v || '').split(/\s+/).filter(Boolean)
+  const units = [
+    ...words(card.year ? String(card.year) : ''),
+    ...words(card.brand),
+    ...words(card.set_name),
+    ...words(card.player_name),
+    ...words(card.card_number ? `#${card.card_number}` : ''),
+    ...flags.map((f) => words(f).join(' ')),
+    ...words(card.team),
   ]
-  const full = parts.filter(Boolean).join(' ').split(/\s+/).filter(Boolean).join(' ')
-  const truncated = full.length > EBAY_TITLE_MAX
-  const title = truncated ? full.slice(0, EBAY_TITLE_MAX).replace(/\s+$/, '') : full
-  return { title, full, truncated, length: full.length }
+  const full = units.join(' ')
+  return {
+    title: truncateTitle(units),
+    full,
+    truncated: full.length > EBAY_TITLE_MAX,
+    length: full.length,
+  }
+}
+
+/**
+ * Mirror of truncate_title() in backend/routers/ebay.py: join the units,
+ * dropping whole ones that don't fit. Slicing at the 80th character turns a
+ * `/99` serial into `/9`, `REFRACTOR` into `REFRACTO` and `1ST BOWMAN` into
+ * `1ST` — titles that are not just shorter but wrong about the card. Dropping
+ * the whole unit says less and nothing false.
+ */
+export function truncateTitle(units) {
+  let kept = ''
+  for (const unit of units) {
+    const candidate = kept ? `${kept} ${unit}` : unit
+    if (candidate.length > EBAY_TITLE_MAX) {
+      // A first unit over the cap has no boundary to fall back to.
+      return kept || unit.slice(0, EBAY_TITLE_MAX).replace(/\s+$/, '')
+    }
+    kept = candidate
+  }
+  return kept
 }
