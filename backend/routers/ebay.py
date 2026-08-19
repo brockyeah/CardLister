@@ -37,22 +37,71 @@ def build_title(card: Card) -> str:
     if card.parallel_color:
         flags.append(card.parallel_color.upper())
 
-    card_no = f"#{card.card_number}" if card.card_number else ""
-    parts = [
+    # Normalized the same way the serial number above is: a whitespace-only
+    # value contributes nothing rather than a bare "#".
+    card_no_value = " ".join((card.card_number or "").split())
+    card_no = f"#{card_no_value}" if card_no_value else ""
+    # Units the title may be cut between, in title order. Free-text fields
+    # contribute one unit per word (a prefix of a set or player name is still
+    # true of the card), while identifiers stay single indivisible units even
+    # when they contain a space, because a prefix of an identifier names a
+    # *different* thing: "1ST BOWMAN" cut to "1ST" is not a shorter way of
+    # saying it, and card "#US 44" cut to "#US" is a card number the seller
+    # does not own. Card numbers carrying a space are not hypothetical — CSV
+    # import only strips the "Card #" column's outer whitespace, and vision
+    # reads the number off the card as printed. Splitting here also collapses
+    # the internal whitespace the old " ".join(title.split()) pass did.
+    units = []
+    for text in (
         str(card.year) if card.year else "",
         card.brand or "",
         card.set_name or "",
         card.player_name or "",
-        card_no,
-        " ".join(flags),
-        card.team or "",
-    ]
-    title = " ".join(p for p in parts if p).strip()
-    # Collapse internal whitespace
-    title = " ".join(title.split())
-    if len(title) > EBAY_TITLE_MAX:
-        title = title[:EBAY_TITLE_MAX].rstrip()
-    return title
+    ):
+        units.extend(text.split())
+    if card_no:
+        units.append(card_no)
+    # Skip flags that normalize to nothing: a whitespace-only parallel_color
+    # is truthy, so it reached the flag list and then joined as "", which
+    # injected a stray space (the old trailing " ".join(title.split()) used
+    # to scrub that). serial_number and card_number already guard this.
+    units.extend(norm for norm in (" ".join(flag.split()) for flag in flags) if norm)
+    units.extend((card.team or "").split())
+    return truncate_title(units)
+
+
+def truncate_title(units: list) -> str:
+    """Join title units, dropping whole units that don't fit inside the cap.
+
+    A bare `title[:80]` slices wherever the 80th character lands, and the
+    things that get sliced are what carry the card's identity: a `/99` serial
+    becomes `/9`, `REFRACTOR` becomes `REFRACTO`, `1ST BOWMAN` becomes `1ST`.
+    Those are not shortened titles, they are *wrong* ones — a buyer searching
+    `/9` finds a listing for a card numbered to 99, and the seller has
+    advertised something they do not own. Dropping the whole unit instead is an
+    honest omission: the title says less, but nothing it says is false. This
+    matters because the title is the product — it goes on the clipboard and
+    straight into eBay's sell form.
+
+    Stops at the first unit that doesn't fit rather than skipping ahead to a
+    shorter one, so a lower-priority flag can never jump in front of a
+    higher-priority one that was dropped (the flag order is deliberate — see
+    test_first_bowman.py).
+
+    Note this only changes *how* an over-long title is cut, not the field or
+    flag order that decides what gets cut first (invariant #7 — the format
+    itself is a deliberate three-file change and is not what this fixes).
+    """
+    kept = ""
+    for unit in units:
+        candidate = f"{kept} {unit}" if kept else unit
+        if len(candidate) > EBAY_TITLE_MAX:
+            # A first unit longer than the cap has no boundary to fall back to,
+            # so the hard slice is the only option left — better a clipped
+            # 80-character set name than an empty title.
+            return kept or unit[:EBAY_TITLE_MAX].rstrip()
+        kept = candidate
+    return kept
 
 
 def build_description(card: Card) -> str:

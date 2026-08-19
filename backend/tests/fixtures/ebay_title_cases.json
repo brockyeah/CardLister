@@ -170,7 +170,7 @@
         "serial_number": null,
         "parallel_color": "holo purple"
       },
-      "expected": "2023 Panini Donruss Optic Rated Rookies Signatures Somebody With A Really Long N"
+      "expected": "2023 Panini Donruss Optic Rated Rookies Signatures Somebody With A Really Long"
     },
     {
       "name": "truncation strips trailing space",
@@ -228,6 +228,177 @@
         "parallel_color": null
       },
       "expected": "2022 Topps Update Julio Rodriguez #US44 RC"
+    },
+    {
+      "name": "over-length title drops the serial rather than slicing it to a different number",
+      "card": {
+        "year": 2023,
+        "brand": "Bowman",
+        "set_name": "Chrome Prospects",
+        "player_name": "Jackson Chourio",
+        "card_number": "BCP-100",
+        "team": "Brewers",
+        "is_rookie": true,
+        "is_first_bowman": true,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": true,
+        "serial_number": "99",
+        "parallel_color": null
+      },
+      "expected": "2023 Bowman Chrome Prospects Jackson Chourio #BCP-100 RC 1ST BOWMAN REFRACTOR"
+    },
+    {
+      "name": "over-length title drops a whole flag rather than half of it",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome Update Series Rookie Debut",
+        "player_name": "Wyatt Langford",
+        "card_number": "USC-150",
+        "team": "Rangers",
+        "is_rookie": true,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": true,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Chrome Update Series Rookie Debut Wyatt Langford #USC-150 RC"
+    },
+    {
+      "name": "single token longer than the cap falls back to a hard slice",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "player_name": null,
+        "card_number": null,
+        "team": "Guardians",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    },
+    {
+      "name": "multi-word flag is dropped whole, not left as a 1ST fragment",
+      "card": {
+        "year": 2023,
+        "brand": "Bowman",
+        "set_name": "Chrome X X X X X X X X X X X X X X X X X X X",
+        "player_name": "Holliday",
+        "card_number": "1",
+        "team": "Orioles",
+        "is_rookie": true,
+        "is_first_bowman": true,
+        "is_autograph": true,
+        "is_patch": false,
+        "is_refractor": true,
+        "serial_number": "99",
+        "parallel_color": "Gold"
+      },
+      "expected": "2023 Bowman Chrome X X X X X X X X X X X X X X X X X X X Holliday #1 RC"
+    },
+    {
+      "name": "card number containing a space is dropped whole, not cut to a different number",
+      "card": {
+        "year": 2022,
+        "brand": "Topps",
+        "set_name": "Update Series Rookie Debut XXXXXXXXXXXXXXXXXXXX",
+        "player_name": "Julio Rodriguez",
+        "card_number": "US 44",
+        "team": "Mariners",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2022 Topps Update Series Rookie Debut XXXXXXXXXXXXXXXXXXXX Julio Rodriguez"
+    },
+    {
+      "name": "card number containing a space survives when it fits",
+      "card": {
+        "year": 2022,
+        "brand": "Topps",
+        "set_name": "Update",
+        "player_name": "Julio Rodriguez",
+        "card_number": "US 44",
+        "team": "Mariners",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2022 Topps Update Julio Rodriguez #US 44 Mariners"
+    },
+    {
+      "name": "non-BMP characters count as one character, as Python len does",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": null,
+        "player_name": "Shohei \ud83d\ude00 Ohtani",
+        "card_number": null,
+        "team": "Dodgers",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Shohei \ud83d\ude00 Ohtani Dodgers"
+    },
+    {
+      "name": "whitespace-only card number adds no bare hash",
+      "card": {
+        "year": null,
+        "brand": null,
+        "set_name": null,
+        "player_name": "Player",
+        "card_number": "   ",
+        "team": null,
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "Player"
+    },
+    {
+      "name": "whitespace-only parallel adds no flag",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome",
+        "player_name": "Julio Rodriguez",
+        "card_number": "150",
+        "team": "Mariners",
+        "is_rookie": true,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "parallel_color": "   ",
+        "serial_number": null
+      },
+      "expected": "2024 Topps Chrome Julio Rodriguez #150 RC Mariners"
     }
   ]
 }

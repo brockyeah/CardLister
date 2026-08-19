@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   getAnalytics, reassignUser, deleteUserData, getConfiguredUsers,
   downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
-  getStorageUsage, resyncSheet,
+  getStorageUsage, resyncSheet, getSoldYears, downloadSoldCsv,
 } from '../api'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
@@ -204,12 +204,25 @@ function ManageData({ users, onDone }) {
   const [msg, setMsg] = useState('')
   const [targets, setTargets] = useState([])
   const [storage, setStorage] = useState(null)
+  // Years that actually have sales, so the tax export offers real choices
+  // rather than a free-text box that can quietly produce an empty file.
+  const [soldYears, setSoldYears] = useState([])
+  const [soldYear, setSoldYear] = useState('')
 
   const loadStorage = () => getStorageUsage().then(setStorage).catch(() => setStorage(null))
 
   useEffect(() => {
     getConfiguredUsers().then((d) => setTargets(d.users || [])).catch(() => setTargets([]))
     loadStorage()
+    getSoldYears()
+      .then((d) => {
+        const years = d.years || []
+        setSoldYears(years)
+        // Default to the most recent year with sales — the one a return is
+        // almost always being prepared for.
+        if (years.length) setSoldYear(String(years[0]))
+      })
+      .catch(() => setSoldYears([]))
   }, [])
 
   const merge = async () => {
@@ -245,6 +258,16 @@ function ManageData({ users, onDone }) {
       setMsg('Backup downloaded.')
     } catch {
       setMsg('Backup failed.')
+    } finally { setBusy(false) }
+  }
+
+  const exportSold = async () => {
+    setBusy(true); setMsg('')
+    try {
+      await downloadSoldCsv(soldYear || undefined)
+      setMsg(soldYear ? `Sold cards for ${soldYear} downloaded.` : 'All sold cards downloaded.')
+    } catch {
+      setMsg('Sold export failed.')
     } finally { setBusy(false) }
   }
 
@@ -361,6 +384,28 @@ function ManageData({ users, onDone }) {
         database — it clears the data rows and writes every card back, so anything typed
         directly into the sheet is discarded. It's safe to run repeatedly (twice in a row
         produces the same sheet), and it's how CSV-imported cards reach the mirror.
+      </p>
+      <div className="flex flex-wrap items-end gap-3 mb-2">
+        <div>
+          <label className="label">Sold cards export</label>
+          <select
+            value={soldYear}
+            onChange={(e) => setSoldYear(e.target.value)}
+            className="input"
+          >
+            <option value="">All years</option>
+            {soldYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button onClick={exportSold} disabled={busy} className="btn-secondary">
+          Download sold CSV
+        </button>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Sold cards with their sale date and price, ordered oldest first, for tax reporting.
+        Sold rows also appear in the full inventory export, but mixed in with everything else
+        and with no sale date to sort on. The year list shows only years that have sales.
+        Gross proceeds only — the app doesn't record what a card cost you.
       </p>
       <p className="text-xs text-gray-500 mb-3">
         Import expects the CSV export's column layout (columns matched by header name — extra

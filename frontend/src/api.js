@@ -111,6 +111,26 @@ export const downloadInventoryCsv = () =>
     URL.revokeObjectURL(url)
   })
 
+export const getSoldYears = () =>
+  api.get('/api/cards/sold-years').then((r) => r.data)
+
+// Blob download — a plain <a href> can't carry the Bearer token.
+// `year` omitted exports every recorded sale.
+export const downloadSoldCsv = (year) =>
+  api
+    .get('/api/cards/export-sold.csv', {
+      params: year ? { year } : {},
+      responseType: 'blob',
+    })
+    .then((r) => {
+      const url = URL.createObjectURL(r.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `cardlister-sold-${year || 'all'}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    })
+
 export const importInventoryCsv = (file) => {
   const fd = new FormData()
   fd.append('file', file)

@@ -60,10 +60,16 @@ def test_rc_flag_precedes_first_bowman_and_survives_truncation():
         serial_number="99", parallel_color="Gold",
     )
     title = build_title(card)
-    assert len(title) == 80
+    assert len(title) <= 80
     assert "RC" in title
     assert "1ST BOWMAN" not in title  # truncated away, proving RC comes first
-    assert title.index("RC") < title.index("1ST BOWM")
+    # And truncated away *whole*: this title used to end in a bare "1ST", which
+    # is not a shorter way of saying 1st Bowman, just a meaningless fragment.
+    # The flag ordering this test exists to protect is unchanged — RC still
+    # comes first and still survives; only the cut is now on a word boundary,
+    # which is why the length is no longer exactly the cap.
+    assert not title.endswith("1ST")
+    assert "BOWM" not in title
 
 
 def test_migration_adds_first_bowman_count_to_callup_events(tmp_path):

@@ -10,7 +10,76 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/sweet-rubin-567i4v`
+## [Unreleased] — branch `claude/sweet-rubin-kp5kr6`
+
+### Fixed
+- An eBay title over the 80-character limit no longer says something false
+  about the card. The cap was applied with `title[:80]`, which slices wherever
+  the 80th character happens to land — so a `/99` serial rendered as `/9`,
+  `REFRACTOR` as `REFRACTO`, and `1ST BOWMAN` as a bare `1ST`. These are not
+  shortened titles; they are wrong ones, and the wrongness is invisible at the
+  point it matters, because the title goes on the clipboard and straight into
+  eBay's sell form. A buyer searching `/9` finds a listing for a card numbered
+  to 99 that the seller does not own. `build_title` now assembles the title
+  from units — one per word for free text like the set or player name, where a
+  prefix is still true of the card, and one per flag even when the flag
+  contains a space — and drops any unit that does not fit whole. It stops at
+  the first unit that doesn't fit rather than skipping ahead to a shorter one,
+  because keeping `AUTO` in place of a dropped `1ST BOWMAN` would silently
+  invert a flag priority that is deliberate. A single unit longer than the cap
+  still hard-slices: there is no boundary left to fall back to, and an empty
+  title would be worse. The form preview is unchanged in shape — it strikes
+  through the dropped tail and still counts the *full* length against the
+  limit, so the over-length warning does not disappear now that the rendered
+  title comes in under it.
+- The card number is treated as one indivisible unit, so a card number
+  containing a space (`#US 44`) can no longer be cut to `#US` — a card number
+  the seller does not own, the same class of falsehood as `/9`. These are not
+  hypothetical: CSV import strips only the outer whitespace of the `Card #`
+  column, and vision reads the number off the card as printed. A
+  whitespace-only card number now contributes nothing rather than a bare `#`,
+  matching how the serial number field has always been normalized.
+- A whitespace-only Parallel Color no longer injects a stray space into the
+  title. Such a value is truthy, so it reached the flag list and then
+  normalized to an empty unit — producing a double space before the team, or a
+  trailing space with no team. The old implementation ended with
+  `" ".join(title.split())`, which scrubbed exactly this; unit-boundary
+  truncation removed that pass. Flags that normalize to nothing are now
+  dropped, matching the guards `serial_number` and `card_number` already have.
+  Pinned by a shared-fixture case, so both suites hold the two sides together.
+- The title preview counts characters the way the backend does. Python's `len`
+  counts Unicode code points and JavaScript's `.length` counts UTF-16 code
+  units, so a single emoji in a player name measured 1 server-side and 2 in the
+  preview. The preview could therefore call a title over the limit, and
+  truncate it on screen, while the backend copied the whole thing to the
+  clipboard — and the shared parity fixture could not catch the disagreement,
+  because the two sides did not mean the same thing by "80". The mirror now
+  measures and slices by code point, which also stops a hard slice from landing
+  inside a surrogate pair.
+
+### Added
+- Sold cards can be exported for one tax year:
+  `GET /api/cards/export-sold.csv?year=2026`, with `GET /api/cards/sold-years`
+  behind a picker so the UI offers only years that actually have sales rather
+  than a free-text box that can quietly produce an empty file. Omitting `year`
+  exports every recorded sale instead, which the picker offers as "All years"
+  (the default when nothing has sold yet); the two modes are named apart on
+  disk as `cardlister-sold-2026.csv` and `cardlister-sold-all.csv`, so a year's
+  file can't be mistaken for the whole history once it is off the machine. Sold rows did
+  already leave the app — mixed into the full inventory dump, with no sale date
+  to sort or filter on — so preparing a return meant hand-filtering the whole
+  collection every year. The file is ordered by sale date ascending, the order
+  a return is prepared in, and carries its own column set rather than reusing
+  `SHEET_HEADERS`: that list is the Google Sheet round-trip contract and is
+  append-only, so binding a second consumer to it would mean every future
+  mirror column silently widening a tax report. Formula-leading cells are
+  escaped exactly as in the inventory export — this file is opened in a
+  spreadsheet by definition, and the player name is model-extracted from a
+  photo. Gross proceeds only, stated as such in the UI, because the app records
+  no purchase price yet. Sits on the Analytics manage-data panel beside the
+  backup and import tools.
+
+## 2026-08-19 — Batch scan retry + comp spread readout (PR #48)
 
 ### Fixed
 - A failed batch scan is no longer a dead end. The batch queue moves each photo

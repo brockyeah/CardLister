@@ -143,6 +143,104 @@ def export_csv(db: Session = Depends(get_db)):
     )
 
 
+# Purpose-built column set for the tax export. Deliberately NOT SHEET_HEADERS:
+# that list is the Google Sheet / import round-trip contract and is append-only
+# (invariant #1), so binding a second consumer to it would mean every future
+# mirror column silently widening a tax report. These columns answer one
+# question — what sold, when, for how much — and change only when that does.
+#
+# There is no cost-basis column because the app records no purchase price yet
+# (tracked in docs/BACKLOG.md); this reports gross proceeds, which is the half
+# of a Schedule D line the database actually knows.
+SOLD_EXPORT_HEADERS = [
+    "Date Sold", "Player", "Year", "Brand", "Set", "Card #", "Parallel",
+    "Serial #", "Condition", "Quantity", "Sale Price", "Listed Price",
+    "Date Listed", "eBay Listing ID", "eBay URL",
+]
+
+
+def _sold_row(card: Card) -> list:
+    def date(value):
+        return value.strftime("%Y-%m-%d") if value else ""
+
+    return [
+        date(card.sold_at),
+        card.player_name or "",
+        card.year or "",
+        card.brand or "",
+        card.set_name or "",
+        card.card_number or "",
+        card.parallel_color or "",
+        card.serial_number or "",
+        card.condition or "",
+        card.quantity or 1,
+        f"{card.sold_price:.2f}" if card.sold_price is not None else "",
+        f"{card.listed_price:.2f}" if card.listed_price is not None else "",
+        date(card.created_at),
+        card.ebay_listing_id or "",
+        card.ebay_listing_url or "",
+    ]
+
+
+# Above GET /{card_id} for the same reason export.csv is — a literal path
+# declared after it 422s against the int path param.
+@router.get("/sold-years")
+def sold_years(db: Session = Depends(get_db)):
+    """Calendar years that have at least one sold card, newest first.
+
+    Lets the export UI offer the years that exist instead of a free-text box
+    that can silently produce an empty file. Years come from `sold_at`, the
+    same column the export filters on, so the two can't disagree.
+    """
+    sold_at_values = db.query(Card.sold_at).filter(
+        Card.status == "sold", Card.sold_at.isnot(None)
+    ).all()
+    years = {sold_at.year for (sold_at,) in sold_at_values}
+    return {"years": sorted(years, reverse=True)}
+
+
+@router.get("/export-sold.csv")
+def export_sold_csv(
+    db: Session = Depends(get_db),
+    year: Optional[int] = Query(None, ge=1900, le=9999),
+):
+    """Sold cards for one tax year (or all of them), as CSV.
+
+    Sold rows already leave in `export.csv`, but mixed into the full inventory
+    dump with no sale date to sort or filter on, so preparing a return meant
+    hand-filtering the whole collection every time. Ordered by sale date
+    ascending — the order a return is prepared in.
+
+    A sold card with no `sold_at` cannot belong to any tax year, so a filtered
+    export excludes it; the unfiltered export still lists it (with an empty
+    Date Sold) rather than hiding a real sale.
+    """
+    cards = db.query(Card).filter(Card.status == "sold").all()
+    if year is not None:
+        # Filtered in Python on the same `datetime.year` the header row is
+        # rendered from, so the file can never contain a date the filter would
+        # have rejected. Volumes here are one collection's sales per year.
+        cards = [c for c in cards if c.sold_at is not None and c.sold_at.year == year]
+    # Nulls last: a row with no sale date has no place in a date-ordered ledger,
+    # but dropping it from the unfiltered export would hide a real sale.
+    cards.sort(key=lambda c: (c.sold_at is None, c.sold_at or datetime.min, c.id))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(SOLD_EXPORT_HEADERS)
+    for card in cards:
+        # Same formula-injection escape as export.csv — this file is opened in
+        # a spreadsheet by definition, and player/notes text is model-extracted.
+        writer.writerow([_escape_formula_cell(cell) for cell in _sold_row(card)])
+
+    suffix = str(year) if year is not None else "all"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="cardlister-sold-{suffix}.csv"'},
+    )
+
+
 MAX_IMPORT_ROWS = 5000
 _TRUTHY = {"y", "yes", "true", "1"}
 _VALID_STATUSES = {"unlisted", "active", "sold"}

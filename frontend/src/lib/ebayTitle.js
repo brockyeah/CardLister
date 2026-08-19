@@ -17,17 +17,66 @@ export function buildEbayTitle(card) {
   }
   if (card.parallel_color) flags.push(String(card.parallel_color).toUpperCase())
 
-  const parts = [
-    card.year ? String(card.year) : '',
-    card.brand || '',
-    card.set_name || '',
-    card.player_name || '',
-    card.card_number ? `#${card.card_number}` : '',
-    flags.join(' '),
-    card.team || '',
+  // Units the title may be cut between: free-text fields contribute one unit
+  // per word, identifiers (each flag, and the card number) stay indivisible
+  // even when they contain a space.
+  const words = (v) => String(v || '').split(/\s+/).filter(Boolean)
+  // Normalized like the serial above: whitespace-only contributes nothing
+  // rather than a bare "#".
+  const cardNoValue = words(card.card_number).join(' ')
+  const cardNo = cardNoValue ? `#${cardNoValue}` : ''
+  const units = [
+    ...words(card.year ? String(card.year) : ''),
+    ...words(card.brand),
+    ...words(card.set_name),
+    ...words(card.player_name),
+    ...(cardNo ? [cardNo] : []),
+    ...flags.map((f) => words(f).join(' ')).filter(Boolean),
+    ...words(card.team),
   ]
-  const full = parts.filter(Boolean).join(' ').split(/\s+/).filter(Boolean).join(' ')
-  const truncated = full.length > EBAY_TITLE_MAX
-  const title = truncated ? full.slice(0, EBAY_TITLE_MAX).replace(/\s+$/, '') : full
-  return { title, full, truncated, length: full.length }
+  const full = units.join(' ')
+  return {
+    title: truncateTitle(units),
+    full,
+    truncated: titleLength(full) > EBAY_TITLE_MAX,
+    length: titleLength(full),
+  }
+}
+
+/**
+ * Character count the way the backend measures it.
+ *
+ * Python's `len()` counts Unicode code points; JavaScript's `.length` counts
+ * UTF-16 code units, so a single non-BMP character (an emoji in a player name
+ * or note) counts as 1 in `build_title` and 2 here. Left alone, the preview
+ * would report a card as over the limit — and truncate it — while the backend
+ * copied the whole title to the clipboard, with the shared parity fixture
+ * unable to catch it because the two sides disagree about what "80" means.
+ * The backend is the source of truth (invariant #7), so the mirror adopts its
+ * unit of measure.
+ */
+function titleLength(text) {
+  return [...text].length
+}
+
+/**
+ * Mirror of truncate_title() in backend/routers/ebay.py: join the units,
+ * dropping whole ones that don't fit. Slicing at the 80th character turns a
+ * `/99` serial into `/9`, `REFRACTOR` into `REFRACTO` and `1ST BOWMAN` into
+ * `1ST` — titles that are not just shorter but wrong about the card. Dropping
+ * the whole unit says less and nothing false.
+ */
+export function truncateTitle(units) {
+  let kept = ''
+  for (const unit of units) {
+    const candidate = kept ? `${kept} ${unit}` : unit
+    if (titleLength(candidate) > EBAY_TITLE_MAX) {
+      // A first unit over the cap has no boundary to fall back to. Slice by
+      // code point, not code unit, so the cut can't land inside a surrogate
+      // pair and leave a lone surrogate in the title.
+      return kept || [...unit].slice(0, EBAY_TITLE_MAX).join('').replace(/\s+$/, '')
+    }
+    kept = candidate
+  }
+  return kept
 }
