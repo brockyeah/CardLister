@@ -28,8 +28,6 @@ only in `[Unreleased]` on a branch is not in prod yet.
   on a single click with no confirm. The prompt counts the scanned-but-unsaved
   cards separately from the ones still waiting, because only the first group is
   unrecoverable.
-
-### Fixed
 - Retry now appears for the failure it exists to handle. A failed Anthropic
   extraction is not an HTTP failure — `claude_vision` returns a blank card and
   `scan.py` sends it as a 200 carrying an `error` field — so the queue resolved
