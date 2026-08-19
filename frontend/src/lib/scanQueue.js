@@ -28,6 +28,11 @@ const PAID_STATUSES = ['ready', 'scanning']
  */
 export function scanResultPatch(result) {
   if (result?.error) return { status: 'error', error: result.error }
+  // A nullish/empty body is also a failure, not a success with no data.
+  // `ready` is the one status that renders Review and hides Retry, and
+  // `reviewQueueItem` bails on `!result` — so marking it ready leaves an inert
+  // Review button and no way back, the same dead end by a different door.
+  if (!result) return { status: 'error', error: 'Scan returned no data — retry this photo.' }
   return { status: 'ready', result }
 }
 

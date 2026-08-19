@@ -102,8 +102,18 @@ describe('scanResultPatch', () => {
     expect(scanResultPatch(result)).toEqual({ status: 'ready', result })
   })
 
-  it('treats a missing result as ready rather than throwing', () => {
-    expect(scanResultPatch(undefined).status).toBe('ready')
+  it.each([undefined, null, '', 0])('treats an empty response (%p) as an error', (empty) => {
+    // Not just null-safety: `ready` is the only status that renders Review and
+    // hides Retry, and reviewQueueItem bails on `!result` — so `ready` here
+    // means an inert button and no way back. Retry is the honest affordance.
+    const patch = scanResultPatch(empty)
+    expect(patch.status).toBe('error')
+    expect(patch.error).toBeTruthy()
+  })
+
+  it('a no-data scan is not counted as paid work', () => {
+    const queue = [{ key: 'a', status: scanResultPatch(null).status }]
+    expect(queueLossSummary(queue)).toBeNull()
   })
 
   it('an errored item is not counted as paid work', () => {

@@ -10,6 +10,22 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `fix/scan-nullish-result`
+
+### Fixed
+- An empty response from `/api/scan` no longer strands a batch item. PR #48
+  routed a *failed* extraction to `error` — it arrives as a 200 carrying an
+  `error` field — but a nullish or empty body still fell through to `ready`,
+  and `ready` is the one status that renders Review while hiding Retry, with
+  `reviewQueueItem` bailing on `!result`. The row therefore offered a button
+  that did nothing and no way back: the same dead end #48 closed, reached
+  through a different door. Empty responses are now classified as errors,
+  which also keeps them out of the clear-queue "paid for" warning, since no
+  extraction was billed. Found by the daily review routine against the merged
+  code, and it reverses a case the #48 tests had pinned the other way — that
+  assertion was about null-safety and did not follow through to what `ready`
+  means downstream.
+
 ## [Unreleased] — branch `claude/sweet-rubin-kp5kr6`
 
 ### Fixed
