@@ -10,7 +10,40 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `fix/scan-nullish-result`
+## [Unreleased] — branch `claude/sweet-rubin-bnabr7`
+
+### Fixed
+- The eBay listing text no longer offers `$0.00` for a card that has no price.
+  `ebay_listing_text` fell back to `card.suggested_price or 0`, so a card saved
+  before the comps lookup resolved — or one where every pricing source failed —
+  produced `PRICE:\n$0.00` in the clipboard block that is pasted straight into
+  eBay's sell form. That is not a shortened truth the way a dropped title flag
+  is: a zero reads as a filled-in field, and unlike a wrong player name it is
+  not the kind of thing a seller catches on review, so the listing can go live
+  priced at nothing. The endpoint now says the price is not set instead of
+  inventing one, and returns `price: null` plus a `has_price` flag; a
+  non-positive price counts as unset for the same reason the comps panel renders
+  an unusable comp as unavailable. Both copy paths surface it before the paste —
+  the Scanner save toast and the Inventory Copy Text / Open eBay buttons say the
+  card has no price yet and point at Comps.
+- The mark-sold date picker pre-fills the day the user is actually having.
+  `MarkSoldModal` defaulted it from `new Date().toISOString().slice(0, 10)`,
+  which is the *UTC* date, so from 8pm EDT onward it offered **tomorrow** and an
+  evening sale was stamped a day late unless the user noticed and corrected it.
+  The submit half had the mirror-image problem: a bare `YYYY-MM-DD` handed to
+  `new Date()` parses as UTC midnight per spec, which sits against a boundary
+  that a reader west of UTC crosses. Sold dates feed the Sheets "Date Sold"
+  column, the tax-year CSV export and the planned days-to-sell analytics, so a
+  date off by one propagates — and a sale that slides across New Year's lands in
+  the wrong tax return. The default now comes from local calendar parts and the
+  submitted instant is anchored at noon UTC on the picked day, which keeps the
+  picked calendar date intact for every consumer that reads the stored
+  datetime's date part. Both halves live in a tested pure helper
+  (`frontend/src/lib/soldDate.js`). This is deliberately only the mark-sold
+  half of the app's UTC problem; the analytics day-boundary item stays
+  design-first, since changing it re-buckets every historical reading.
+
+## 2026-08-19 — Empty scan responses classified as errors (PR #51)
 
 ### Fixed
 - An empty response from `/api/scan` no longer strands a batch item. PR #48
@@ -26,7 +59,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   assertion was about null-safety and did not follow through to what `ready`
   means downstream.
 
-## [Unreleased] — branch `claude/sweet-rubin-kp5kr6`
+## 2026-08-19 — eBay title truncation on unit boundaries + sold-cards tax export (PR #49)
 
 ### Fixed
 - An eBay title over the 80-character limit no longer says something false
@@ -95,7 +128,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   no purchase price yet. Sits on the Analytics manage-data panel beside the
   backup and import tools.
 
-## [Unreleased] — branch `docs/agent-coordination`
+## 2026-08-19 — Two-agent coordination rules in CLAUDE.md (PR #50)
 
 ### Changed
 - CLAUDE.md records how the two agents that commit here stay out of each
