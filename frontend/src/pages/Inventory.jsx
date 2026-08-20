@@ -10,6 +10,7 @@ import {
 } from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
+import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 // Shown when the listing text was built for a card that has no price yet.
@@ -27,7 +28,7 @@ function StatTile({ label, value, hint }) {
 
 function MarkSoldModal({ card, onClose, onConfirm }) {
   const [price, setPrice] = useState(card.listed_price ?? '')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayLocalDate())
   const [saving, setSaving] = useState(false)
 
   const submit = async (e) => {
@@ -36,7 +37,9 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
     try {
       await onConfirm({
         sold_price: Number(price),
-        sold_at: new Date(date).toISOString(),
+        // Null lets the backend stamp its own time rather than sending an
+        // Invalid Date; the picker is `required`, so this is the odd path.
+        sold_at: soldAtFromDateInput(date),
       })
       onClose()
     } finally {
