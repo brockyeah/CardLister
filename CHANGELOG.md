@@ -42,6 +42,20 @@ only in `[Unreleased]` on a branch is not in prod yet.
   (`frontend/src/lib/soldDate.js`). This is deliberately only the mark-sold
   half of the app's UTC problem; the analytics day-boundary item stays
   design-first, since changing it re-buckets every historical reading.
+- A four-digit year below 100 in the sold-date helper is taken literally.
+  `Date.UTC(year, …)` applies the legacy two-digit-year remapping, so
+  `0050-08-20` came back as **1950** — a year the user never typed, changed
+  with no error anywhere, which is precisely the class of silent substitution
+  the helper exists to prevent. It now builds the date with `setUTCFullYear`
+  and checks the year alongside the month and day, so a remap cannot slip past
+  the rollover guard (CodeRabbit, PR #53).
+- The frontend suite runs in a fixed non-UTC timezone (`America/New_York`, set
+  in `vite.config.js`). CI runners default to UTC, where a local date and a UTC
+  date are the same string — so the regression test for the mark-sold bug
+  passed just as happily against the bug it was written to catch. The zone is
+  the owner's own, west of UTC where the bug bit, and observes DST. A test
+  asserts the zone is not UTC rather than trusting the config silently, in the
+  spirit of the auth sweep's non-empty self-check (CodeRabbit, PR #53).
 
 ## 2026-08-19 — Empty scan responses classified as errors (PR #51)
 

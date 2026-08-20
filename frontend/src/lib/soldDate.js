@@ -36,11 +36,20 @@ export function soldAtFromDateInput(dateStr) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim())
   if (!match) return null
   const [, year, month, day] = match
-  const stamp = Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0)
-  const asDate = new Date(stamp)
-  if (Number.isNaN(stamp)) return null
+  // Not `Date.UTC(year, …)`: that signature remaps years 0–99 onto 1900–1999,
+  // so `0050-08-20` came back as 1950 — a year the user never typed, changed
+  // silently. `setUTCFullYear` takes the year literally.
+  const asDate = new Date(0)
+  asDate.setUTCFullYear(Number(year), Number(month) - 1, Number(day))
+  asDate.setUTCHours(12, 0, 0, 0)
+  if (Number.isNaN(asDate.getTime())) return null
   // Reject dates the calendar rolled over (2026-02-31 → March 3): the picker
   // cannot produce one, but a hand-typed value in a text-input fallback can.
-  if (asDate.getUTCMonth() !== Number(month) - 1 || asDate.getUTCDate() !== Number(day)) return null
+  // The year is checked too, so no remapping can slip through unnoticed.
+  if (
+    asDate.getUTCFullYear() !== Number(year)
+    || asDate.getUTCMonth() !== Number(month) - 1
+    || asDate.getUTCDate() !== Number(day)
+  ) return null
   return asDate.toISOString()
 }
