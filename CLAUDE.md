@@ -82,11 +82,13 @@ An in-process asyncio task polls MLB transactions every `CALLUP_POLL_MINUTES`, e
 
 SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTERs — so **every new column on an existing table needs an entry in `_COLUMN_MIGRATIONS`**, a hand-maintained list applied idempotently at startup. New *tables* need nothing. `uploads_dir()` is derived as `Path(DB_PATH).parent / "uploads"`, so one Railway volume at `/data` holds both the DB and every photo.
 
+`GET /api/analytics/backup.db` stages its `VACUUM INTO` snapshot in that same directory rather than a system temp dir — the container's `/tmp` is ephemeral disk sized for neither a full copy of the DB nor its growth. A backup therefore briefly doubles the DB's footprint on the volume; out-of-space returns 507 rather than a blank 500. The staging file is unlinked by a `BackgroundTask`, which a client disconnect skips, so each request first sweeps `cardlister-backup-*.db` files older than an hour — without that, a leak is permanent and invisible to `storage_usage`, which counts only the DB file and the uploads dir.
+
 ### Frontend (`frontend/src`)
 
 **React 19 + react-router v8** — import from `'react-router'`; `react-router-dom` is not installed. Tailwind v3. Plain declarative `<Routes>`, no data-router APIs.
 
-JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Two download endpoints fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
+JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Three download endpoints (backup, inventory CSV, sold CSV) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links. They share `lib/download.js`, which exists because hand-rolling that anchor gets two things wrong: revoking the object URL in the same tick as `click()` races the browser's own fetch of it (revoke on a later task), and with `responseType: 'blob'` axios hands back the *error* body as a Blob too, so an API `detail` is unreadable until it is re-parsed.
 
 `Scanner.jsx` is the center of gravity: a batch queue (`queued → scanning → ready → saved`) processed one item at a time behind a ref guard, front images only. Pricing lookups carry a monotonic `pricingSeq` and every write path bails if a newer lookup has started — this is a shipped race fix, so **any new async state write in Scanner needs the same guard**.
 

@@ -5,6 +5,42 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] `storage_usage` under-reports the volume it exists to watch (2026-08-21
+      review, noticed while moving backup snapshots onto that volume): the
+      panel adds `os.path.getsize(DB_PATH)` to the uploads directory and calls
+      that the footprint, so anything else on the volume is invisible — the
+      SQLite `-wal`/`-shm` sidecars if journal mode is ever changed, a backup
+      snapshot mid-download, and a snapshot leaked by a client that
+      disconnected (bounded to an hour by the new sweep, but a full copy of the
+      database while it lasts). The tiles are the only view of volume pressure
+      the app has, and the number they show is the one that will be believed
+      when Railway starts refusing writes. Walk the DB's directory instead of
+      naming one file, and report the remainder as a third figure rather than
+      folding it into `db_bytes`, so a growing "other" is legible rather than
+      looking like database growth (quick win; implement directly; inline —
+      `routers/analytics.py` plus the Analytics tile)
+- [ ] `suggested_price` has no `ge=0` floor, but `listed_price` does
+      (2026-08-21 review): `CardBase`/`CardUpdate` validate
+      `listed_price: Optional[float] = Field(default=None, ge=0)` and leave
+      `suggested_price` a bare `Optional[float]`, so a negative comp median —
+      or a hand-crafted PATCH — is stored and mirrored to the Sheet's price
+      column. The listing-text endpoint now treats a non-positive price as
+      unset, which contains the worst of it, but the two fields are the same
+      kind of value read by the same consumers and only one is guarded. Add the
+      floor to both models and a validation test alongside
+      `test_card_validation.py` (quick win; implement directly; inline)
+- [ ] Orphan cleanup leaves `Scan.image_path` pointing at a file it deleted
+      (2026-08-21 review): `_orphaned_uploads` deliberately lets scan rows go
+      unprotected — an unsaved scan's photo is exactly the disk growth the tool
+      reclaims — but the `Scan` row survives with a path to nothing. Harmless
+      today, because nothing renders scan photos; it stops being harmless the
+      moment the "Scan history browser" item below ships, which would show a
+      broken thumbnail for every scan older than the 48h grace window that was
+      never saved. Null the two path columns on the scans whose files the
+      cleanup removed, in the same call, so the record stays honest about what
+      it still has and the history browser can say "photo reclaimed" instead of
+      rendering a hole (quick win; implement directly; inline —
+      `routers/analytics.py:cleanup_uploads` plus a test)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -91,19 +127,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       or keep it but label it, and have the Scanner/Inventory copy buttons
       surface that (quick win; implement directly; inline — `routers/ebay.py`
       plus its test)
-- [ ] Backup snapshots are written to container-local disk, not the volume
-      (2026-08-19 review): `download_backup` calls `tempfile.mkstemp()`, which
-      lands in the container's `/tmp` rather than on the Railway volume that
-      holds the database. `VACUUM INTO` writes a full copy of the DB there, so
-      the one recovery tool the app has gets less reliable exactly as the
-      database it protects grows, and it fails with a bare 500 ("Backup
-      snapshot failed") that says nothing about disk. Point the temp file at
-      the DB's own directory (guaranteed to be sized for at least one copy of
-      it) or honour a `TMPDIR`, and distinguish "out of space" from "snapshot
-      failed" in the error. Note the export must still be deleted on the way
-      out — the existing `BackgroundTask(os.unlink, …)` covers that, and moving
-      the file onto the volume makes forgetting it much more expensive (quick
-      win; implement directly; inline)
 - [ ] eBay title truncation cannot spare the flags, because it can only cut a
       prefix (2026-08-19 review, deferred out of the truncation fix that
       shipped the same day). **Current behaviour:** unit order is
@@ -569,6 +592,41 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-21 — Backup snapshots stage on the volume, not container-local
+      disk: `download_backup` called `tempfile.mkstemp()` with no directory,
+      which on Railway is the container's ephemeral `/tmp`, while the database
+      lives on the mounted volume — so `VACUUM INTO` wrote a full copy of the
+      database onto the one disk sized for neither it nor its growth, and the
+      app's only recovery tool got less reliable as the data it protects got
+      more valuable. Snapshots now stage beside the database; out-of-space
+      returns 507 and says so (SQLite reports it in a message, the OS as
+      ENOSPC — both read the same now), and every other failure still returns
+      the generic 500 rather than guessing. Each request also sweeps snapshots
+      older than an hour first: the unlink runs in a `BackgroundTask` that a
+      client disconnect skips, and on the volume that leak is permanent and
+      invisible to the storage tiles. Verified end to end against a running
+      app — staged beside the DB, gone after the response, and a readable
+      SQLite file at the other end.
+- [x] 2026-08-21 — File downloads stop racing the browser: all three
+      authenticated downloads revoked the object URL in the same tick as
+      `a.click()`, but a click only *schedules* the download and the browser
+      reads the `blob:` URL after the current task ends, so it could already be
+      revoked — a download that silently does nothing, most reliably on
+      Firefox. The anchor was never in the document either. One shared helper
+      (`frontend/src/lib/download.js`) now owns the object-URL lifetime, uses
+      the server's `Content-Disposition` filename (the backup's carries the
+      time, from the server's clock, instead of a UTC date from the browser's),
+      and re-reads a blob error body as JSON so the API's `detail` survives to
+      the screen — without which the new out-of-space message would have been
+      swallowed by "Backup failed."
+- [x] 2026-08-21 — Preset models are priced explicitly: nothing connected
+      `claude_vision.PRESETS` to `analytics.MODEL_PRICES`, so a preset refresh
+      that changed one alone would fall through to `_DEFAULT_PRICE`. That
+      fallback is right for a model nobody chose — overcounting is the safe
+      direction — and wrong for a preset: the Cost preset exists to be cheaper,
+      and priced at Opus rates its whole reason for existing is invisible in
+      the one report that would show it. Now a test failure instead of a silent
+      67% overstatement.
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`
