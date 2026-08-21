@@ -13,7 +13,7 @@
  * server's own clock rather than the browser's, so it cannot disagree with
  * what is inside the file.
  *
- * Handles RFC 5987 `filename*=UTF-8''…` (preferred when present, being the
+ * Handles RFC 5987 `filename*=` (preferred when present, being the
  * encoding-aware form) and plain quoted or bare `filename=`.
  */
 export function filenameFromContentDisposition(header, fallback) {
@@ -21,8 +21,7 @@ export function filenameFromContentDisposition(header, fallback) {
 
   const extended = /filename\*\s*=\s*([^;]+)/i.exec(value)
   if (extended) {
-    const raw = extended[1].trim().replace(/^UTF-8''/i, '')
-    const clean = sanitize(safeDecode(raw))
+    const clean = sanitize(safeDecode(extValue(extended[1].trim())))
     if (clean) return clean
   }
 
@@ -33,6 +32,28 @@ export function filenameFromContentDisposition(header, fallback) {
   }
 
   return fallback
+}
+
+/**
+ * The value half of an RFC 5987 ext-value.
+ *
+ * The grammar is `charset "'" [ language ] "'" value-chars`, and the language
+ * component is optional but may be present: `UTF-8'en'caf%C3%A9.db` is a legal
+ * header. Matching the literal prefix `UTF-8''` therefore misses the form that
+ * carries a language and leaves `UTF-8'en'` sitting in the filename. Split on
+ * the two apostrophes instead and take what follows.
+ *
+ * The charset is read but not honoured: everything in practice sends UTF-8,
+ * which is what `decodeURIComponent` assumes. A header claiming ISO-8859-1
+ * with high bytes would fail to decode and fall back to the raw text rather
+ * than producing mojibake silently.
+ */
+function extValue(raw) {
+  const unquoted = raw.replace(/^"(.*)"$/, '$1')
+  const parts = unquoted.split("'")
+  // Fewer than three parts means no ext-value structure at all — treat the
+  // whole thing as the value rather than dropping it.
+  return parts.length >= 3 ? parts.slice(2).join("'") : unquoted
 }
 
 function safeDecode(raw) {

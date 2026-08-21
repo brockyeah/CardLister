@@ -59,6 +59,13 @@ only in `[Unreleased]` on a branch is not in prod yet.
   `Content-Disposition` filename is used when present (parsed in a tested pure
   helper, RFC 5987 form included, basenamed and sanitized), falling back to the
   old name.
+- The RFC 5987 filename parser drops a language tag instead of keeping it in
+  the name. The ext-value grammar is `charset "'" [ language ] "'" value`, and
+  the language half is optional but legal, so matching the literal prefix
+  `UTF-8''` missed `UTF-8'en'caf%C3%A9.db` entirely and left `UTF-8'en'` sitting
+  in the downloaded filename. It now splits on the two apostrophes and takes
+  what follows, treating a value with no ext-value structure as the whole name
+  rather than discarding it (CodeRabbit, PR #54).
 
 ### Added
 - A test that every model the scan presets can select is priced explicitly in

@@ -32,6 +32,26 @@ describe('filenameFromContentDisposition', () => {
     )).toBe('café-backup.db')
   })
 
+  it('drops the charset and a language tag from an ext-value', () => {
+    // RFC 5987's grammar is charset "'" [ language ] "'" value-chars, and the
+    // language half is optional but legal — matching the literal `UTF-8''`
+    // left `UTF-8'en'` sitting in the filename. (CodeRabbit, PR #54.)
+    expect(filenameFromContentDisposition(
+      "attachment; filename*=UTF-8'en'caf%C3%A9-backup.db", FALLBACK,
+    )).toBe('café-backup.db')
+    expect(filenameFromContentDisposition(
+      "attachment; filename*=UTF-8'en-GB'cardlister-sold-2026.csv", FALLBACK,
+    )).toBe('cardlister-sold-2026.csv')
+  })
+
+  it('treats a value with no ext-value structure as the whole filename', () => {
+    // Not spec-legal, but dropping the name entirely would be worse than
+    // taking a sender at its word.
+    expect(filenameFromContentDisposition(
+      'attachment; filename*=plain-backup.db', FALLBACK,
+    )).toBe('plain-backup.db')
+  })
+
   it('survives a malformed percent escape rather than failing the download', () => {
     expect(filenameFromContentDisposition(
       "attachment; filename*=UTF-8''100%-backup.db", FALLBACK,
