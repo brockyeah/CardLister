@@ -68,6 +68,14 @@ only in `[Unreleased]` on a branch is not in prod yet.
   rather than discarding it (CodeRabbit, PR #54).
 
 ### Added
+- `saveBlob`'s lifecycle is pinned by tests: the anchor is attached before the
+  click, and the object URL survives it, being revoked only on a later task.
+  That ordering *is* the download fix, and nothing tested it — a later
+  simplification could have folded the revoke back into the same tick and the
+  suite would have stayed green. The four DOM/URL calls it makes are stubbed
+  rather than pulling in jsdom, so the suite stays pure-function and
+  node-environment as CLAUDE.md requires; the tests were checked to fail
+  against a same-tick revoke (CodeRabbit, PR #54).
 - A test that every model the scan presets can select is priced explicitly in
   `analytics.MODEL_PRICES`. Nothing connected those two tables. The
   `_DEFAULT_PRICE` fallback is right for a model nobody chose — overcounting

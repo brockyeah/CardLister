@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { filenameFromContentDisposition, readBlobError } from './download.js'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { filenameFromContentDisposition, readBlobError, saveBlob } from './download.js'
 
 const FALLBACK = 'cardlister-backup.db'
 
@@ -103,5 +103,75 @@ describe('readBlobError', () => {
   it('ignores an error with no response at all (network failure)', async () => {
     const err = { message: 'Network Error' }
     await expect(readBlobError(err)).resolves.toBe(err)
+  })
+})
+
+describe('saveBlob', () => {
+  // Deliberately NOT jsdom. CLAUDE.md keeps this suite pure-function and
+  // node-environment, and adding jsdom + testing-library is called out there
+  // as a real decision rather than a drop-in. saveBlob touches exactly four
+  // DOM/URL calls, so stubbing those four pins the ordering the shipped fix is
+  // about — append, then click, then revoke on a LATER task — without pulling
+  // a DOM implementation into the repo. The ordering is the whole fix: revoking
+  // in the same tick as click() races the browser's own read of the blob: URL,
+  // and nothing else in the suite would notice it moving back.
+  let anchor
+  let log
+  let realUrl
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    log = []
+    anchor = {
+      href: '', download: '', rel: '', style: {}, connected: false,
+      click() { log.push({ event: 'click', connected: anchor.connected }) },
+      remove() { anchor.connected = false; log.push({ event: 'remove' }) },
+    }
+    realUrl = globalThis.URL
+    vi.stubGlobal('URL', {
+      createObjectURL: () => { log.push({ event: 'create' }); return 'blob:fake-url' },
+      revokeObjectURL: (u) => log.push({ event: 'revoke', url: u }),
+    })
+    vi.stubGlobal('document', {
+      createElement: () => anchor,
+      body: { appendChild: (el) => { el.connected = true; log.push({ event: 'append' }) } },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    globalThis.URL = realUrl
+  })
+
+  const events = () => log.map((e) => e.event)
+
+  it('clicks an anchor that is attached to the document', () => {
+    saveBlob({}, 'cardlister-backup.db')
+    const click = log.find((e) => e.event === 'click')
+    expect(click).toBeDefined()
+    expect(click.connected).toBe(true)
+    expect(events()).toEqual(['create', 'append', 'click'])
+  })
+
+  it('does not revoke the object URL in the same tick as the click', () => {
+    // The regression this whole helper exists for: a click only *schedules*
+    // the download, so a same-tick revoke can beat the browser to the URL.
+    saveBlob({}, 'cardlister-backup.db')
+    expect(events()).not.toContain('revoke')
+  })
+
+  it('removes the anchor and revokes the URL once the timer fires', () => {
+    saveBlob({}, 'cardlister-backup.db')
+    vi.advanceTimersByTime(30_000)
+    expect(events()).toEqual(['create', 'append', 'click', 'remove', 'revoke'])
+    expect(log.find((e) => e.event === 'revoke').url).toBe('blob:fake-url')
+    expect(anchor.connected).toBe(false)
+  })
+
+  it('puts the filename on the download attribute', () => {
+    saveBlob({}, 'cardlister-sold-2026.csv')
+    expect(anchor.download).toBe('cardlister-sold-2026.csv')
+    expect(anchor.href).toBe('blob:fake-url')
   })
 })
