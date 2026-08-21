@@ -426,8 +426,14 @@ export default function Inventory() {
           <option value="sold">Sold</option>
         </select>
         <button onClick={reload} className="btn-secondary md:ml-auto">Refresh</button>
+        {/* Same treatment as the other two blob downloads: readBlobError has
+            already recovered the API's detail by the time this rejects, and
+            discarding it would leave one of the three saying less than the
+            server knows. */}
         <button
-          onClick={() => downloadInventoryCsv().catch(() => alert('Export failed — try again.'))}
+          onClick={() => downloadInventoryCsv().catch(
+            (e) => alert(formatApiError(e, 'Export failed — try again.')),
+          )}
           className="btn-secondary"
         >
           Export CSV

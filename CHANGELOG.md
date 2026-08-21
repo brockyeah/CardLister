@@ -48,7 +48,10 @@ only in `[Unreleased]` on a branch is not in prod yet.
   and every caller fell through to a fixed string — the new "not enough disk
   space" message would have been swallowed by "Backup failed." on the way to
   the screen. The blob body is now re-read as JSON before the promise rejects,
-  and the backup and sold-export handlers render the API's message.
+  and all three call sites — the backup and sold-export handlers on Analytics
+  and Inventory's Export CSV button — render the API's message rather than a
+  fixed one (the Inventory site by way of the Claude review action on PR #54,
+  which caught it still discarding the detail the others now show).
 - Downloads are named by the server rather than by the browser clock. The
   backup filename was built from `new Date().toISOString()` — the UTC date,
   the same class of bug as the mark-sold default — and carried no time, so two
