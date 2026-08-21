@@ -4,12 +4,15 @@ Aggregates usage_events with filters (time range, user, model) and returns
 totals plus breakdowns by user, model, and day. Costs are estimated from
 per-model token prices; settlement happens offline.
 """
+import errno
+import logging
 import os
 import sqlite3
 import tempfile
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +27,8 @@ from ..services.billing_alerts import send_test_alert
 from ..schemas import (
     AnalyticsReport, AnalyticsTotals, UsageRow, ModelRow, DayRow, ReassignRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -183,6 +188,79 @@ def configured_users():
     return {"users": sorted(get_users())}
 
 
+SNAPSHOT_PREFIX = "cardlister-backup-"
+# A snapshot still on disk after this long belongs to a request that never
+# finished delivering it — see _sweep_stale_snapshots.
+STALE_SNAPSHOT_SECONDS = int(os.getenv("BACKUP_SNAPSHOT_TTL_SECONDS", str(3600)))
+
+
+def _snapshot_dir() -> Path:
+    """Where to stage a snapshot: the database's own directory.
+
+    Not `tempfile.mkstemp()`'s default. On Railway that resolves to the
+    container's `/tmp`, which is ephemeral container-local disk, while the
+    database lives on the mounted volume — so `VACUUM INTO` wrote a full copy
+    of the DB somewhere sized for neither it nor its growth, and the app's one
+    recovery tool got less reliable exactly as the data it protects got more
+    valuable. The DB's own directory is by definition sized for at least one
+    copy of the DB, which is what a snapshot is.
+
+    The trade is that a backup briefly doubles the database's footprint on the
+    volume. That is the honest cost of a consistent copy, and it fails here
+    with a message that names disk space instead of 500ing somewhere invisible.
+    """
+    return Path(DB_PATH).resolve().parent
+
+
+def _sweep_stale_snapshots(directory: Path) -> None:
+    """Delete snapshots left behind by requests that never completed.
+
+    The happy path unlinks via `BackgroundTask` once the response is delivered,
+    but that task does not run if the client disconnects mid-download — and now
+    that snapshots land on the volume rather than in a container `/tmp` that
+    dies with the deploy, a leaked one is permanent. `storage_usage` reports
+    only the DB file and the uploads dir, so it would not even show up there.
+
+    Best-effort by design: a sweep failure must not fail the backup.
+    """
+    cutoff = time.time() - STALE_SNAPSHOT_SECONDS
+    try:
+        entries = list(directory.glob(f"{SNAPSHOT_PREFIX}*.db"))
+    except OSError:
+        return
+    for path in entries:
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                logger.info("Removed stale backup snapshot %s", path.name)
+        except OSError:
+            continue
+
+
+def _snapshot_error(exc: BaseException) -> HTTPException:
+    """Turn a snapshot failure into the most specific thing we can honestly say.
+
+    Out of space is the one cause worth naming: a backup is a full copy of the
+    database, it is the failure the volume will actually produce, and it is
+    fixable by the person reading the message — whereas "Backup snapshot
+    failed" sends them to the Railway logs to find out whether their backups
+    have been failing. SQLite reports SQLITE_FULL as an OperationalError whose
+    message is "database or disk is full" and the OS reports it as ENOSPC; the
+    two arrive by different routes and mean the same thing here. Nothing else
+    is guessed at.
+    """
+    out_of_space = (
+        (isinstance(exc, OSError) and exc.errno == errno.ENOSPC)
+        or "disk is full" in str(exc).lower()
+    )
+    if out_of_space:
+        return HTTPException(
+            status_code=507,
+            detail="Not enough disk space for a backup snapshot — free space on the volume and retry.",
+        )
+    return HTTPException(status_code=500, detail="Backup snapshot failed")
+
+
 @router.get("/backup.db")
 def download_backup():
     """Consistent point-in-time snapshot of the SQLite DB, streamed as a download.
@@ -190,7 +268,13 @@ def download_backup():
     VACUUM INTO takes a transactional copy, so it's safe against concurrent
     writes — unlike copying the file, which can capture a torn state mid-write.
     """
-    fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="cardlister-backup-")
+    staging = _snapshot_dir()
+    _sweep_stale_snapshots(staging)
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix=SNAPSHOT_PREFIX, dir=staging)
+    except OSError as e:
+        logger.exception("Backup snapshot could not be staged in %s", staging)
+        raise _snapshot_error(e)
     os.close(fd)
     os.unlink(tmp_path)  # VACUUM INTO refuses to overwrite an existing file
     try:
@@ -201,16 +285,22 @@ def download_backup():
             src.execute("VACUUM INTO ?", (tmp_path,))
         finally:
             src.close()
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError) as e:
+        # A half-written snapshot is exactly the thing the sweep above cannot
+        # reclaim for an hour, so drop it now.
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise HTTPException(status_code=500, detail="Backup snapshot failed")
+        logger.exception("Backup snapshot failed")
+        raise _snapshot_error(e)
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return FileResponse(
         tmp_path,
         media_type="application/octet-stream",
         filename=f"cardlister-backup-{stamp}.db",
-        background=BackgroundTask(os.unlink, tmp_path),
+        # missing_ok: the sweep on a later request may have collected this file
+        # already, and a background task raising here would log a bare traceback
+        # for a snapshot that is gone precisely because cleanup worked.
+        background=BackgroundTask(lambda: Path(tmp_path).unlink(missing_ok=True)),
     )
 
 
