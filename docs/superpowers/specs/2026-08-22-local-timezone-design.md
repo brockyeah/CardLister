@@ -311,9 +311,11 @@ one household, one zone.
 
 - Unit tests for every `timeutils` helper, including both DST transitions,
   the date-only rule, invalid-tz fallback, and `+05:00` normalization.
-- Endpoint tests: an event at `2026-08-22T01:30Z` buckets on `2026-08-21`
-  and is excluded from "today" at `now = 2026-08-22T02:00Z`; a Dec-31-evening
-  ET sale lands in the earlier tax year in both `sold-years` and the export.
+- Endpoint tests: an event at `2026-08-22T01:30Z` (21:30 EDT Aug 21)
+  buckets on `2026-08-21`, is **included** in "today" at
+  `now = 2026-08-22T02:00Z` (still Aug 21 in ET), and is excluded once the
+  ET day turns, e.g. at `now = 2026-08-22T05:00Z`; a Dec-31-evening ET sale
+  lands in the earlier tax year in both `sold-years` and the export.
 - Round-trip test: sold export / Sheets row for a midnight (date-only) row
   keeps its calendar date and reimports value-exact; "Date Listed" real
   instants reimport equal to the second; a mark-sold submit of a bare
