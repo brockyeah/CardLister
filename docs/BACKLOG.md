@@ -44,9 +44,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the *previous* day anywhere west of UTC. Sold dates feed the Sheets "Date
       Sold" column, the planned tax-year export, and days-to-sell analytics, so
       the error propagates. Fix by composing the default from local date parts
-      and submitting local noon, in a tested pure helper (quick win; implement
-      directly; inline — Inventory.jsx plus a lib function) — **do not
-      implement separately: covered as step 6 of
+      and submitting the picked `YYYY-MM-DD` string as-is — the server owns
+      the date semantics (quick win; implement directly; inline —
+      Inventory.jsx plus a lib function) — **do not implement separately:
+      covered as step 6 of
       `docs/superpowers/plans/2026-08-22-local-timezone.md`**, and the
       backend half (aware-datetime normalization at the boundary) is step 3
       there
