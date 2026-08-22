@@ -88,10 +88,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (`docs/superpowers/specs/2026-08-22-local-timezone-design.md`,
       `docs/superpowers/plans/2026-08-22-local-timezone.md`): recommends
       storage staying naive UTC with conversion at the edges via
-      `CARDLISTER_TZ` (default America/New_York), a read-side rule treating
-      exact-midnight values as date-only artifacts (mark-sold and CSV import
-      have been minting UTC-midnight rows, so naive conversion would shift
-      every historical sold date back a day — no data migration), and a
+      `CARDLISTER_TZ` (default America/New_York), an explicit
+      midnight-means-date-only contract (mark-sold and CSV import have been
+      minting UTC-midnight rows, so naive conversion would shift every
+      historical sold date back a day; the modal now submits the bare date
+      so new writes share the representation — no data migration), and a
       `tzdata` pip pin (the `python:3.11-slim` image has no zoneinfo, so the
       gap crashes only in production while CI stays green). Covers the
       mark-sold item above, the Sheets date columns, and the tax-year export

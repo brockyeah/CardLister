@@ -11,22 +11,24 @@ other, so they can ship as one PR or several.
 
 ## Step 1 — dependency, config, and `backend/timeutils.py`
 
-- Add `tzdata` to `backend/requirements.txt` (hard prerequisite: the
-  `python:3.11-slim` image has no OS zoneinfo — deploy would crash while CI
-  stays green).
+- Add `tzdata` to `backend/requirements.txt`, exact-pinned like every other
+  entry there (hard prerequisite: the `python:3.11-slim` image has no OS
+  zoneinfo — deploy would crash while CI stays green). Deliberately no
+  `PYTHONTZPATH` manipulation — see the design's configuration section.
 - Pin `CARDLISTER_TZ=America/New_York` in the `conftest.py` env block (with
   the other env setup, before any backend import) so the suite is
   deterministic on any runner.
 - New module `backend/timeutils.py`: `local_tz()`, `utc_naive()`,
-  `to_local()`, `local_day_key()`, `card_date()`, `local_noon_utc()`,
-  `range_start_utc()` — contracts as tabled in the design. Invalid
+  `to_local()`, `local_day_key()`, `card_date()`, `range_start_utc()` —
+  contracts as tabled in the design. Invalid
   `CARDLISTER_TZ` logs one warning and falls back to the default; resolution
   is `lru_cache`d on the raw env string so changes take effect live.
 
 **Test (`backend/tests/test_timeutils.py`):**
 - `utc_naive`: `+05:00` aware → correct naive UTC; naive passes through.
-- `card_date`: `2026-08-22 00:00:00.000000` → `2026-08-22` verbatim (legacy
-  artifact); `2026-08-22 01:30:00.123456` → `2026-08-21` (ET).
+- `card_date`: `2026-08-22 00:00:00.000000` → `2026-08-22` verbatim (the
+  date-only representation); `2026-08-22 01:30:00.123456` → `2026-08-21`
+  (ET).
 - `local_day_key` and `range_start_utc` across both 2026 DST transitions
   (Mar 8, Nov 1): `today` start is `04:00Z` under EDT and `05:00Z` under
   EST; `month` start on Nov 1; `7d`/`30d` stay `now - timedelta`.
@@ -52,11 +54,17 @@ Patch time via the module attribute per the conftest note.
 - `backend/routers/cards.py:520`: `card.sold_at =
   timeutils.utc_naive(payload.sold_at) if payload.sold_at else
   datetime.utcnow()`.
+- No schema change: pydantic 2.13.4 already parses a bare `"2026-08-22"`
+  into naive midnight (runtime-verified — see the design's facts), which is
+  the canonical date-only representation. The frontend switches to sending
+  exactly that in step 6.
 
 **Test:** POST `/api/cards/{id}/mark-sold` with
 `sold_at="2026-08-22T12:00:00+05:00"` → stored value is naive
 `2026-08-22 07:00:00` (this fails today: the pinned SQLAlchemy stores
-`12:00:00`). Existing mark-sold tests unchanged.
+`12:00:00`); with `sold_at="2026-08-22"` → stored naive
+`2026-08-22 00:00:00` and `card_date` renders `2026-08-22` regardless of
+zone. Existing mark-sold tests unchanged.
 
 ## Step 4 — tax export and sold-years
 
@@ -65,7 +73,7 @@ Patch time via the module attribute per the conftest note.
   `card_date(...).year`.
 
 **Test (extend `backend/tests/test_export_sold_csv.py`):**
-- Legacy artifact row (`sold_at=2026-03-15 00:00:00`) exports Date Sold
+- Date-only row (`sold_at=2026-03-15 00:00:00`) exports Date Sold
   `2026-03-15` and appears under year 2026 — unchanged by the tz switch.
 - Real instant `2027-01-01T02:30:00Z` (Dec 31 2026, 21:30 ET) lands in year
   **2026** in both `sold-years` and the `year=2026` export, and its Date
@@ -74,32 +82,39 @@ Patch time via the module attribute per the conftest note.
 ## Step 5 — Sheets mirror / CSV date columns, import symmetry
 
 - `backend/services/google_sheets.py:86-87`: "Date Listed" → local ISO with
-  offset for real instants, bare date for artifacts; "Date Sold" → date-only
+  offset for real instants, bare date for date-only values; "Date Sold" → date-only
   via `card_date`.
-- `backend/routers/cards.py` import (264-268, 378-389): bare `YYYY-MM-DD` →
-  `local_noon_utc`; ISO with offset → `utc_naive`; naive ISO → unchanged
-  (legacy exports keep their UTC meaning).
+- `backend/routers/cards.py` import (264-268, 378-389): one new branch
+  only — ISO with offset → `utc_naive`. Bare `YYYY-MM-DD` already parses to
+  naive midnight, which is now the canonical date-only representation, and
+  naive ISO with a time part keeps its legacy UTC meaning.
 
 **Test (extend `backend/tests/test_import_csv.py` +
-`test_sheets_mirror.py`):** round-trip — export a card, import the file,
-stored `created_at`/`sold_at` match to the second; a bare `Date Sold`
-`2026-08-21` imports as local noon (`2026-08-21 16:00:00` naive UTC under
-EDT) and renders back as `2026-08-21` everywhere.
+`test_sheets_mirror.py`):** round-trip — export a card and import the file:
+a date-only `sold_at` (naive midnight) reimports **value-exact**, a real
+`created_at` instant reimports equal to the second via the offset-carrying
+"Date Listed" form, and a bare `Date Sold` `2026-08-21` renders back as
+`2026-08-21` everywhere. Do **not** assert instant equality for a *legacy*
+real-instant `sold_at` — Date Sold exports date-only, so only its calendar
+date survives, by design (see the design's risk #7).
 
-## Step 6 — frontend: modal defaults, noon submit, `fmtDate`
+## Step 6 — frontend: modal defaults, date-only submit, `fmtDate`
 
 - New `frontend/src/lib/dates.js`: `todayLocalDateInput()` (browser-local
-  `YYYY-MM-DD` from date parts), `localNoonISO(dateStr)`
-  (`new Date(y, m-1, d, 12).toISOString()`), and `displayDate(iso)` — the
-  `fmtDate` replacement mirroring the backend artifact rule (exact-midnight
-  no-offset string → date part verbatim; otherwise parse as UTC by
-  appending `Z`, then `toLocaleDateString()`).
-- `frontend/src/pages/Inventory.jsx:27,36` uses the first two;
-  `frontend/src/components/CardTable.jsx:50-56` uses `displayDate`.
+  `YYYY-MM-DD` from date parts — the picker default, the only remaining
+  browser-timezone use) and `displayDate(iso)` — the `fmtDate` replacement
+  mirroring the backend date-only rule (exact-midnight no-offset string →
+  date part verbatim; otherwise parse as UTC by appending `Z`, then
+  `toLocaleDateString()`).
+- `frontend/src/pages/Inventory.jsx:27,36`: default from
+  `todayLocalDateInput()`; submit the picked `YYYY-MM-DD` string **as-is**
+  (no `new Date()`, no `toISOString()`) — the server owns date semantics,
+  so browser vs `CARDLISTER_TZ` disagreement cannot shift the stored date.
+- `frontend/src/components/CardTable.jsx:50-56` uses `displayDate`.
 
 **Test (`frontend/src/lib/dates.test.js`, node env — pure functions only,
-per the repo's no-jsdom testing note):** noon submit round-trips the picked
-date for any browser offset (test with mocked `Date` at ±11h);
+per the repo's no-jsdom testing note):** `todayLocalDateInput` composes
+from local date parts (mocked `Date` at ±11h offsets);
 `displayDate('2026-08-21T00:00:00')` → Aug 21 regardless of environment tz;
 `displayDate` of a real instant appends `Z` before parsing.
 
@@ -124,8 +139,12 @@ One focused session (steps 1–4), a second for 5–7. No schema change, no
 
 ## Decisions needed from the owner before implementation
 
-1. Approve Approach A + A2: storage stays naive UTC; legacy midnight rows
-   are handled by the read-side artifact rule, **no data migration**.
+1. Approve Approach A + A2: storage stays naive UTC, **exact midnight is
+   the documented date-only representation** (legacy rows and new date-only
+   writes share it; the mark-sold modal submits the bare date), and there is
+   **no data migration**. Residual caveat accepted: an API caller
+   hand-sending `...T00:00:00Z` while meaning that instant gets date-only
+   semantics (design risk #5).
 2. Confirm `CARDLISTER_TZ` default `America/New_York` and the
    warn-and-fall-back (not refuse-to-boot) behavior for invalid values.
 3. Confirm the Sheets column format change: "Date Sold" becomes date-only,
