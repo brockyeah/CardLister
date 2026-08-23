@@ -73,6 +73,17 @@ def test_upload_answers_head_with_headers_and_no_body():
         assert client.head("/uploads/does-not-exist.png").status_code == 404
 
 
+def test_nul_byte_in_filename_is_a_404_not_a_500():
+    # `%00` decodes into the path param and `.resolve()` raises "embedded null
+    # byte" before the containment check runs — the same 500-where-404-is-honest
+    # class as the `/uploads/%2e` fix, one syscall later. Public route, so any
+    # scanner could trigger the traceback.
+    with TestClient(app) as client:
+        assert client.get("/uploads/%00").status_code == 404
+        assert client.get("/uploads/a%00b.png").status_code == 404
+        assert client.head("/uploads/a%00b.png").status_code == 404
+
+
 def test_pdf_upload_forced_to_download():
     with TestClient(app) as client:
         pdf = io.BytesIO(b"%PDF-1.4 fake test document")

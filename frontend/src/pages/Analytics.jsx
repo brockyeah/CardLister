@@ -4,6 +4,7 @@ import {
   downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
   getStorageUsage, resyncSheet, getSoldYears, downloadSoldCsv,
 } from '../api'
+import { formatApiError } from '../lib/apiError'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -46,7 +47,7 @@ export default function Analytics() {
     setLoading(true)
     getAnalytics({ range, user: user || undefined, model: model || undefined })
       .then(setReport)
-      .catch((e) => setError(e.response?.data?.detail || 'Could not load analytics.'))
+      .catch((e) => setError(formatApiError(e, 'Could not load analytics.')))
       .finally(() => setLoading(false))
   }, [range, user, model])
 
@@ -234,7 +235,7 @@ function ManageData({ users, onDone }) {
       setMsg(`Moved ${n} rows from ${from} to ${to}.`)
       setTimeout(onDone, 1200)
     } catch (e) {
-      setMsg(e.response?.data?.detail || 'Merge failed.')
+      setMsg(formatApiError(e, 'Merge failed.'))
     } finally { setBusy(false) }
   }
 
@@ -247,7 +248,7 @@ function ManageData({ users, onDone }) {
       setMsg(`Deleted ${from}'s data.`)
       setTimeout(onDone, 1200)
     } catch (e) {
-      setMsg(e.response?.data?.detail || 'Delete failed.')
+      setMsg(formatApiError(e, 'Delete failed.'))
     } finally { setBusy(false) }
   }
 
@@ -291,8 +292,7 @@ function ManageData({ users, onDone }) {
       setMsg(parts.join(' '))
       loadStorage()
     } catch (err) {
-      const detail = err.response?.data?.detail
-      setMsg(typeof detail === 'string' ? detail : 'Import failed.')
+      setMsg(formatApiError(err, 'Import failed.'))
     } finally { setBusy(false) }
   }
 
@@ -314,7 +314,7 @@ function ManageData({ users, onDone }) {
       setMsg(r.ok ? `Sheet rewritten: ${r.synced} row${r.synced === 1 ? '' : 's'}.`
                   : r.detail || 'Resync failed.')
     } catch (e) {
-      setMsg(e.response?.data?.detail || 'Resync failed.')
+      setMsg(formatApiError(e, 'Resync failed.'))
     } finally { setBusy(false) }
   }
 
@@ -346,7 +346,7 @@ function ManageData({ users, onDone }) {
       setMsg(`Deleted ${r.deleted} photo${r.deleted === 1 ? '' : 's'}, freed ${(r.freed_bytes / (1024 * 1024)).toFixed(1)} MB.`)
       loadStorage()
     } catch (e) {
-      setMsg(e.response?.data?.detail || 'Cleanup failed.')
+      setMsg(formatApiError(e, 'Cleanup failed.'))
     } finally { setBusy(false) }
   }
 

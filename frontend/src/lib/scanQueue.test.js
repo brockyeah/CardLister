@@ -98,8 +98,21 @@ describe('scanResultPatch', () => {
   })
 
   it('marks a clean result ready and keeps the payload', () => {
-    const result = { player_name: 'Elly De La Cruz', error: '' }
+    const result = { player_name: 'Elly De La Cruz', error: '', image_path: '/uploads/abc.png' }
     expect(scanResultPatch(result)).toEqual({ status: 'ready', result })
+  })
+
+  it.each([
+    { message: 'upstream gateway said hello' },
+    { detail: 'Not Found' },
+    'a raw HTML error page',
+  ])('treats a truthy body that is not a scan response (%p) as an error', (body) => {
+    // `/api/scan` always includes image_path — the upload is stored before
+    // extraction, in mock mode and on failure alike. A 200 without it is a
+    // proxy or gateway body, and `ready` would offer Review over nothing.
+    const patch = scanResultPatch(body)
+    expect(patch.status).toBe('error')
+    expect(patch.error).toBeTruthy()
   })
 
   it.each([undefined, null, '', 0])('treats an empty response (%p) as an error', (empty) => {

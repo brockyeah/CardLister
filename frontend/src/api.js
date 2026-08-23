@@ -157,5 +157,3 @@ export const attachEbayListing = (id, payload) =>
 // --- eBay listing text ---
 export const getEbayListingText = (id) =>
   api.get(`/api/ebay/${id}/listing-text`).then((r) => r.data)
-
-export default api

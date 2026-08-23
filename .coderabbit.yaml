@@ -12,7 +12,7 @@ reviews:
     drafts: false
     base_branches: ["main"]
   path_filters:
-    # Lockfiles here are package-lock.json (root + frontend), not *.lock.
+    # The only lockfile here is frontend/package-lock.json, not *.lock.
     - "!**/package-lock.json"
     - "!**/dist/**"
     - "!**/node_modules/**"

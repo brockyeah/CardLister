@@ -399,6 +399,63 @@
         "serial_number": null
       },
       "expected": "2024 Topps Chrome Julio Rodriguez #150 RC Mariners"
+    },
+    {
+      "name": "NEL and C1 separators split like ordinary spaces",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome\u001cUpdate",
+        "player_name": "Bobby\u0085Witt Jr.",
+        "card_number": "7",
+        "team": "Royals",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Chrome Update Bobby Witt Jr. #7 Royals"
+    },
+    {
+      "name": "BOM is text the title keeps, not whitespace",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": null,
+        "player_name": "\ufeffShohei Ohtani",
+        "card_number": "17",
+        "team": "Dodgers",
+        "is_rookie": false,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps \ufeffShohei Ohtani #17 Dodgers"
+    },
+    {
+      "name": "code-point measurement decides truncation at the cap",
+      "card": {
+        "year": 2024,
+        "brand": "Topps",
+        "set_name": "Chrome Update Sapphire Edition",
+        "player_name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00 Superstar",
+        "card_number": "150",
+        "team": "Dodgers",
+        "is_rookie": true,
+        "is_first_bowman": false,
+        "is_autograph": false,
+        "is_patch": false,
+        "is_refractor": false,
+        "serial_number": null,
+        "parallel_color": null
+      },
+      "expected": "2024 Topps Chrome Update Sapphire Edition \ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
     }
   ]
 }

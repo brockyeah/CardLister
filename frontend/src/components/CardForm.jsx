@@ -37,7 +37,6 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
       setData(next)
       onChange?.(next)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedPrice])
 
   const update = (key, value) => {
