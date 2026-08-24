@@ -63,6 +63,16 @@ reviews:
         - Changing routers/ebay.py build_title is a three-file change
           (build_title, frontend/src/lib/ebayTitle.js, and regenerated
           expected values in backend/tests/fixtures/ebay_title_cases.json).
+        - Changing the condition grades in services/card_fields.py is a
+          three-file change (card_fields.py, frontend/src/lib/condition.js,
+          and backend/tests/fixtures/condition_cases.json). Both suites read
+          that fixture, so a spelling added to one implementation *with* a
+          fixture case fails the other suite loudly — but one added to a
+          single side with no case diverges silently. Flag any recognized
+          spelling that maps onto a different grade than the one it names:
+          normalize_condition may tidy a spelling, never reinterpret it, and
+          it must return unrecognized values byte-for-byte (the CSV formula
+          escape and the export/import round-trip both depend on that).
         Also flag anything that would increase Anthropic token spend without
         saying so — larger images, higher thinking effort, extra model calls.
     - path: "backend/tests/**/*.py"
