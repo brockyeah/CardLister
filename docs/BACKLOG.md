@@ -5,6 +5,81 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
+      (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
+      `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
+      (48), and only stamps `emailed_at` when `mailer.send_email` returns
+      true. So a failing mailer — wrong SMTP credentials after a Railway env
+      edit, a provider outage, a rate limit — retries the same events every
+      cycle until they cross 48h, at which point they leave the pending window
+      **permanently, unemailed, with nothing recording that an alert was
+      dropped**. Being told a prospect got called up while you hold his 1st
+      Bowman is the feature this app was built around, and this is the one
+      failure mode where it stays quiet and looks healthy: `/api/health`
+      reports the poller fresh, because the heartbeat is stamped after a
+      failure too. The window itself is right (it bounds retries); what's
+      missing is the record. Count events aging out unemailed and surface it —
+      log + the existing ntfy `billing_alerts` push is the cheapest version,
+      and it reuses what's already wired (quick win; implement directly;
+      inline — `services/callups.py` plus a test that fails the mailer and
+      advances the clock past the cutoff)
+- [ ] Price *to* a target net, now that the fee math exists (2026-08-25
+      review): the Comps modal's "Set Price to $X" applies the comps median
+      gross, and the seller who wants to clear $20 has to invert
+      13.25% + $0.30 in their head. `estimateFees` has an exact inverse —
+      `price = (target + fixed) / (1 - rate)` — so a small "net target" input
+      beside the apply button turns the modal from a report into the pricing
+      tool it is trying to be. Same pass should decide whether the Inventory
+      **Revenue** tile (gross `sold_price`, `lib/inventoryStats.js`) grows a
+      net-of-fees companion: realized profit computed gross is the number that
+      makes a thin-margin month look fine (quick win; implement directly;
+      inline — `lib/fees.js` + `Inventory.jsx`, and `inventoryStats.js` if the
+      tile is included)
+- [ ] The eBay fee rate cannot actually be changed on the deployed app
+      (2026-08-25 review, honest follow-up to the estimate that shipped the
+      same day): `lib/fees.js` reads `VITE_EBAY_FEE_RATE` /
+      `VITE_EBAY_FEE_FIXED`, but Vite inlines those at **build** time and the
+      Dockerfile's frontend stage passes no build args, so Railway always gets
+      the compiled-in defaults. eBay changes category rates, and a store
+      subscription changes them per seller; when that happens the only lever
+      today is editing the constant and redeploying. Two options, and they
+      differ in more than effort: a Dockerfile `ARG`/`ENV` pair plumbed into
+      `npm run build` keeps it a pure frontend concern but still needs a
+      rebuild to change; serving the rate from the backend alongside the other
+      integration config makes it a restart-free env var and puts it where a
+      future *server-side* net (P&L, tax export) could share it. Pick before
+      building — the second one is the one that scales (quick win; implement
+      directly; inline)
+- [ ] `find_exact_match` only looks at the 100 most recent corrections of a
+      year, so old corrections quietly stop being applied (2026-08-25 review):
+      `services/learning.py` filters `Correction.year == year`, orders by
+      `created_at desc`, `limit(100)`, then scans that page in Python for a
+      brand + card-number match. A baseball inventory concentrates hard in a
+      few years — 2023 Bowman Chrome alone can carry hundreds of corrections —
+      so once one year passes 100 rows, a correction the user made for that
+      exact card becomes invisible and the same misread comes back on the next
+      scan. It fails in the direction that erodes trust in the learning loop
+      without ever erroring, and it gets *worse* the more the tool is used.
+      The fix is to match in SQL rather than paging: a normalized
+      `match_key` column on `Correction` (brand + card # + year, casefolded)
+      written at record time and indexed, with `find_exact_match` querying it
+      directly. That is a schema change on an existing table, so it needs a
+      `_COLUMN_MIGRATIONS` entry and a backfill for existing rows — the
+      backfill is the part worth designing, since the normalization has to
+      match `_norm` exactly or old corrections stay invisible anyway (medium;
+      **design first** — schema + backfill; inline)
+- [ ] Orphaned uploads accumulate with nothing reporting them (2026-08-25
+      review): `/api/scan` writes the upload to the volume before extraction
+      and only records a `Scan` row when the extraction both succeeded and was
+      real (`not is_mock and not error`), so every failed or mock scan leaves a
+      file on the Railway volume referenced by nothing. Deleting it there is
+      wrong — the review form still previews that image — and the cleanup tool
+      shipped 2026-07-30 can sweep them, but nothing tells anyone there is
+      something to sweep, so it only runs when someone thinks to look. The
+      storage tiles on Analytics manage-data already report DB and uploads
+      size; add orphan count and bytes beside them so the existing tool gets
+      used before the volume fills (quick win; implement directly; inline —
+      reuses the cleanup endpoint's own preview query)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -372,11 +447,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
       for spikes (medium; **plan doc first** — new table/schema; inline)
-- [ ] eBay fee + net-proceeds estimate: show the final-value fee (env-configurable
-      rate, default ~13.25% + $0.30) and net proceeds next to the price in the
-      Comps modal and mark-sold dialog — pricing today shows gross only, so
-      thin-margin cards look better than they are (quick win; implement directly —
-      display-only math, no schema; inline)
 - [ ] Condition dropdown with canonical values: `condition` is a free-text input
       (defaults "NM"), so typos like "nm "/"Near Mint" fragment the data; replace
       with a select (RAW, GEM-MT, NM-MT, NM, EX, VG, POOR) and normalize known
@@ -569,6 +639,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
+      Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
+      when the seller receives $8.37. `lib/fees.js` holds the rate (13.25% +
+      $0.30, overridable at build time) and the estimate; Mark as Sold tracks
+      the price as it is typed, a loss below ~$0.35 renders as a negative net
+      rather than being clamped to zero, and an unusable price shows the comps
+      list's em dash instead of a plausible `$0.00`. Verified in a browser, not
+      just in tests. Two follow-ups are open above: pricing *to* a target net,
+      and making the rate settable on the Railway image.
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`

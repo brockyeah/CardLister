@@ -10,6 +10,29 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `claude/sweet-rubin-haleik`
+
+### Added
+- Every price the app puts in front of a pricing decision is gross, and eBay
+  takes ~13.25% + $0.30 off the top of a sale. The Comps modal and the Mark as
+  Sold dialog now show the estimated net beside the figure they already
+  showed: comps say $10, the seller receives $8.37. The gap is proportionally
+  worst on the cheap raw cards that make up most of the inventory — the flat
+  $0.30 alone is 3% of a $10 sale, and below about $0.35 the fee exceeds the
+  sale entirely, which the estimate reports as a negative net rather than
+  rounding it up to zero. In Mark as Sold the figure tracks the price as it is
+  typed, so it lands while the seller is deciding whether to accept the number,
+  not afterwards. It is labelled an estimate everywhere it renders and says
+  what it leaves out: eBay charges the fee on shipping the buyer pays too, and
+  promoted-listing fees are not modelled, so real proceeds run a little lower.
+  An unusable price shows the same em dash the comps list uses rather than a
+  plausible-looking `$0.00`. The rate lives in one place (`lib/fees.js`) and
+  honours a `VITE_EBAY_FEE_RATE` / `VITE_EBAY_FEE_FIXED` build override for
+  local and self-hosted builds, rejecting a percentage written where a
+  fraction belongs — `13.25` would charge 1325% and turn every net negative.
+  The production Dockerfile passes no build args, so a Railway deploy uses the
+  defaults; wiring the override through the image is a backlog item.
+
 ## [Unreleased] — branch `fix/scan-nullish-result`
 
 ### Fixed
