@@ -26,9 +26,24 @@ only in `[Unreleased]` on a branch is not in prod yet.
   what it leaves out: eBay charges the fee on shipping the buyer pays too, and
   promoted-listing fees are not modelled, so real proceeds run a little lower.
   An unusable price shows the same em dash the comps list uses rather than a
-  plausible-looking `$0.00`. The rate lives in one place (`lib/fees.js`) and
-  honours a `VITE_EBAY_FEE_RATE` / `VITE_EBAY_FEE_FIXED` build override for
-  local and self-hosted builds, rejecting a percentage written where a
+  plausible-looking `$0.00`.
+- Both halves of eBay's fee are **tiered**, and modelling either as a flat
+  number is wrong inside this inventory's ordinary range. The per-order charge
+  is $0.30 at or under $10 and **$0.40 above it**, so a flat $0.30 understated
+  the fee on every card over $10 — most of them; a $24.99 card nets $21.28,
+  not $21.38. The percentage is 13.25% up to $7,500 and 2.35% only on the
+  portion **above** that, applied per tier rather than as one rate chosen by
+  the total: a $10,000 card pays 13.25% on the first $7,500 and 2.35% on the
+  rest, and charging the low rate on the whole sale would understate the fee
+  by ~$820 on exactly the card where the number matters most. eBay's standing
+  50%-off promotion on singles at $1,000+ is deliberately not modelled — it is
+  a promotion rather than the schedule, and an estimate that errs optimistic
+  is worse than useless on a pricing decision. Every rate and threshold is
+  printed under the figure, so a stale rate is visible the day eBay changes
+  one. The flat-fee bug was caught by CodeRabbit on the PR and confirmed
+  against eBay's published 2026 schedule before the math changed.
+- The schedule lives in one place (`lib/fees.js`) and each field honours a
+  `VITE_EBAY_FEE_*` build override, rejecting a percentage written where a
   fraction belongs — `13.25` would charge 1325% and turn every net negative.
   The production Dockerfile passes no build args, so a Railway deploy uses the
   defaults; wiring the override through the image is a backlog item.

@@ -10,7 +10,7 @@ import {
 } from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
-import { FEE_DISCLAIMER, estimateFees, formatFeeBasis, formatNet } from '../lib/fees.js'
+import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value, hint }) {
@@ -64,8 +64,7 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
           {estimateFees(price) && (
             <div className="text-xs text-gray-400 mt-1">
               Est. net after eBay fees: <span className="font-bold text-gray-200">{formatNet(price)}</span>
-              <span className="text-gray-500"> ({formatFeeBasis()})</span>
-              <div className="text-gray-500 mt-0.5">{FEE_DISCLAIMER}</div>
+              <div className="text-gray-500 mt-0.5">{feeDisclaimer()}</div>
             </div>
           )}
         </div>
@@ -229,11 +228,11 @@ function CompsModal({ card, onClose, onApplyPrice }) {
                 and it decides the repricing this modal exists to do. */}
             {(estimateFees(card.listed_price) || estimateFees(suggested)) && (
               <div className="text-xs text-gray-400 mb-3">
-                Est. net after eBay fees ({formatFeeBasis()}):{' '}
+                Est. net after eBay fees:{' '}
                 <span className="font-bold text-gray-200">{formatNet(card.listed_price)}</span> listed
                 {' · '}
                 <span className="font-bold text-gray-200">{formatNet(suggested)}</span> at comps
-                <div className="text-gray-500 mt-0.5">{FEE_DISCLAIMER}</div>
+                <div className="text-gray-500 mt-0.5">{feeDisclaimer()}</div>
               </div>
             )}
 

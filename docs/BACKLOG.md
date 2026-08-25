@@ -25,11 +25,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       advances the clock past the cutoff)
 - [ ] Price *to* a target net, now that the fee math exists (2026-08-25
       review): the Comps modal's "Set Price to $X" applies the comps median
-      gross, and the seller who wants to clear $20 has to invert
-      13.25% + $0.30 in their head. `estimateFees` has an exact inverse —
-      `price = (target + fixed) / (1 - rate)` — so a small "net target" input
-      beside the apply button turns the modal from a report into the pricing
-      tool it is trying to be. Same pass should decide whether the Inventory
+      gross, and the seller who wants to clear $20 has to invert the fee
+      schedule in their head. `estimateFees` inverts exactly but **piecewise**
+      — `price = (target + fixed) / (1 - rate)` holds only within one tier, and
+      the candidate price has to be re-checked against both the $10 per-order
+      step and the $7,500 rate tier (and re-solved in the other band when it
+      crosses), which is the part to get right rather than eyeball. A small
+      "net target" input beside the apply button then turns the modal from a
+      report into the pricing tool it is trying to be. Same pass should decide whether the Inventory
       **Revenue** tile (gross `sold_price`, `lib/inventoryStats.js`) grows a
       net-of-fees companion: realized profit computed gross is the number that
       makes a thin-margin month look fine (quick win; implement directly;
@@ -641,13 +644,16 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 - [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
       Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
-      when the seller receives $8.37. `lib/fees.js` holds the rate (13.25% +
-      $0.30, overridable at build time) and the estimate; Mark as Sold tracks
-      the price as it is typed, a loss below ~$0.35 renders as a negative net
-      rather than being clamped to zero, and an unusable price shows the comps
-      list's em dash instead of a plausible `$0.00`. Verified in a browser, not
-      just in tests. Two follow-ups are open above: pricing *to* a target net,
-      and making the rate settable on the Railway image.
+      when the seller receives $8.37. `lib/fees.js` holds the schedule — both
+      halves tiered, 13.25% to $7,500 then 2.35% on the portion above, $0.30
+      per order at or under $10 and $0.40 above — and the estimate; Mark as
+      Sold tracks the price as it is typed, a loss below ~$0.35 renders as a
+      negative net rather than being clamped to zero, and an unusable price
+      shows the comps list's em dash instead of a plausible `$0.00`. Verified
+      in a browser, not just in tests. The tiering was a CodeRabbit catch on
+      the PR: the first cut charged a flat $0.30, understating the fee on every
+      card over $10. Two follow-ups are open above: pricing *to* a target net,
+      and making the schedule settable on the Railway image.
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`
