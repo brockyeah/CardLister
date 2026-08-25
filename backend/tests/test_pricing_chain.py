@@ -7,6 +7,7 @@ describing whatever it became. Nothing else covers this endpoint.
 Patches module attributes on `routers.pricing` — the router binds the fetchers
 with `from ... import`, so patching the service module would not be seen.
 """
+import threading
 import time
 from unittest.mock import patch
 
@@ -186,13 +187,28 @@ def test_sources_run_concurrently_not_serially():
 
 
 def test_deadline_bounds_a_hanging_lookup():
-    """A source that never answers cannot hold the request open indefinitely."""
+    """A source that never answers cannot hold the request open indefinitely.
+
+    The hanging sources block on an Event rather than sleeping: an abandoned
+    worker is a non-daemon thread that the interpreter joins at exit, so a bare
+    `time.sleep(30)` here would add 30s of invisible wall clock to every run of
+    the whole backend suite — time pytest does not report, which reads as a hung
+    runner. Releasing them in `finally` costs nothing and proves the same thing.
+    """
+    release = threading.Event()
+
+    def hangs(value):
+        def fetch(**kwargs):
+            release.wait(timeout=30)   # released in finally; the cap is a backstop
+            return value
+        return fetch
+
     patches = [
         patch.object(pricing, "PRICING_DEADLINE_SECONDS", 0.3),
         patch.object(pricing, "ebay_api_configured", lambda: False),
-        patch.object(pricing, "fetch_130point_comps", _slow(30, ([COMP], 1.0, None))),
-        patch.object(pricing, "fetch_mavin_comps", _slow(30, ([COMP], 1.0, "mavin", None))),
-        patch.object(pricing, "fetch_ebay_sold_comps", _slow(30, ([COMP], 1.0, None))),
+        patch.object(pricing, "fetch_130point_comps", hangs(([COMP], 1.0, None))),
+        patch.object(pricing, "fetch_mavin_comps", hangs(([COMP], 1.0, "mavin", None))),
+        patch.object(pricing, "fetch_ebay_sold_comps", hangs(([COMP], 1.0, None))),
     ]
     for p in patches:
         p.start()
@@ -203,6 +219,7 @@ def test_deadline_bounds_a_hanging_lookup():
             body = client.post("/api/pricing", json=QUERY, headers=headers).json()
             elapsed = time.monotonic() - started
     finally:
+        release.set()          # let the abandoned workers exit immediately
         for p in patches:
             p.stop()
     assert elapsed < 5, f"took {elapsed:.2f}s — the deadline did not bound it"

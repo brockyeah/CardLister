@@ -27,9 +27,13 @@ Two deliberate choices worth keeping:
   `concurrent.futures.wait(...)` first. `wait()` defaults to ALL_COMPLETED, so
   waiting up front would make *every* lookup as slow as the slowest source and
   give back most of the win.
-* The executor is per-request and shut down without waiting. A module-level
-  pool keeps non-daemon workers that the interpreter joins at exit, so an
-  abandoned request would delay container shutdown (uvicorn is PID 1).
+* The executor is per-request and shut down without waiting, so pools do not
+  accumulate across requests. Note what this does NOT buy: `cancel_futures`
+  cannot cancel work already running, and the workers are non-daemon, so the
+  interpreter still joins an abandoned source at exit. The real bound on
+  shutdown is each source's own network timeout — which is why those must stay
+  bounded, and why a module-level pool would be strictly worse (its workers
+  outlive every request, not just one).
 """
 import concurrent.futures
 import logging
