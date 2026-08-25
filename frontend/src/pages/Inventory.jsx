@@ -10,6 +10,7 @@ import {
 } from '../lib/inventoryStats'
 import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
+import { FEE_DISCLAIMER, estimateFees, formatFeeBasis, formatNet } from '../lib/fees.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 function StatTile({ label, value, hint }) {
@@ -57,6 +58,16 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
             autoFocus
             required
           />
+          {/* The payout, not the sale. Live off the input so the number moves
+              with the price being typed — the moment the seller is deciding
+              whether the sale was worth making. */}
+          {estimateFees(price) && (
+            <div className="text-xs text-gray-400 mt-1">
+              Est. net after eBay fees: <span className="font-bold text-gray-200">{formatNet(price)}</span>
+              <span className="text-gray-500"> ({formatFeeBasis()})</span>
+              <div className="text-gray-500 mt-0.5">{FEE_DISCLAIMER}</div>
+            </div>
+          )}
         </div>
         <div className="mb-5">
           <label className="label">Sold On</label>
@@ -212,6 +223,19 @@ function CompsModal({ card, onClose, onApplyPrice }) {
                 )}
               </div>
             </div>
+
+            {/* Both tiles above are gross. eBay's cut is what separates a
+                price that looks like the comps from one that pays like them,
+                and it decides the repricing this modal exists to do. */}
+            {(estimateFees(card.listed_price) || estimateFees(suggested)) && (
+              <div className="text-xs text-gray-400 mb-3">
+                Est. net after eBay fees ({formatFeeBasis()}):{' '}
+                <span className="font-bold text-gray-200">{formatNet(card.listed_price)}</span> listed
+                {' · '}
+                <span className="font-bold text-gray-200">{formatNet(suggested)}</span> at comps
+                <div className="text-gray-500 mt-0.5">{FEE_DISCLAIMER}</div>
+              </div>
+            )}
 
             {compWarning && <div className="text-xs text-yellow-400 mb-3">{compWarning}</div>}
 
