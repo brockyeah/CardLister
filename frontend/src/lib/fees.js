@@ -153,10 +153,19 @@ export function formatFeeSchedule(schedule = FEE_SCHEDULE) {
   )
 }
 
-/** What the estimate leaves out. Shown with every net figure. */
+/**
+ * What the estimate leaves out. Shown with every net figure.
+ *
+ * Names both other components of eBay's fee base, not just shipping: the fee
+ * is charged on the total the buyer pays, which includes the sales tax eBay
+ * collects and remits — money the seller never receives but is charged a
+ * percentage of. Every omission here pushes the real payout *below* this
+ * estimate, so the disclosure has to be complete or the figure reads as a
+ * floor when it is a ceiling.
+ */
 export const FEE_CAVEAT =
-  'Estimate on the item price only — eBay also charges the fee on shipping the buyer pays, ' +
-  'and promoted-listing fees are not included.'
+  'Estimate on the item price only — eBay also charges the fee on the shipping and sales tax ' +
+  'the buyer pays, and promoted-listing fees are not included.'
 
 /** The full note rendered beneath a net: the schedule, then the caveat. */
 export function feeDisclaimer(schedule = FEE_SCHEDULE) {

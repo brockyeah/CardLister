@@ -23,7 +23,9 @@ only in `[Unreleased]` on a branch is not in prod yet.
   rounding it up to zero. In Mark as Sold the figure tracks the price as it is
   typed, so it lands while the seller is deciding whether to accept the number,
   not afterwards. It is labelled an estimate everywhere it renders and says
-  what it leaves out: eBay charges the fee on shipping the buyer pays too, and
+  what it leaves out: eBay charges the fee on the total the buyer pays, which
+  includes shipping and the sales tax eBay collects and remits — money the
+  seller never receives but is charged a percentage of — and
   promoted-listing fees are not modelled, so real proceeds run a little lower.
   An unusable price shows the same em dash the comps list uses rather than a
   plausible-looking `$0.00`.

@@ -118,12 +118,15 @@ describe('formatFeeSchedule', () => {
 describe('feeDisclaimer', () => {
   it('carries both the schedule and what the estimate leaves out', () => {
     // The figure is computed from the item price alone; eBay charges the fee
-    // on shipping too. Wherever a net renders, this renders with it.
+    // on the whole amount the buyer pays. Wherever a net renders, this renders
+    // with it, and it has to name every part of the fee base it excludes —
+    // each omission pushes the real payout below the estimate.
     const note = feeDisclaimer(S)
     expect(note).toContain(formatFeeSchedule(S))
     expect(note).toContain(FEE_CAVEAT)
     expect(FEE_CAVEAT).toMatch(/item price only/i)
     expect(FEE_CAVEAT).toMatch(/shipping/i)
+    expect(FEE_CAVEAT).toMatch(/sales tax/i)
   })
 })
 
