@@ -135,6 +135,50 @@ def test_cheatsheet_keeps_the_same_field_across_different_sets(db_session):
     assert "2024 Bowman Draft:" in sheet
 
 
+def test_cheatsheet_separates_sets_whose_context_lines_collide(db_session):
+    # Vision splits one physical set two ways across scans, so brand "Bowman" +
+    # set "Chrome Prospects" and brand "Bowman Chrome" + set "Prospects" both
+    # render "2024 Bowman Chrome Prospects". Keying dedup on that joined string
+    # would drop one of two genuinely different sets' lessons.
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-1", created_at=datetime(2026, 8, 1, 12, 0, 0),
+        diff_json=json.dumps({"card_number": {"from": "1", "to": "BCP-1"}}),
+    ))
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman Chrome", set_name="Prospects",
+        card_number="BCP-2", created_at=datetime(2026, 8, 8, 12, 0, 0),
+        diff_json=json.dumps({"card_number": {"from": "2", "to": "BCP-2"}}),
+    ))
+    db_session.commit()
+
+    sheet = build_cheatsheet(db_session)
+    assert sheet.count("\n") == 1, f"expected both sets' rules, got:\n{sheet}"
+    assert "to 'BCP-1'" in sheet
+    assert "to 'BCP-2'" in sheet
+
+
+def test_cheatsheet_treats_case_and_space_variants_as_one_set(db_session):
+    # The mirror image of the collision above: "Bowman" and "bowman " are the
+    # same set, so two corrections of the same field there are contradictory
+    # and must collapse to the newest rather than becoming competing rules.
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome",
+        card_number="BCP-1", created_at=datetime(2026, 8, 1, 12, 0, 0),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.add(Correction(
+        username="tester", year=2024, brand="bowman ", set_name=" CHROME",
+        card_number="BCP-2", created_at=datetime(2026, 8, 8, 12, 0, 0),
+        diff_json=json.dumps({"set_name": {"from": "Chrome Prospects", "to": "Chrome"}}),
+    ))
+    db_session.commit()
+
+    sheet = build_cheatsheet(db_session)
+    assert sheet.count("\n") == 0, f"expected one rule, got:\n{sheet}"
+    assert "corrected it to 'Chrome'" in sheet  # the newer one
+
+
 def test_create_card_with_scan_id_records_correction(db_session):
     from backend.main import app
 

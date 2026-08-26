@@ -85,6 +85,16 @@ def build_cheatsheet(db: Session) -> str:
     is *for*: the module docstring scopes it to naming and numbering
     conventions, which have one current answer per set. Per-card facts are the
     exact-match overlay's job (`find_exact_match`), not the cheat-sheet's.
+
+    The key is the normalized (year, brand, set_name) *tuple*, not the rendered
+    context line. Joining first is ambiguous, and ambiguous in a way this app
+    produces: vision splits one physical set two ways across scans, so brand
+    "Bowman" + set "Chrome Prospects" and brand "Bowman Chrome" + set
+    "Prospects" both render "2024 Bowman Chrome Prospects" — and keying on that
+    string would drop one of two genuinely different sets' lessons. Normalizing
+    each part closes the mirror-image gap: "Bowman" and "bowman " *are* the same
+    set, so they must share a key rather than yield two competing rules
+    (CodeRabbit, PR #63).
     """
     rows = (
         db.query(Correction)
@@ -99,8 +109,10 @@ def build_cheatsheet(db: Session) -> str:
     for row in rows:
         diff = json.loads(row.diff_json or "{}")
         context = " ".join(str(p) for p in (row.year, row.brand, row.set_name) if p) or "unknown set"
+        # Rendered for display; deduped on the fields themselves (see docstring).
+        context_key = (_norm(row.year), _norm(row.brand), _norm(row.set_name))
         for field, change in diff.items():
-            key = (context, field)
+            key = (context_key, field)
             if key in seen:
                 continue
             seen.add(key)

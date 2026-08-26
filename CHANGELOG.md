@@ -19,7 +19,7 @@ each opened to date it, so a fourth edit of that one line would be a fourth
 conflicting change to the same heading. Whichever of those merges owns it.
 -->
 
-#### Added
+### Added
 - Production health is now watched from somewhere that can actually reach it.
   Phase 1 of the daily routine pings `/api/health` itself, but that routine
   runs in a scheduled cloud sandbox whose egress proxy answers 403 to CONNECT
@@ -35,7 +35,7 @@ conflicting change to the same heading. Whichever of those merges owns it.
   to ignore; persistent lag shows up as the same warning run after run. The
   routine keeps its own attempt, since when it works it is free and immediate.
 
-#### Fixed
+### Fixed
 - The scan cheat-sheet no longer teaches the model both halves of a reversed
   correction. `build_cheatsheet` deduped on the **whole rendered rule string**,
   so correcting a field one way and later correcting it back produced two rules
