@@ -45,6 +45,12 @@ jobs:
           # Recorded in README.md as the production URL. Kept as an env var so
           # an environment rename is a one-line change here.
           HEALTH_URL: https://cardlister-production.up.railway.app/api/health
+          # Both always set (never unset — `set -u` is active), so the script
+          # can compare them without a guard. DEFAULT_BRANCH can still be an
+          # empty string if the event payload carries no repository object;
+          # the script treats empty as "don't skip" and compares as before.
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -uo pipefail
 
@@ -70,10 +76,28 @@ jobs:
             exit 1
           fi
 
-          ok=$(jq -r '.ok // false' body.json)
-          db=$(jq -r '.db // false' body.json)
-          stale=$(jq -r '.poller.stale // false' body.json)
-          enabled=$(jq -r '.poller.enabled // false' body.json)
+          # Shape check before any value is trusted. The `// false` defaults
+          # below are not uniformly safe: for `ok`/`db` a missing field
+          # defaults to false and *fails*, but for `stale` a missing field
+          # defaults to false meaning "not stale", which **passes**. So a
+          # response with no `poller` object at all — a partial body, or a
+          # future rename of the field — would report perfectly healthy while
+          # the poller was dead. That is the fail-open this whole workflow
+          # exists to escape, so an unexpected shape is a failure, never a pass.
+          if ! jq -e '(.ok | type == "boolean")
+                      and (.db | type == "boolean")
+                      and (.poller | type == "object")
+                      and (.poller.stale | type == "boolean")' body.json >/dev/null 2>&1; then
+            echo "::error::/api/health did not return the expected fields (ok, db and poller.stale as booleans). The probe cannot judge health from this body, which counts as a failure rather than a pass."
+            echo "❌ Production health: unexpected response shape — cannot judge health." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          ok=$(jq -r '.ok' body.json)
+          db=$(jq -r '.db' body.json)
+          stale=$(jq -r '.poller.stale' body.json)
+          # Presentational only, so a default is fine for these three.
+          enabled=$(jq -r '.poller.enabled // "unknown"' body.json)
           last=$(jq -r '.poller.last_cycle_at // "never"' body.json)
           revision=$(jq -r '.revision // "unknown"' body.json)
 
@@ -88,7 +112,7 @@ jobs:
             echo "| poller stale | \`$stale\` |"
             echo "| poller last cycle | \`$last\` |"
             echo "| revision | \`$revision\` |"
-            echo "| main HEAD | \`${GITHUB_SHA:0:7}\` |"
+            echo "| this run's ref | \`$REF_NAME\` @ \`${GITHUB_SHA:0:7}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           failed=0
@@ -114,7 +138,18 @@ jobs:
           # flap red on every merge and train everyone to ignore this workflow.
           # Lag that persists shows up as the same warning on run after run,
           # which is the signal worth acting on.
-          if [ "$revision" != "unknown" ] && [ "${GITHUB_SHA:0:7}" != "$revision" ]; then
+          #
+          # Only meaningful when GITHUB_SHA *is* what production should be
+          # running. A scheduled run is always on the default branch, but
+          # workflow_dispatch can be fired from any ref, and comparing the
+          # deployed revision against a feature branch's HEAD would warn about
+          # a mismatch that is entirely expected. Skip it there and say so
+          # rather than emit a warning that means nothing.
+          if [ -n "$DEFAULT_BRANCH" ] && [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "Deploy-lag comparison skipped: this run is on '$REF_NAME', not '$DEFAULT_BRANCH', so its SHA is not what production should be running."
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "ℹ️ Deploy-lag comparison skipped — run is on \`$REF_NAME\`, not \`$DEFAULT_BRANCH\`." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$revision" != "unknown" ] && [ "${GITHUB_SHA:0:7}" != "$revision" ]; then
             echo "::warning::Deployed revision $revision does not match main HEAD ${GITHUB_SHA:0:7} — a deploy may have failed, or one is still building."
             echo >> "$GITHUB_STEP_SUMMARY"
             echo "⚠️ Deployed revision \`$revision\` != main HEAD \`${GITHUB_SHA:0:7}\` (still building, or the deploy failed)." >> "$GITHUB_STEP_SUMMARY"
