@@ -5,6 +5,68 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] A call-up is judged against inventory once, at first sight, and never
+      re-judged (2026-08-26 review): `run_poll_cycle` calls
+      `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
+      continue` branch — that is, only for a transaction it has never seen —
+      and stores `inventory_match` / `matched_card_count` /
+      `first_bowman_count` on the row permanently. The pending-alert filter
+      then reads the *stored* flag (`is_alertable(e.type_desc,
+      e.inventory_match)`), so a **Recalled** transaction for a player whose
+      cards the owner had not scanned yet is stamped un-alertable and stays
+      that way, even though the 48h retry window is still open and the card is
+      now in the database. The order of events is the normal one, not an edge
+      case: news of a call-up is often *why* the owner goes and scans that
+      player's cards. The same staleness shows in the Prospect Wire ticker for
+      its whole 7-day window — the "You Own 3" and "1st Bowman ×1" badges are
+      the sell signal the app exists to surface, and they never appear for a
+      card acquired after the transaction posted. Fix: recompute the three
+      counts for un-emailed in-window events at the top of each cycle (the
+      pending set is small and `count_inventory_matches` already scans all
+      cards), and re-derive the ticker's badges rather than trusting the
+      stamp. Decide as part of it whether *emailed* events should also refresh
+      their badges for the ticker's benefit — the alert has already gone out,
+      but the ticker is still lying (medium; implement directly; inline —
+      `services/callups.py` plus a test that adds a matching card between two
+      poll cycles and asserts the second one alerts)
+- [ ] The prospect-news cache never caches an empty result, so an empty digest
+      re-fetches every RSS feed on every page load (2026-08-26 review):
+      `fetch_articles` guards with `if _cache["articles"] and now -
+      _cache["at"] < _CACHE_TTL`, keying freshness on the *truthiness of the
+      payload* rather than on the timestamp it stores right beside it. An
+      empty result therefore never satisfies the guard, and empty is not the
+      rare case — it happens when both feeds fail (each a 10s timeout, so ~20s
+      of blocked worker thread per request) and it happens all winter, when no
+      MLB headline scores above the `score_article(a) > 0` floor. `NewsSection`
+      fires `GET /api/news` on every Scanner mount, so the app re-fetches both
+      feeds on every page load precisely when fetching is most expensive and
+      least likely to work. Key the guard on `_cache["at"]` instead, so a
+      result — including an empty one — is honoured for its TTL; consider a
+      shorter negative TTL so a transient feed outage recovers sooner than a
+      genuine offseason lull (quick win; implement directly; inline —
+      `services/prospect_news.py` plus a test that a second call inside the TTL
+      does not re-fetch after an empty first call)
+- [ ] Nothing checks the workflow files, and a broken one fails *open*
+      (2026-08-26 review, prompted by adding `health.yml`): the repo now runs
+      four workflows, two of which carry non-trivial embedded shell — the new
+      health probe is ~60 lines of bash with `jq` parsing. A YAML typo or an
+      unquoted expansion in one of them surfaces only when the schedule fires,
+      and for a *watchdog* workflow the failure mode is the worst one
+      available: it silently stops reporting, which is indistinguishable from
+      production being healthy. `actionlint` catches both halves in one pass —
+      it validates workflow schema and expression syntax, and it runs
+      `shellcheck` over every `run:` block. One fast job, no new services
+      (quick win; implement directly; inline — a job in `ci.yml`; expect to fix
+      a handful of existing quoting warnings on the first run)
+- [ ] Every Prospect Wire headline prints its source twice (2026-08-26
+      review): `NewsSection.jsx` renders `{a.source}` as the emerald uppercase
+      kicker above the headline (line ~112) and again in the gray byline below
+      the summary (line ~132), so every article reads "MLB.com … MLB.com ·
+      2d ago". The byline almost certainly meant to carry the age alone — the
+      kicker already owns the attribution. Cosmetic, but it is on the page the
+      owner opens every time he scans a card (quick win; implement directly;
+      inline — `NewsSection.jsx` only; no test infrastructure exists for
+      components, so verify by build + eye)
 - [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
       (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
       `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
@@ -97,22 +159,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       size; add orphan count and bytes beside them so the existing tool gets
       used before the volume fills (quick win; implement directly; inline —
       reuses the cleanup endpoint's own preview query)
-- [ ] The cheat-sheet teaches the model both halves of a reversed correction
-      (2026-08-24 review): `build_cheatsheet` (`services/learning.py:74-87`)
-      dedups on the **whole rendered rule string**, so two corrections of the
-      same field in the same set produce two different strings and both survive
-      into the prompt. Correct "Chrome" → "Chrome Prospects" today and
-      "Chrome Prospects" → "Chrome" next week — because the first fix was
-      wrong — and every subsequent scan carries a pair of contradictory
-      instructions for the same field, with nothing marking the newer one as
-      the one that stands. Rows are already ordered `created_at desc`, so the
-      fix is a one-line change of the dedup key to `(context, field)`: the
-      first rule seen for a field is the newest and the only one that should
-      be taught. It also stops a much-corrected field from eating the 30-rule
-      budget and crowding out every other lesson, and it gets *worse* the
-      longer the app is used — the contradiction rate rises with the
-      correction count (quick win; implement directly; inline — learning.py
-      plus a test that a reversed correction yields one rule, not two)
 - [ ] A failed row-number parse duplicates a card in the Sheets mirror
       (2026-08-24 review): `sync_card`'s append branch
       (`services/google_sheets.py:292-306`) writes the row, then parses
@@ -268,21 +314,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       pinned in the test makes the insert fail and the append pass. Decide with
       it what the migrations baseline is (earliest deployed shape vs. today's
       production shape) (medium; implement directly; inline)
-- [ ] Production health monitoring does not depend on the routine's network
-      policy (2026-08-20 review, hit during that run): Phase 1 of the daily
-      routine pings
-      `https://cardlister-production.up.railway.app/api/health`, and from the
-      scheduled cloud sandbox that request is refused by the egress proxy
-      (403 to CONNECT), so the health check silently cannot run — the one step
-      of the routine meant to notice a failed deploy or a stale call-up poller.
-      Nothing is wrong with the app; the check just has no route to it. Move
-      the ping into a scheduled GitHub Actions workflow that fails the run when
-      `ok`/`db` is false or the poller is stale, so health is watched from
-      somewhere that can reach it and a failure shows up as a red run rather
-      than a missing sentence in a report. Keep the routine's own attempt —
-      when it works it is free — but have it report the block explicitly rather
-      than the result (quick win; implement directly; inline — new workflow
-      plus a note in `docs/notes/daily-routine-prompt.md`)
 - [ ] Mark-sold accepts a date in the future (2026-08-20 review, found while
       fixing the UTC default): the picker carries no `max`, and
       `MarkSoldRequest` validates only `sold_price > 0` — nothing bounds
@@ -864,6 +895,24 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-08-26 — Production health is watched from somewhere that can reach
+      it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
+      and fails the run on a non-200, an unreachable or non-JSON response, an
+      `ok`/`db` false, or a stale call-up poller. Deploy lag (a `revision` that
+      does not match main HEAD) warns rather than fails, so a merge does not
+      flap the check red while Railway is still building. The daily routine's
+      own ping stays, but it runs from a sandbox whose egress proxy 403s the
+      Railway host, so the check it was meant to perform had simply been
+      silently skipped — and a missing sentence in a report nobody diffs is a
+      worse failure shape than a red run
+- [x] 2026-08-26 — The cheat-sheet teaches only the newest correction per
+      field: `build_cheatsheet` deduped on the rendered rule string, so
+      reversing a correction left both halves in every later scan prompt with
+      nothing marking which one still stood. Dedup is now `(context, field)`
+      over newest-first rows, which also stops one much-corrected field from
+      eating the 30-rule budget. `created_at` ties now break on `id` in both
+      `build_cheatsheet` and `find_exact_match`, so "newest wins" is
+      deterministic rather than left to SQLite's row order
 - [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
       Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
       when the seller receives $8.37. `lib/fees.js` holds the schedule — both
