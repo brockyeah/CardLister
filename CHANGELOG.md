@@ -41,15 +41,25 @@ conflicting change to the same heading. Whichever of those merges owns it.
   so correcting a field one way and later correcting it back produced two rules
   that read as contradictory instructions, with nothing marking which one still
   stood — and the contradiction rate rose with the correction count, so it got
-  worse the longer the app was used. Dedup is now on `(context, field)` over
-  newest-first rows, so the surviving rule for a field in a set is the most
-  recent correction. That also stops one much-corrected field from consuming
-  the 30-rule budget and crowding out every lesson from every other set, which
-  is the quieter half of the same bug. Collapsing to the newest is right for
-  what this digest is scoped to — naming and numbering *conventions*, which
-  have one current answer per set; per-card facts are the exact-match overlay's
-  job, not the cheat-sheet's, and dedup stays per `(context, field)` so two
-  different sets each keep their own rule.
+  worse the longer the app was used. Dedup is now on the set plus the field,
+  over newest-first rows, so the surviving rule for a field in a set is the
+  most recent correction. That also stops one much-corrected field from
+  consuming the 30-rule budget and crowding out every lesson from every other
+  set, which is the quieter half of the same bug. Collapsing to the newest is
+  right for what this digest is scoped to — naming and numbering *conventions*,
+  which have one current answer per set; per-card facts are the exact-match
+  overlay's job, not the cheat-sheet's, and dedup is per set, so two different
+  sets each keep their own rule.
+- The set half of that key is the **normalized `(year, brand, set_name)`
+  tuple**, not the rendered context line, because joining those three first is
+  ambiguous in a way this app produces: vision splits one physical set two ways
+  across scans, so brand `Bowman` + set `Chrome Prospects` and brand
+  `Bowman Chrome` + set `Prospects` both render `2024 Bowman Chrome Prospects`.
+  Keying on that string dropped one of two genuinely different sets' lessons.
+  Normalizing each part closes the mirror image at the same time — `Bowman` and
+  `bowman ` *are* the same set, so they must share a key rather than yield two
+  competing rules, which is the same `_norm` identity comparison the rest of
+  the module already uses. The rendered line stays, for display only.
 - `created_at` ties now break on `id` in both `build_cheatsheet` and
   `find_exact_match`. Both queries mean "the latest correction wins", and both
   left same-timestamp rows to resolve in whatever order SQLite happened to
