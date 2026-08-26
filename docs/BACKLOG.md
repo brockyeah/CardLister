@@ -53,24 +53,30 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       future *server-side* net (P&L, tax export) could share it. Pick before
       building — the second one is the one that scales (quick win; implement
       directly; inline)
-- [ ] `find_exact_match` only looks at the 100 most recent corrections of a
-      year, so old corrections quietly stop being applied (2026-08-25 review):
-      `services/learning.py` filters `Correction.year == year`, orders by
-      `created_at desc`, `limit(100)`, then scans that page in Python for a
-      brand + card-number match. A baseball inventory concentrates hard in a
-      few years — 2023 Bowman Chrome alone can carry hundreds of corrections —
-      so once one year passes 100 rows, a correction the user made for that
-      exact card becomes invisible and the same misread comes back on the next
-      scan. It fails in the direction that erodes trust in the learning loop
-      without ever erroring, and it gets *worse* the more the tool is used.
-      The fix is to match in SQL rather than paging: a normalized
-      `match_key` column on `Correction` (brand + card # + year, casefolded)
-      written at record time and indexed, with `find_exact_match` querying it
-      directly. That is a schema change on an existing table, so it needs a
-      `_COLUMN_MIGRATIONS` entry and a backfill for existing rows — the
-      backfill is the part worth designing, since the normalization has to
-      match `_norm` exactly or old corrections stay invisible anyway (medium;
-      **design first** — schema + backfill; inline)
+- [ ] `find_exact_match` silently stops applying old corrections as a year
+      fills up (found 2026-08-24, re-filed 2026-08-25 — one bug, two entries,
+      merged here): `services/learning.py:99-110` filters
+      `Correction.year == year`, orders by `created_at desc`, `limit(100)`,
+      then linear-scans that page in Python for a brand + card-number match.
+      A baseball inventory concentrates hard in a few years — 2023 Bowman
+      Chrome alone can carry hundreds of corrections — so once one year passes
+      100 rows, a correction the user made for that exact card falls out of the
+      window and the overlay just stops happening. No error, no note: the
+      learning loop quietly degrades for the earliest cards, which are exactly
+      the ones the user is most likely to have already taught, and it gets
+      worse the more the tool is used.
+      **Fix: move the match into SQL and drop the limit** — both fields are
+      already normalized on write (`_norm` casefolds and strips), so a
+      `func.lower(func.trim(...))` filter works directly, the way
+      `check_duplicate` already does it in `routers/cards.py`. Bounded by the
+      match, not by recency.
+      A `match_key` column written at record time was the other proposal and is
+      **rejected**: it is a schema change on an existing table, so it needs a
+      `_COLUMN_MIGRATIONS` entry plus a backfill whose normalization has to
+      reproduce `_norm` exactly or old corrections stay invisible anyway — all
+      to solve something the existing normalized columns already answer
+      (quick win–medium; implement directly; inline — needs a test with >100
+      corrections in one year pinning that the 101st still matches)
 - [ ] Orphaned uploads accumulate with nothing reporting them (2026-08-25
       review): `/api/scan` writes the upload to the volume before extraction
       and only records a `Scan` row when the extraction both succeeded and was
@@ -99,22 +105,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       longer the app is used — the contradiction rate rises with the
       correction count (quick win; implement directly; inline — learning.py
       plus a test that a reversed correction yields one rule, not two)
-- [ ] The exact-match override silently stops firing as the collection grows
-      (2026-08-24 review): `find_exact_match` (`services/learning.py:99-110`)
-      pulls the **100 most recent corrections for the card's year** and then
-      linear-scans them in Python for a brand + card-number match. Past 100
-      corrections in one year — a single winter of listing gets there — an
-      older correction for the exact card being scanned falls out of the
-      window and the overlay just doesn't happen. There is no error and no
-      note; the feature quietly degrades into doing nothing for the earliest
-      cards, which are precisely the ones a user is most likely to have
-      already taught. Both match fields are already normalized on write
-      (`_norm` casefolds and strips), so the filter can move into SQL
-      (`func.lower(func.trim(...))`, as `check_duplicate` already does in
-      `routers/cards.py`) and drop the limit entirely — bounded by the match,
-      not by recency (quick win–medium; implement directly; inline — needs a
-      test with >100 corrections in one year pinning that the 101st still
-      matches)
 - [ ] A failed row-number parse duplicates a card in the Sheets mirror
       (2026-08-24 review): `sync_card`'s append branch
       (`services/google_sheets.py:292-306`) writes the row, then parses

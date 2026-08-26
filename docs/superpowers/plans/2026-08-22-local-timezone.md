@@ -62,8 +62,9 @@ Patch time via the module attribute per the conftest note.
   datetime.utcnow()`.
 - No schema change: pydantic 2.13.4 already parses a bare `"2026-08-22"`
   into naive midnight (runtime-verified — see the design's facts), which is
-  the canonical date-only representation. The frontend switches to sending
-  exactly that in step 6.
+  the date-only representation for CSV imports and legacy rows. **The
+  frontend does not switch to sending that** — PR #53 already sends a
+  noon-UTC anchor, which is timezone-safe on its own (see step 6).
 
 **Test:** POST `/api/cards/{id}/mark-sold` with
 `sold_at="2026-08-22T12:00:00+05:00"` → stored value is naive
@@ -92,7 +93,7 @@ zone. Existing mark-sold tests unchanged.
   via `card_date`.
 - `backend/routers/cards.py` import (264-268, 378-389): one new branch
   only — ISO with offset → `utc_naive`. Bare `YYYY-MM-DD` already parses to
-  naive midnight, which is now the canonical date-only representation, and
+  naive midnight, the date-only representation for imports and legacy rows, and
   naive ISO with a time part keeps its legacy UTC meaning.
 
 **Test (extend `backend/tests/test_import_csv.py` +
@@ -120,9 +121,11 @@ date survives, by design (see the design's risk #7).
   date part verbatim; otherwise parse as UTC by appending `Z`, then
   `toLocaleDateString()`).
 - `frontend/src/pages/Inventory.jsx:27,36`: default from
-  `todayLocalDateInput()`; submit the picked `YYYY-MM-DD` string **as-is**
-  (no `new Date()`, no `toISOString()`) — the server owns date semantics,
-  so browser vs `CARDLISTER_TZ` disagreement cannot shift the stored date.
+  `todayLocalDateInput()`. **Leave the submit path as PR #53 shipped it** —
+  `soldDate.js` anchors the picked day at noon UTC, which lands on the same
+  calendar date anywhere within ±12h of UTC, so browser vs `CARDLISTER_TZ`
+  disagreement cannot shift the stored date without the server needing
+  date-only semantics at all.
 - `frontend/src/components/CardTable.jsx:50-56` uses `displayDate`.
 
 **Test (`frontend/src/lib/dates.test.js`, node env — pure functions only,
@@ -160,12 +163,14 @@ One focused session (steps 1–4), a second for 5–7. No schema change, no
 
 ## Decisions needed from the owner before implementation
 
-1. Approve Approach A + A2: storage stays naive UTC, **exact midnight is
-   the documented date-only representation** (legacy rows and new date-only
-   writes share it; the mark-sold modal submits the bare date), and there is
-   **no data migration**. Residual caveat accepted: an API caller
+1. Approve Approach A + A2: storage stays naive UTC, and **exact midnight is
+   the date-only representation for legacy rows and CSV-imported bare dates**
+   — *not* for new mark-sold writes, which PR #53 anchors at noon UTC and
+   which need no special-casing. There is **no data migration**. Residual
+   caveat accepted, and now narrower than when first written: an API caller
    hand-sending `...T00:00:00Z` while meaning that instant gets date-only
-   semantics (design risk #5).
+   semantics (design risk #5) — unreachable from the app's own mark-sold
+   path.
 2. Confirm `CARDLISTER_TZ` default `America/New_York` and the
    warn-and-fall-back (not refuse-to-boot) behavior for invalid values.
 3. Confirm the Sheets column format change: "Date Sold" becomes date-only,

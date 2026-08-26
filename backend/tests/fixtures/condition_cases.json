@@ -1,13 +1,21 @@
 {
-  "_comment": "Shared condition-normalization table. Consumed by backend/tests/test_condition_normalization.py and frontend/src/lib/condition.test.js. The backend (backend/services/card_fields.py) is authoritative; frontend/src/lib/condition.js mirrors it so the dropdown offers the same grades the importer folds to. Add a spelling here ONLY when it unambiguously names the same grade — mapping one grade onto a different one restates what the seller is claiming about the card.",
-  "canonical": ["RAW", "GEM-MT", "NM-MT", "NM", "EX", "VG", "POOR"],
+  "_comment": "Shared condition-normalization table. Consumed by backend/tests/test_condition_normalization.py and frontend/src/lib/condition.test.js. The backend (backend/services/card_fields.py) is authoritative; frontend/src/lib/condition.js mirrors it so the dropdown offers the same grades the importer folds to. Add a spelling here ONLY when it unambiguously names the same grade \u2014 mapping one grade onto a different one restates what the seller is claiming about the card.",
+  "canonical": [
+    "RAW",
+    "GEM-MT",
+    "NM-MT",
+    "NM",
+    "EX",
+    "VG",
+    "POOR"
+  ],
   "labels": {
-    "RAW": "RAW — ungraded",
-    "GEM-MT": "GEM-MT — gem mint",
-    "NM-MT": "NM-MT — near mint to mint",
-    "NM": "NM — near mint",
-    "EX": "EX — excellent",
-    "VG": "VG — very good",
+    "RAW": "RAW \u2014 ungraded",
+    "GEM-MT": "GEM-MT \u2014 gem mint",
+    "NM-MT": "NM-MT \u2014 near mint to mint",
+    "NM": "NM \u2014 near mint",
+    "EX": "EX \u2014 excellent",
+    "VG": "VG \u2014 very good",
     "POOR": "POOR"
   },
   "cases": [
@@ -47,7 +55,7 @@
       "expected": "POOR"
     },
     {
-      "name": "trailing space — the typo the free-text input actually produced",
+      "name": "trailing space \u2014 the typo the free-text input actually produced",
       "input": "nm ",
       "expected": "NM"
     },
@@ -67,7 +75,7 @@
       "expected": "NM"
     },
     {
-      "name": "spelled out — what vision extraction tends to return",
+      "name": "spelled out \u2014 what vision extraction tends to return",
       "input": "Near Mint",
       "expected": "NM"
     },
@@ -177,12 +185,12 @@
       "expected": "PSA 10"
     },
     {
-      "name": "MINT alone is not folded — it names a grade between GEM-MT and NM-MT, and picking one would restate the card",
+      "name": "MINT alone is not folded \u2014 it names a grade between GEM-MT and NM-MT, and picking one would restate the card",
       "input": "Mint",
       "expected": "Mint"
     },
     {
-      "name": "PR is not folded to POOR — a two-letter code that is not itself canonical stays whatever the seller wrote",
+      "name": "PR is not folded to POOR \u2014 a two-letter code that is not itself canonical stays whatever the seller wrote",
       "input": "PR",
       "expected": "PR"
     },
@@ -205,6 +213,41 @@
       "name": "whitespace-only is unrecognized, so it is not trimmed either",
       "input": "   ",
       "expected": "   "
+    },
+    {
+      "name": "hyphenated ungraded spelling",
+      "input": "UN-GRADED",
+      "expected": "RAW"
+    },
+    {
+      "name": "gem mint with no separator",
+      "input": "GEMMT",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mint spelled out",
+      "input": "GEM-MINT",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mint with the numeric grade",
+      "input": "GEM MT 10",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "near mint-mint abbreviation",
+      "input": "NM-M",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "very good hyphenated",
+      "input": "VERY-GOOD",
+      "expected": "VG"
+    },
+    {
+      "name": "very good contracted",
+      "input": "VGOOD",
+      "expected": "VG"
     }
   ]
 }

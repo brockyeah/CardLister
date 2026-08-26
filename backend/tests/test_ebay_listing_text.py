@@ -75,3 +75,20 @@ def test_listing_text_missing_card_404(db_session):
         headers = _auth(client)
         r = client.get("/api/ebay/999999/listing-text", headers=headers)
         assert r.status_code == 404, r.text
+
+
+def test_zero_listed_price_falls_back_to_a_positive_suggested_price(db_session):
+    """A listed_price of 0 is not a price — prefer a real suggested one.
+
+    schemas allow listed_price ge=0, so 0 is storable; reporting "not set"
+    while a usable comp median sits in suggested_price helps nobody.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        card = client.post("/api/cards", json={
+            "player_name": "Elly De La Cruz", "listed_price": 0, "suggested_price": 25.0,
+        }, headers=headers).json()
+        body = client.get(f"/api/ebay/{card['id']}/listing-text", headers=headers).json()
+        assert body["has_price"] is True
+        assert body["price"] == 25.0
+        assert "$25.00" in body["clipboard_text"]

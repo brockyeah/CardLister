@@ -79,8 +79,10 @@ re-litigate them.
   when the OS database is absent).
 
 - **Existing `sold_at` rows are largely midnight-UTC artifacts, and so are
-  CSV-imported dates.** The mark-sold submit path has always stored UTC
-  midnight of the picked date (Inventory.jsx:36), and CSV import's
+  CSV-imported dates.** The mark-sold submit path stored UTC midnight of the
+  picked date (Inventory.jsx:36) **until PR #53 changed it to a noon-UTC
+  anchor on 2026-08-25** — so midnight rows are a bounded historical set, not
+  a growing one. CSV import's
   `_parse_date` is bare `datetime.fromisoformat` (cards.py:264-268), so an
   imported `Date Sold` of `2026-08-21` also stores midnight. Rendering those
   instants in ET without special handling would shift **every historical
@@ -123,9 +125,10 @@ paths above.
 This carve-out is a **contract, not a legacy accommodation** (revised after
 CodeRabbit's review of the first draft, which correctly observed that a
 heuristic without provenance can misread a deliberate midnight instant):
-exact midnight *is* the canonical stored representation of a date-only
-field. The mark-sold modal submits the bare picked date (pydantic fact
-above), CSV import keeps storing bare dates at midnight — the existing
+exact midnight *is* the stored representation of a date-only field **for
+legacy rows and CSV imports** (see the 2026-08-25 revision above: new
+mark-sold writes are noon-anchored by PR #53 and need no carve-out).
+CSV import keeps storing bare dates at midnight — the existing
 `_parse_date` behavior, unchanged — and `card_date()` renders the calendar
 date back verbatim. Sold dates are date-semantics fields end to end (the
 picker is date-only), so nothing is lost, historical rows and new writes
@@ -184,12 +187,18 @@ configured zone, aware storage buys nothing over convert-at-the-edges.
 - **A2 — midnight-as-date-only contract (recommended)**: `card_date(dt)`
   returns `dt.date()` verbatim when `dt.time() == 00:00:00` and
   `dt.microsecond == 0`, else `to_local(dt).date()`. Pure, tested,
-  reversible, no writes — and the write side *keeps producing* the same
-  representation on purpose: the mark-sold modal submits the bare picked
-  date (which pydantic parses to naive midnight, fact above) and CSV
-  import's existing bare-date parse is left exactly as it is. One
-  representation for legacy and new rows, exact round-trips, and no
-  browser-timezone dependence anywhere in the sold-date path.
+  reversible, no writes. CSV import's existing bare-date parse is left
+  exactly as it is, so imports keep producing midnight rows and round-trip
+  exactly.
+
+  **Superseded in part (2026-08-25):** an earlier form of A2 also had the
+  mark-sold modal submit a bare date so legacy and new rows shared one
+  representation. PR #53 shipped a noon-UTC anchor instead, which
+  `to_local(dt).date()` already renders correctly (EDT and EST both verified),
+  so new mark-sold rows take the ordinary branch and never touch the
+  midnight carve-out. That is a better split than one shared representation:
+  the branch with the documented misread case now covers only rows the app
+  no longer writes.
 
 An earlier draft of this design had A2 storing *local noon* for new
 date-only writes, treating midnight purely as a legacy artifact. CodeRabbit's

@@ -161,8 +161,12 @@ def ebay_listing_text(card_id: int, db: Session = Depends(get_db)):
     # than a missing one: unlike a wrong player name, "$0.00" is not a typo a
     # seller catches on review. Say the price is missing instead of inventing
     # one. `has_price` lets the copy buttons warn before the paste happens.
-    raw_price = card.listed_price if card.listed_price is not None else card.suggested_price
-    price = float(raw_price) if raw_price is not None else None
+    # First positive price wins, listed over suggested. A listed_price of 0
+    # is not a price (schemas allow ge=0), so falling through to a real
+    # suggested price beats reporting "not set" when one exists.
+    listed = float(card.listed_price) if card.listed_price is not None else None
+    suggested = float(card.suggested_price) if card.suggested_price is not None else None
+    price = next((p for p in (listed, suggested) if p is not None and p > 0), None)
     # Non-positive is treated as unset for the same reason the pricing UI
     # renders an unusable comp price as unavailable: a $0.00 sale price is
     # never a real one, so it can only mislead.

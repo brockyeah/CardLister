@@ -45,7 +45,10 @@ export const DEFAULT_FEE_SCHEDULE = {
  * per field at import.
  */
 export function parseFeeOverride(raw, fallback, { max = Infinity } = {}) {
-  if (raw === undefined || raw === null || raw === '') return fallback
+  // Trimmed-empty counts as unset: Number('   ') is 0, which is finite,
+  // non-negative and below max, so whitespace would sail past every guard
+  // below and silently zero the fee — overstating net proceeds.
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback
   const n = Number(raw)
   if (!Number.isFinite(n) || n < 0 || n >= max) {
     // Visible in the console rather than silent: a misconfigured rate that

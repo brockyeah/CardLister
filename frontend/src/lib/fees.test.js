@@ -159,3 +159,17 @@ describe('parseFeeOverride', () => {
     warn.mockRestore()
   })
 })
+
+describe('parseFeeOverride — unset detection', () => {
+  it('treats a whitespace-only override as unset', () => {
+    // Number('   ') is 0: finite, non-negative, below max — so without an
+    // explicit trim it passes every guard and silently zeroes the fee rate,
+    // overstating net proceeds rather than falling back.
+    expect(parseFeeOverride('   ', 0.1325, { max: 1 })).toBe(0.1325)
+    expect(parseFeeOverride('\t\n', 0.1325, { max: 1 })).toBe(0.1325)
+  })
+
+  it('still accepts an explicit zero', () => {
+    expect(parseFeeOverride('0', 0.1325, { max: 1 })).toBe(0)
+  })
+})
