@@ -47,8 +47,16 @@ class FakeSheet:
         # values().get — header probe or used-range probe
         if range and range.endswith("1"):
             return _Exec(lambda: {"values": [SHEET_HEADERS]})
+        # Slice each row to the requested column span, like the real API: a
+        # probe for `A:A` must NOT see data that only exists further right.
+        # Without this the fake answered every probe at full width, so
+        # `test_resync_clears_residue_invisible_to_a_column_a_probe` passed
+        # even against the column-A probe it exists to forbid.
+        first_col, last_col = _parse_cols(range)
         last = max(self.rows) if self.rows else 1
-        values = [SHEET_HEADERS] + [self.rows.get(r, []) for r in _range(2, last + 1)]
+        values = [SHEET_HEADERS[first_col:last_col + 1]] + [
+            self.rows.get(r, [])[first_col:last_col + 1] for r in _range(2, last + 1)
+        ]
         return _Exec(lambda: {"values": values})
 
     def values(self):
@@ -112,6 +120,23 @@ def _parse_range(rng: str):
     parts = body.split(":")
     first = int("".join(c for c in parts[0] if c.isdigit()))
     last = int("".join(c for c in parts[1] if c.isdigit())) if len(parts) > 1 else first
+    return first, last
+
+
+def _parse_cols(rng: str):
+    """'Inventory!A2:V9' -> (0, 21); 'Inventory!A:A' -> (0, 0); 'Inventory!A2' -> (0, 0)."""
+    body = rng.split("!")[1]
+    parts = body.split(":")
+
+    def col(cell):
+        n = 0
+        for ch in cell:
+            if ch.isalpha():
+                n = n * 26 + (ord(ch.upper()) - ord("A") + 1)
+        return n - 1
+
+    first = col(parts[0])
+    last = col(parts[1]) if len(parts) > 1 else first
     return first, last
 
 

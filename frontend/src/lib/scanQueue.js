@@ -33,6 +33,15 @@ export function scanResultPatch(result) {
   // `reviewQueueItem` bails on `!result` — so marking it ready leaves an inert
   // Review button and no way back, the same dead end by a different door.
   if (!result) return { status: 'error', error: 'Scan returned no data — retry this photo.' }
+  // A truthy body that isn't a scan response (a proxy or gateway answering 200
+  // with its own JSON or HTML) is the same dead end again: `/api/scan` always
+  // includes `image_path` — the upload is stored before extraction, in mock
+  // mode and on extraction failure alike — so a body without it cannot be a
+  // scan result, and `ready` would once more offer a Review button over
+  // nothing.
+  if (!result.image_path) {
+    return { status: 'error', error: 'Scan returned an unusable response — retry this photo.' }
+  }
   return { status: 'ready', result }
 }
 

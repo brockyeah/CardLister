@@ -170,6 +170,14 @@ export default function Scanner() {
         stagedBack ? downscaleImage(stagedBack) : null,
       ])
       const result = await scanCard(front, mode, back)
+      // A truthy 200 body without `image_path` is not a scan response (the
+      // real endpoint always includes it — the upload is stored before
+      // extraction). Bail before mutating state so the staged photo survives
+      // for a retry instead of silently vanishing back to the drop zone.
+      if (!result?.image_path) {
+        setError('Scan returned an unusable response — try again.')
+        return
+      }
       setImagePath(result.image_path)
       setMock(!!result.mock)
       setScanId(result.scan_id ?? null)
@@ -592,6 +600,10 @@ export default function Scanner() {
                   setPricingSource('')
                   setPricingLoading(false)
                 }}
+                // A discard mid-save can't stop the save — createCard is
+                // already in flight — so the form would clear and then a
+                // "Card saved" toast would contradict it.
+                disabled={submitting}
                 className="btn-secondary w-full"
               >
                 Discard & Start Over

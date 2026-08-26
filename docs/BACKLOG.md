@@ -145,6 +145,62 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the blast radius is exactly the rows whose spelling the app already
       recognizes (quick win; implement directly; inline — reuses
       `services/card_fields.py` and `POST /api/sheets/resync`)
+- [ ] Sheets mirror: the `sheets_row` DB commit happens *outside*
+      `_sheets_lock`, defeating the race protocol PR #46 built (2026-08-23
+      weekly review). The lock's own comment (`google_sheets.py`) claims it is
+      "held across re-read → Sheet write → sheets_row commit", but every
+      writer releases it on return and the commit runs in the caller:
+      `sync_card`'s row is committed at `cards.py:_sync_card_to_sheets`, and
+      `rewrite_all_rows`' stamping loop at `sheets.py` after the `with` exits.
+      Two concrete losses: (a) a save's background task can commit a stale row
+      index *over* a resync's fresh one, so the card's next edit writes into a
+      row that now belongs to another card; (b) `blank_row`'s under-lock
+      `_is_owned` check reads DB state a concurrent resync hasn't committed
+      yet, so a delete racing a resync can blank a row the resync just gave to
+      a live card. `resync_one` (`POST /api/sheets/sync/{card_id}`) bypasses
+      both halves of the protocol entirely and has no caller — fix or delete
+      it. Fix shape: pass a `commit(rows)` callback into the three writers so
+      the DB commit executes before the lock releases (mirroring the existing
+      `reread_row` pattern), plus a two-thread interleaving test (the whole
+      lock currently has zero concurrency coverage — moving the reread outside
+      the lock passes all 14 mirror tests), a test for the resync `"commit"`
+      failure branch, and a post-resync assertion that every `sheets_row`
+      matches its sheet position (large; **design first** — data integrity
+      across `google_sheets.py`/`cards.py`/`sheets.py`; extend the existing
+      2026-08-17 Sheets integrity design doc rather than starting a new one)
+- [ ] Scanner `resetAfterSave` advances the batch queue from a stale snapshot
+      (2026-08-23 weekly review): it computes `nextReady` from the render
+      closure captured when Save was pressed, but `doSave` awaits two network
+      calls plus the clipboard before calling it, and the queue can change
+      underneath — clear the queue (confirming the loss warning) while a save
+      is in flight and the closure still schedules `reviewQueueItem` on the
+      discarded item, resurrecting its form and firing a fresh pricing lookup
+      for a card the user just threw away. Track the live queue in a ref (or
+      compute inside the functional update) and bail if the item is no longer
+      present and `ready` (quick win; implement directly; inline —
+      Scanner.jsx only)
+- [ ] Scan requests have no client timeout, and a hung one wedges the batch
+      queue unrecoverably (2026-08-23 weekly review): `api.js` sets no axios
+      timeout, so a request that never settles leaves the item `scanning`
+      forever — the one status with no Retry — and `processingRef` stays
+      `true`, so every queued item waits forever and even Clear-queue + a new
+      batch stays stuck at "waiting…" because nothing resets the ref. Add a
+      generous timeout to `scanCard` (must exceed `SUBSCRIPTION_SCAN_TIMEOUT`
+      = 150s plus headroom, e.g. 180s, so a slow-but-legitimate paid scan is
+      never aborted client-side while the server still bills it) and reset
+      `processingRef` on the way out (quick win–medium; implement directly;
+      inline — api.js + Scanner.jsx)
+- [ ] `scan_card` runs sync SQLite work on the event loop (2026-08-23 weekly
+      review): the poller fix moved `run_poll_cycle` to the threadpool, but
+      async `scan_card` still calls `build_cheatsheet(db)`, `db.commit()`, and
+      `apply_exact_match` directly, and `_save_upload` does sync 1MB disk
+      writes. If a Sheets background thread holds the SQLite write lock
+      mid-commit, the event loop itself blocks for up to the busy timeout,
+      stalling every request including `/api/health` — the exact class the
+      poller fix closed. Wrap the DB block and the upload write loop in
+      `run_in_threadpool` (async `import_csv` has the same shape but is
+      milliseconds-scale; fix opportunistically) (medium; implement directly;
+      inline — scan.py only)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -182,8 +238,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       unless the user notices. On submit it does `new Date(date).toISOString()`,
       and a bare `YYYY-MM-DD` parses as UTC midnight per spec, which renders as
       the *previous* day anywhere west of UTC. Sold dates feed the Sheets "Date
-      Sold" column, the planned tax-year export, and days-to-sell analytics, so
-      the error propagates. Fix by composing the default from local date parts
+      Sold" column, the now-shipped tax-year export (2026-08-19), and
+      days-to-sell analytics, so the error propagates — a late-evening Dec 31
+      sale lands in the wrong year's tax file. The backend fallbacks
+      (`mark_sold`'s `datetime.utcnow()` and the CSV import's stamp) carry the
+      same skew. Fix by composing the default from local date parts
       and submitting local noon, in a tested pure helper (quick win; implement
       directly; inline — Inventory.jsx plus a lib function)
 - [ ] Pricing lookups are never cached, so the same card re-runs the whole
@@ -354,9 +413,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       batch queue and the reviewed form live only in React state, and there is
       no `beforeunload` guard anywhere in `frontend/src`. Every `ready` queue
       item represents Opus tokens already spent, so a stray gesture on a phone
-      throws away both the review effort and real money. Register a
-      `beforeunload` handler while any queue item is unsaved or the form is
-      dirty (quick win; implement directly; inline — Scanner.jsx only)
+      throws away both the review effort and real money. In-app navigation is
+      the same hole and `beforeunload` does not cover it: the save toast's own
+      "View Inventory →" link unmounts Scanner and destroys the rest of the
+      batch with no warning (2026-08-23 review). Register a `beforeunload`
+      handler while any queue item is unsaved or the form is dirty, plus a
+      react-router blocker (or confirm-on-nav) for SPA navigation (quick win;
+      implement directly; inline — Scanner.jsx only)
 - [ ] Integration-configuration readout on Analytics manage-data: Sheets
       (`_get_service` returns None with no credentials), the eBay Browse API
       (`is_configured()`), the vision billing ladder (api key → subscription →

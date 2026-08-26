@@ -34,7 +34,7 @@ cd frontend && npm run build        # → frontend/dist
 
 Must be `python -m pytest` from the repo root — there is no `pytest.ini`/`pyproject.toml`, so bare `pytest` fails to resolve `backend.`. CI, the Dockerfile, and the local venv are all Python 3.11.
 
-**There is no linter or formatter in this repo** (no eslint/prettier/ruff/black). A stray `eslint-disable` comment in `CardForm.jsx` reads to nothing.
+**There is no linter or formatter in this repo** (no eslint/prettier/ruff/black).
 
 ## Architecture
 
@@ -94,7 +94,7 @@ SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTE
 
 **React 19 + react-router v8** — import from `'react-router'`; `react-router-dom` is not installed. Tailwind v3. Plain declarative `<Routes>`, no data-router APIs.
 
-JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Two download endpoints fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
+JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. The download endpoints (DB backup and both CSV exports) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
 
 `Scanner.jsx` is the center of gravity: a batch queue (`queued → scanning → ready → saved`) processed one item at a time behind a ref guard, front images only. Pricing lookups carry a monotonic `pricingSeq` and every write path bails if a newer lookup has started — this is a shipped race fix, so **any new async state write in Scanner needs the same guard**.
 
@@ -104,15 +104,15 @@ Uploads are downscaled client-side before hitting the API, with EXIF rotation ba
 
 These have no compile-time or test-time guard unless noted — they fail in production or cost money.
 
-1. **`SHEET_HEADERS` is append-only.** New columns go at the end, with a matching trailing element in `_card_to_row`. Inserting mid-list misaligns every already-synced sheet row, since `Card.sheets_row` writes a fixed bounded range.
-2. **The `" (subscription)"` model suffix is load-bearing.** `analytics.py:_cost()` prices anything with that exact suffix at $0.00. Change the format and subscription-billed scans start reporting phantom Opus dollars.
+1. **`SHEET_HEADERS` is append-only.** New columns go at the end, with a matching trailing element in `_card_to_row`. Inserting mid-list misaligns every already-synced sheet row, since `Card.sheets_row` writes a fixed bounded range. `SOLD_EXPORT_HEADERS`/`_sold_row` in `routers/cards.py` is a deliberately *separate* contract for the tax export — don't "unify" it with `SHEET_HEADERS`, or every future mirror column silently widens the tax report (the comment there says why).
+2. **The `(subscription)` model suffix is load-bearing.** `analytics.py:_cost()` prices any model string *ending in* `(subscription)` at $0.00 (an `endswith` check, no leading-space requirement). Change the format the producer writes in `claude_vision.py` and subscription-billed scans start reporting phantom Opus dollars. Now pinned on both sides by `test_analytics_cost.py` and `test_vision_fallback.py`.
 3. **Literal-path GET routes must be declared above `/{card_id}`** in `routers/cards.py`, or they 422 against the int path param. `export.csv` carries a comment saying so.
 4. **New columns on existing tables need a `_COLUMN_MIGRATIONS` entry** — otherwise they work on a fresh DB and break every deployed one.
 5. **New routers need `dependencies=[Depends(require_auth)]`** — `test_auth_sweep.py` walks the OpenAPI schema and fails CI otherwise. A genuinely public route means updating `PUBLIC`/`PUBLIC_PREFIXES` there.
 6. **`VISION_MAX_IMAGE_PX=0` overrides every preset's cap** (pinned by a test), quietly multiplying token cost.
 7. **Changing the eBay title format is a three-file change**: `routers/ebay.py:build_title`, `frontend/src/lib/ebayTitle.js`, and regenerated `expected` values in `backend/tests/fixtures/ebay_title_cases.json` — a fixture both suites read, the frontend one importing it across the repo boundary. Backend is the source of truth; the JS is preview-only.
 8. **`MAX_DIMENSION_PX = 2000` in `downscaleImage.js` shadows the `accuracy` preset.** Raising the preset above 2000 does nothing until the client cap moves too.
-9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers.
+9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers. The Sheets mirror lock (`google_sheets._sheets_lock`) is also a `threading.Lock`, atomic only inside one process — a second worker silently reopens the save-vs-resync row race it exists to close.
 10. **Never add a `startCommand` to `railway.toml`** — Railway passes it literally and won't expand `$PORT`; the Dockerfile's `sh -c` does.
 11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment (case-folded), so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
 12. **The year-long `immutable` cache on `/uploads` and `/assets` depends on names never being reused.** Uploads are minted as `uuid.uuid4().hex` in `routers/scan.py` and Vite content-hashes bundle names — any future change that derives a filename from user input, reuses a name, or rewrites a file in place (e.g. a server-side thumbnail/re-encode pass) will serve year-stale bytes with no error anywhere. `index.html` is the deliberate exception: `SpaStaticFiles` stamps it `no-cache` so a cached shell can't outlive its bundles across a deploy.

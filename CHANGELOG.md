@@ -94,6 +94,81 @@ only in `[Unreleased]` on a branch is not in prod yet.
   quietly. 46 backend and 51 frontend cases, including the pass-through
   guarantees above and a check that a card whose condition reads
   `constructor` is not resolved off the lookup object's prototype.
+## [Unreleased] — branch `claude/intelligent-babbage-s4at2t`
+
+### Fixed
+- A NUL byte in an `/uploads` filename (`/uploads/%00`) no longer raises a 500
+  with a traceback on a public route. `.resolve()` throws "embedded null byte"
+  before the containment check runs — the same 500-where-404-is-honest class
+  the `/uploads/%2e` fix closed, one syscall later, and reachable by any
+  unauthenticated scanner. Unresolvable names now 404 like every other
+  non-file, with a test pinning `%00` in both bare and embedded positions.
+- The eBay title preview now splits words on exactly the whitespace Python
+  does. The mirror used `\s`, which misses the C1 separators and NEL
+  (`\x85` — reachable as cp1252 `…` mojibake in a paste or CSV import) and
+  wrongly includes BOM/ZWNBSP, so near the 80-character cap the preview and
+  the backend could truncate at different unit boundaries — the exact
+  divergence the shared fixture exists to prevent, on characters no fixture
+  case contained. The mirror now uses a character class verified equal to
+  Python's whitespace set across the whole BMP, the serial number is stripped
+  the same way, and three new fixture cases pin NEL splitting, BOM
+  preservation, and a title whose truncation is decided by code-point (not
+  UTF-16) measurement. The JS parity test itself measured the cap in UTF-16
+  units — it would have *failed a correct implementation* on any fixture case
+  straddling the cap — and now measures in code points like the code it tests.
+- A 200 from `/api/scan` whose body is truthy but not a scan response (a proxy
+  or gateway answering with its own JSON or HTML) is now classified as a scan
+  failure. The nullish-body fix caught empty bodies, but a shapeless truthy one
+  still landed in `ready` — an inert Review button and no Retry, the same dead
+  end through a third door — and in single-scan mode it silently discarded the
+  staged photo. Both paths now key on the one field every real scan response
+  carries (`image_path`, stored before extraction in mock mode and on failure
+  alike); the batch item gets Retry and the single-scan photo stays staged.
+- Analytics and its manage-data panel no longer render a raw FastAPI `detail`
+  into JSX. Six catch blocks set `e.response?.data?.detail` directly into
+  state, and a 422's `detail` is an array of objects — rendering it crashes
+  React and white-screens the page, the exact bug class the Scanner's
+  `formatApiError` helper was built for in the same week. All six now go
+  through the helper; the one guarded spot (CSV import) loses its ad-hoc
+  `typeof` check for the shared one.
+- "Discard & Start Over" is disabled while a save is in flight. A discard
+  mid-save cannot stop the save — the request is already gone — so the form
+  cleared and then a "Card saved" toast contradicted the user's last action.
+
+### Removed
+- Two dependencies nothing imports: `passlib` (auth compares plaintext env
+  passwords with `hmac.compare_digest`; hashing never shipped) and
+  `python-dotenv` (the README tells the user to export `.env` themselves —
+  the app never loads it). Both were installed and pip-audited in every CI run
+  and deploy for zero imports. Also gone: the root `package-lock.json` (an
+  empty lockfile with no root `package.json`, untouched since the initial
+  commit), a dead `export default` in `api.js` every consumer ignores in
+  favour of named exports, and the stray `eslint-disable` comment CLAUDE.md
+  itself documented as reading to nothing.
+
+### Tests
+- The Sheets-mirror fake now slices `values().get` responses to the requested
+  column span like the real API. It answered every probe at full width, so
+  `test_resync_clears_residue_invisible_to_a_column_a_probe` passed even
+  against the regression it is named after (verified by reintroducing the
+  `A:A` probe: the suite stayed green before this change and fails after).
+- `UsageEvent` joins the `db_session` hard-delete list, per the repo's own
+  isolation rule — `test_user_admin`'s exact-count assertions only passed
+  because no alphabetically-earlier test happened to write usage rows.
+- The sold-CSV export's documented null-`sold_at` contract (excluded from a
+  year filter, listed last with an empty Date Sold in the unfiltered file) is
+  now pinned; previously a sort key that crashed on `None` passed the suite.
+  HEAD cache headers on the SPA shell and hashed assets are pinned too —
+  the header logic is shared with GET, but only GET was asserted.
+
+### Docs
+- CLAUDE.md refreshed against a re-derivation of every invariant: the
+  `(subscription)` cost rule is an `endswith` check with no leading space and
+  is now test-pinned on both sides; invariant #9 (single process) now names
+  the Sheets mirror lock as a second thing that silently breaks under
+  `--workers`; invariant #1 notes `SOLD_EXPORT_HEADERS` is a deliberately
+  separate contract from `SHEET_HEADERS`; the "two download endpoints" count
+  caught up with the third.
 
 ## [Unreleased] — branch `fix/scan-nullish-result`
 

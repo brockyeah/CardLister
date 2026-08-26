@@ -52,6 +52,12 @@ def test_head_requests_are_page_loads_too(client):
     # Link previews and uptime checks HEAD deep links; they must get the shell.
     r = client.head("/inventory")
     assert r.status_code == 200
+    # Same cache contract as GET — the header logic is shared, but only GET was
+    # pinned, so a HEAD-specific regression would have been silent.
+    assert r.headers["cache-control"] == "no-cache"
+    assert client.head("/assets/index-abc123.js").headers["cache-control"] == (
+        "public, max-age=31536000, immutable"
+    )
 
 
 def test_real_assets_still_win_over_the_fallback(client):
