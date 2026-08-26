@@ -122,10 +122,20 @@ date survives, by design (see the design's risk #7).
   `toLocaleDateString()`).
 - `frontend/src/pages/Inventory.jsx:27,36`: default from
   `todayLocalDateInput()`. **Leave the submit path as PR #53 shipped it** —
-  `soldDate.js` anchors the picked day at noon UTC, which lands on the same
-  calendar date anywhere within ±12h of UTC, so browser vs `CARDLISTER_TZ`
-  disagreement cannot shift the stored date without the server needing
-  date-only semantics at all.
+  `soldDate.js` anchors the picked day at noon UTC, so browser vs
+  `CARDLISTER_TZ` disagreement cannot shift the stored date without the server
+  needing date-only semantics at all.
+  **Bound on that guarantee (measured, corrected 2026-08-25):** noon UTC keeps
+  the calendar date for offsets **UTC−12 through UTC+11**, not "±12h" as an
+  earlier revision of this note claimed. At UTC+12 (`Pacific/Auckland`) noon
+  UTC is already 00:00 the *next* day, and UTC+14 (`Pacific/Kiritimati`) is
+  further out — both render a picked date one day late. `CARDLISTER_TZ`
+  defaults to `America/New_York` (UTC−5/−4) and this is a two-person tool, so
+  the bound is not reached in practice; it is recorded because the variable is
+  documented as accepting any IANA zone. **Decision for the owner:** either
+  document UTC+12..+14 as unsupported, or derive the anchor from
+  `CARDLISTER_TZ` server-side instead of fixing it at noon UTC. Step 6b's test
+  should cover the extreme *supported* offsets, not just EDT/EST.
 - `frontend/src/components/CardTable.jsx:50-56` uses `displayDate`.
 
 **Test (`frontend/src/lib/dates.test.js`, node env — pure functions only,

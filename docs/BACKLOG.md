@@ -67,9 +67,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       worse the more the tool is used.
       **Fix: move the match into SQL and drop the limit** — both fields are
       already normalized on write (`_norm` casefolds and strips), so a
-      `func.lower(func.trim(...))` filter works directly, the way
-      `check_duplicate` already does it in `routers/cards.py`. Bounded by the
-      match, not by recency.
+      `func.lower(func.trim(...))` filter matches, the way `check_duplicate`
+      already does it in `routers/cards.py`. Bounded by the match, not by
+      recency. **Caveat to carry into the implementation (measured):** SQL
+      `lower()` is not `str.casefold()` — casefold maps `ß` to `ss` and
+      SQLite's `lower()` is ASCII-only, so the two diverge on non-ASCII input.
+      Brands and card numbers are ASCII in practice (`Bowman`, `BCP-100`), so
+      this is a boundary to state rather than a blocker; a case-folding
+      difference would show up as a *missed* overlay, never a wrong one.
+      Fetching every row for the year and comparing in Python would be exact
+      but reintroduces the unbounded scan this item exists to remove — it just
+      moves the ceiling from 100 rows to all of them.
       A `match_key` column written at record time was the other proposal and is
       **rejected**: it is a schema change on an existing table, so it needs a
       `_COLUMN_MIGRATIONS` entry plus a backfill whose normalization has to

@@ -110,7 +110,9 @@ paths above.
 > picked day anchored at **noon UTC** (`frontend/src/lib/soldDate.js`), not a
 > bare date at midnight. That changes the scope of the carve-out below, and for
 > the better: noon UTC renders as the same calendar date under ordinary
-> conversion anywhere within ±12h of UTC — verified for America/New_York in
+> conversion for offsets UTC−12 through UTC+11 (measured; UTC+12 and above
+> render the *next* day — see the plan's step 6 bound) — verified for
+> America/New_York in
 > both EDT (noon UTC → 08:00 same day) and EST (→ 07:00 same day) — whereas
 > midnight UTC renders as the *previous* day in either. So new mark-sold rows
 > need no special-casing at all: plain conversion is already correct for them.
@@ -203,9 +205,18 @@ configured zone, aware storage buys nothing over convert-at-the-edges.
 An earlier draft of this design had A2 storing *local noon* for new
 date-only writes, treating midnight purely as a legacy artifact. CodeRabbit's
 review surfaced two real flaws in that: the export/import round-trip could
-not be instant-exact (noon in, date-only out, noon back), and computing noon
-in the *browser's* zone reintroduced a browser-vs-`CARDLISTER_TZ` skew.
-Making midnight the canonical representation dissolves both.
+not be instant-exact (noon in, date-only out, midnight back), and computing
+noon in the *browser's* zone reintroduced a browser-vs-`CARDLISTER_TZ` skew.
+
+**How that reads against what PR #53 actually shipped (2026-08-25):** #53
+stores noon **UTC**, not local noon, so the second flaw does not apply —
+there is no browser zone in the computation. The first still does, and is
+worth stating plainly rather than leaving for someone to discover: a
+noon-anchored `sold_at` exports as a bare `YYYY-MM-DD` and reimports as
+midnight, so a CSV round-trip is date-exact but not instant-exact. That is
+acceptable because sold dates are date-semantics fields end to end — the
+picker is date-only — but it means a re-imported row lands in the legacy
+midnight branch, which is precisely where the carve-out still applies.
 
 **Recommendation: A with A2.**
 
