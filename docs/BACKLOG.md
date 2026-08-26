@@ -338,10 +338,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       decisions to make with it: how long a sold comp stays fresh (hours, not
       minutes — these are completed sales, not live prices), and whether the
       `mock` fallback is cached at all (it should not be, or a transient
-      scraper block pins $9.99 to a card for the whole TTL). **Sequence this
-      after or alongside the parallel fan-out item below — both restructure
-      the same function, and landing them separately means resolving the same
-      conflict twice** (medium; implement directly; inline)
+      scraper block pins $9.99 to a card for the whole TTL). The parallel
+      fan-out this was once told to wait for **has shipped** (2026-08-19,
+      PR #52), so the sequencing constraint is discharged: build the cache on
+      top of the concurrent implementation, in front of the fan-out, so a hit
+      skips submitting every source rather than racing them and discarding
+      the results (medium; implement directly; inline)
 - [ ] Analytics day boundaries are UTC, so the owner's evening scans land on
       the wrong day (2026-08-19 review): `_range_start` builds the `today` and
       `month` windows from `datetime.utcnow()`, and `by_day` buckets on
@@ -350,7 +352,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       *tomorrow's* bar in the daily cost chart, and the "Today" filter after
       8pm reports a window that started yesterday evening. On the first of the
       month the "This month" total is wrong for four hours. Same root cause as
-      the mark-sold UTC item above, and the fix should be the same one applied
+      the mark-sold picker's UTC default — whose *frontend* half shipped
+      2026-08-20 (PR #53, `lib/soldDate.js`), leaving the backend stamps
+      (`mark_sold`'s `datetime.utcnow()` and the CSV import's) still skewed —
+      and the fix should be the same one applied
       once: a configured local timezone (`CARDLISTER_TZ`, defaulting to
       America/New_York) with a shared helper, used by analytics windows,
       mark-sold's default date, the Sheets "Date Listed"/"Date Sold" columns,
@@ -371,8 +376,8 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       so new writes share the representation — no data migration), and a
       `tzdata` pip pin (the `python:3.11-slim` image has no zoneinfo, so the
       gap crashes only in production while CI stays green). Covers the
-      mark-sold item above, the Sheets date columns, and the tax-year export
-      in one pass. **Awaiting owner approval on the three decisions listed at
+      backend half of the mark-sold skew (whose picker shipped 2026-08-20 in
+      PR #53), the Sheets date columns, and the tax-year export in one pass. **Awaiting owner approval on the three decisions listed at
       the end of the plan doc.**
 - [ ] eBay title truncation cannot spare the flags, because it can only cut a
       prefix (2026-08-19 review, deferred out of the truncation fix that
