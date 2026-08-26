@@ -237,6 +237,67 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       it still has and the history browser can say "photo reclaimed" instead of
       rendering a hole (quick win; implement directly; inline —
       `routers/analytics.py:cleanup_uploads` plus a test)
+- [ ] Scanner treats the $9.99 pricing mock as a real suggested price
+      (2026-08-20 review): `fetchPricing` in `Scanner.jsx` writes
+      `pricing.suggested_price` into the form whenever it is truthy, with no
+      look at `pricing.source` — so when every comp source fails and the chain
+      falls through to its `MOCK_PRICE` last resort, the card is saved carrying
+      $9.99 as if a median of ten sales had produced it. The Inventory Comps
+      modal already refuses exactly this (`const suggested = result?.source
+      !== 'mock' ? result?.suggested_price : null`), so the two pricing surfaces
+      disagree about whether a mock counts, and the one that disagrees is the
+      one whose value gets *persisted*. On Railway this is the common case, not
+      the edge: CLAUDE.md notes the scrapers routinely 403 from a datacenter IP.
+      It also defeats the 2026-08-20 listing-text fix — a mocked $9.99 makes
+      `has_price` true, so the seller gets a confident wrong price where they
+      would otherwise be told the card has no price yet. Skip the write when
+      the source is mock and let the field stay empty, matching the modal
+      (quick win; implement directly; inline — Scanner.jsx only)
+- [ ] CI guards for the two invariants that break an already-deployed install
+      (2026-08-20 review): invariants #1 and #4 are the two whose failure mode
+      is silent *and* remote — they work on a fresh DB and a fresh sheet, and
+      corrupt the deployed one. Neither has a test. (a) `_COLUMN_MIGRATIONS`
+      completeness: `test_migrations.py` exercises the *mechanism*
+      (`ensure_columns` adds `quantity`, runs twice safely, skips a missing
+      table) and nothing at all asserts the list is complete, so a new model
+      column with no entry passes the whole suite and breaks every deployed
+      database. A checked-in baseline schema snapshot, migrated forward and
+      diffed against `Base.metadata`, turns that into a CI failure. (b)
+      `SHEET_HEADERS` order: `test_export_csv.py` compares the CSV header row to
+      `SHEET_HEADERS` itself, so a column *inserted mid-list* — the exact move
+      invariant #1 forbids, because it misaligns every already-synced row —
+      passes as long as `_card_to_row` moves with it. A golden literal list
+      pinned in the test makes the insert fail and the append pass. Decide with
+      it what the migrations baseline is (earliest deployed shape vs. today's
+      production shape) (medium; implement directly; inline)
+- [ ] Production health monitoring does not depend on the routine's network
+      policy (2026-08-20 review, hit during that run): Phase 1 of the daily
+      routine pings
+      `https://cardlister-production.up.railway.app/api/health`, and from the
+      scheduled cloud sandbox that request is refused by the egress proxy
+      (403 to CONNECT), so the health check silently cannot run — the one step
+      of the routine meant to notice a failed deploy or a stale call-up poller.
+      Nothing is wrong with the app; the check just has no route to it. Move
+      the ping into a scheduled GitHub Actions workflow that fails the run when
+      `ok`/`db` is false or the poller is stale, so health is watched from
+      somewhere that can reach it and a failure shows up as a red run rather
+      than a missing sentence in a report. Keep the routine's own attempt —
+      when it works it is free — but have it report the block explicitly rather
+      than the result (quick win; implement directly; inline — new workflow
+      plus a note in `docs/notes/daily-routine-prompt.md`)
+- [ ] Mark-sold accepts a date in the future (2026-08-20 review, found while
+      fixing the UTC default): the picker carries no `max`, and
+      `MarkSoldRequest` validates only `sold_price > 0` — nothing bounds
+      `sold_at` at all. A mistyped year (2062) is accepted silently, and from
+      there it is permanent furniture: it appears in the `sold-years` picker
+      forever, it sorts to the end of every tax export, and the only way back
+      is unmark-sold and redo. Cap the input at today's local date and reject a
+      `sold_at` more than a day ahead server-side (a day of slack, since the
+      client submits an instant and the two clocks need not agree). Pair it
+      with a floor on how far back a sale can be dated only if the owner wants
+      one — backdating a sale is legitimate, post-dating one is not (quick win;
+      implement directly; inline — Inventory.jsx plus a schema validator and
+      its test)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -326,6 +387,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       or keep it but label it, and have the Scanner/Inventory copy buttons
       surface that (quick win; implement directly; inline — `routers/ebay.py`
       plus its test)
+- [ ] Backup snapshots are written to container-local disk, not the volume
+      (2026-08-19 review): `download_backup` calls `tempfile.mkstemp()`, which
+      lands in the container's `/tmp` rather than on the Railway volume that
+      holds the database. `VACUUM INTO` writes a full copy of the DB there, so
+      the one recovery tool the app has gets less reliable exactly as the
+      database it protects grows, and it fails with a bare 500 ("Backup
+      snapshot failed") that says nothing about disk. Point the temp file at
+      the DB's own directory (guaranteed to be sized for at least one copy of
+      it) or honour a `TMPDIR`, and distinguish "out of space" from "snapshot
+      failed" in the error. Note the export must still be deleted on the way
+      out — the existing `BackgroundTask(os.unlink, …)` covers that, and moving
+      the file onto the volume makes forgetting it much more expensive (quick
+      win; implement directly; inline)
 - [ ] eBay title truncation cannot spare the flags, because it can only cut a
       prefix (2026-08-19 review, deferred out of the truncation fix that
       shipped the same day). **Current behaviour:** unit order is
@@ -847,6 +921,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       and priced at Opus rates its whole reason for existing is invisible in
       the one report that would show it. Now a test failure instead of a silent
       67% overstatement.
+- [x] 2026-08-20 — Listing text says a card has no price instead of offering
+      `$0.00`: `ebay_listing_text` fell back to `suggested_price or 0`, so a
+      card saved before the comps lookup resolved put `PRICE:\n$0.00` on the
+      clipboard — and that block is pasted straight into eBay's sell form. A
+      zero reads as a filled-in field rather than a missing one, so unlike a
+      wrong player name it is not caught on review. The endpoint now returns
+      `price: null` plus a `has_price` flag (non-positive counts as unset), and
+      both copy paths — the Scanner save toast and Inventory's Copy Text /
+      Open eBay — say the card has no price yet and point at Comps.
+- [x] 2026-08-20 — Mark-sold picker pre-fills the local date, not the UTC one:
+      the default came from `new Date().toISOString().slice(0, 10)`, so from
+      8pm EDT onward it offered **tomorrow** and an evening sale was stamped a
+      day late; submit had the mirror-image problem, since a bare
+      `YYYY-MM-DD` parses as UTC midnight, a boundary readers west of UTC
+      cross. The default now comes from local calendar parts and the submitted
+      instant is anchored at noon UTC on the picked day, which keeps the picked
+      date intact for every consumer that reads the stored datetime's date part
+      (Sheets "Date Sold", the tax-year export, days-to-sell). Tested pure
+      helper in `frontend/src/lib/soldDate.js`; verified in a real browser with
+      the clock at 9pm EDT. Deliberately only the mark-sold half — the
+      analytics day-boundary item stays design-first.
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`

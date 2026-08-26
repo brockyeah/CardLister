@@ -154,17 +154,31 @@ def ebay_listing_text(card_id: int, db: Session = Depends(get_db)):
 
     title = build_title(card)
     description = build_description(card)
-    price = card.listed_price if card.listed_price is not None else (card.suggested_price or 0)
+    # A card can reach this endpoint with no price at all — saved before the
+    # comps lookup resolved, or with every pricing source failing. The old
+    # `or 0` fallback rendered that as `PRICE:\n$0.00`, which is pasted
+    # straight into eBay's sell form and reads as a filled-in field rather
+    # than a missing one: unlike a wrong player name, "$0.00" is not a typo a
+    # seller catches on review. Say the price is missing instead of inventing
+    # one. `has_price` lets the copy buttons warn before the paste happens.
+    raw_price = card.listed_price if card.listed_price is not None else card.suggested_price
+    price = float(raw_price) if raw_price is not None else None
+    # Non-positive is treated as unset for the same reason the pricing UI
+    # renders an unusable comp price as unavailable: a $0.00 sale price is
+    # never a real one, so it can only mislead.
+    has_price = price is not None and price > 0
+    price_block = f"${price:.2f}" if has_price else "(not set — look up comps before listing)"
 
     return {
         "title": title,
         "description": description,
-        "price": round(float(price), 2),
+        "price": round(price, 2) if has_price else None,
+        "has_price": has_price,
         # Pre-baked text ready for navigator.clipboard.writeText on the frontend.
         # Two newlines between sections so it's easy to grab one piece at a time.
         "clipboard_text": (
             f"TITLE:\n{title}\n\n"
-            f"PRICE:\n${price:.2f}\n\n"
+            f"PRICE:\n{price_block}\n\n"
             f"DESCRIPTION:\n{description}"
         ),
         "ebay_sell_url": "https://www.ebay.com/sl/sell",

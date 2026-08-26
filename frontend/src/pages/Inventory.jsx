@@ -11,7 +11,11 @@ import {
 import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
+import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
+
+// Shown when the listing text was built for a card that has no price yet.
+const NO_PRICE_WARNING = 'This card has no price yet, so the listing text has none either — look up comps before you list it.'
 
 function StatTile({ label, value, hint }) {
   return (
@@ -25,7 +29,7 @@ function StatTile({ label, value, hint }) {
 
 function MarkSoldModal({ card, onClose, onConfirm }) {
   const [price, setPrice] = useState(card.listed_price ?? '')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayLocalDate())
   const [saving, setSaving] = useState(false)
 
   const submit = async (e) => {
@@ -34,7 +38,9 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
     try {
       await onConfirm({
         sold_price: Number(price),
-        sold_at: new Date(date).toISOString(),
+        // Null lets the backend stamp its own time rather than sending an
+        // Invalid Date; the picker is `required`, so this is the odd path.
+        sold_at: soldAtFromDateInput(date),
       })
       onClose()
     } finally {
@@ -350,6 +356,10 @@ export default function Inventory() {
       const text = await getEbayListingText(card.id)
       try {
         await navigator.clipboard.writeText(text.clipboard_text)
+        // Quiet by design, with one exception: text copied for a card with no
+        // price carries no price, and the paste into eBay is the last moment
+        // that is cheap to notice.
+        if (text.has_price === false) alert(NO_PRICE_WARNING)
         return true
       } catch {
         // Clipboard API blocked — fall back to a prompt for manual copy.
@@ -369,7 +379,9 @@ export default function Inventory() {
       const text = await getEbayListingText(card.id)
       try {
         await navigator.clipboard.writeText(text.clipboard_text)
-        alert('Listing text copied to clipboard — paste into eBay after the page opens.')
+        alert(text.has_price === false
+          ? `Listing text copied — paste into eBay after the page opens.\n\n${NO_PRICE_WARNING}`
+          : 'Listing text copied to clipboard — paste into eBay after the page opens.')
       } catch {
         // Clipboard API blocked — fall back to showing the text in a prompt for manual copy.
         window.prompt('Copy this listing text to paste into eBay:', text.clipboard_text)

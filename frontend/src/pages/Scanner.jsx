@@ -279,8 +279,13 @@ export default function Scanner() {
       // Workaround: copy a complete title+price+description block to the
       // clipboard, then open eBay's sell page so user can paste.
       let clipboardOk = false
+      // The listing text carries no price when the card was saved before
+      // pricing resolved. Say so here — the whole flow is "paste this into
+      // eBay", and a missing price is only noticeable before the paste.
+      let priceMissing = false
       try {
         const text = await getEbayListingText(created.id)
+        priceMissing = text.has_price === false
         await navigator.clipboard.writeText(text.clipboard_text)
         clipboardOk = true
       } catch {
@@ -293,7 +298,9 @@ export default function Scanner() {
       setToast({
         id: created.id,
         message: clipboardOk
-          ? 'Card saved. Listing text copied to clipboard — paste it into eBay.'
+          ? (priceMissing
+            ? 'Card saved. Listing text copied — but this card has no price yet, so the text has none either. Set one from Inventory → Comps.'
+            : 'Card saved. Listing text copied to clipboard — paste it into eBay.')
           : 'Card saved. (Could not access clipboard — open the card in Inventory to copy manually.)',
       })
       setTimeout(() => setToast(null), 8000)
