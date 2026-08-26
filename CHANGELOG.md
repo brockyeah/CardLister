@@ -49,6 +49,51 @@ only in `[Unreleased]` on a branch is not in prod yet.
   fraction belongs — `13.25` would charge 1325% and turn every net negative.
   The production Dockerfile passes no build args, so a Railway deploy uses the
   defaults; wiring the override through the image is a backlog item.
+## [Unreleased] — branch `claude/sweet-rubin-1kofaj`
+
+### Changed
+- Condition is chosen from a list of grades instead of typed. The field
+  defaulted to "NM" but accepted any string, and three different paths wrote
+  to it — the review form, vision extraction, and CSV import — so the same
+  grade accumulated under several spellings: "NM", `"nm "` with the trailing
+  space a text box invites, and "Near Mint" as the model tends to phrase it.
+  Nothing downstream treated those as equal, so one physical grade fragmented
+  across the inventory table, the Google Sheet's `Condition` column, and the
+  sold-cards tax export, and no filter or grouping over condition could ever
+  be trusted. The review form now offers `RAW / GEM-MT / NM-MT / NM / EX / VG
+  / POOR`, and folds a recognized spelling to its canonical grade the moment
+  the form receives it — a scanned "Near Mint" shows, and saves, as NM.
+- The CSV importer folds the same way, because that is the one entry point
+  that sees spellings this app did not produce: a hand-edited sheet says
+  "Near Mint" where the app says "NM". `POST /api/cards` deliberately does
+  **not** fold. That path stores strings byte-for-byte, which is precisely
+  what the formula-injection tests in `test_export_csv.py` pin — a condition
+  of `" =cmd|' /c calc'!A1"` has to reach the exporter intact for the escape
+  to have something to escape.
+
+### Added
+- `normalize_condition` (`backend/services/card_fields.py`), deliberately
+  conservative in two ways that matter more than the tidying it does. It
+  returns anything it does not recognize **unchanged**: "LP" and "PSA 10" are
+  real grades this app has no opinion on, and `-NM` must keep its leading
+  hyphen or the CSV formula escape and the export/import round-trip both stop
+  being identities. And it folds only spellings that name the *same* grade —
+  "Mint" and "PR" are left alone on purpose, because "Mint" sits between
+  GEM-MT and NM-MT and picking one would restate what the seller is claiming
+  about the card. That is a different act from correcting a typo, and the
+  seller is the only one entitled to it.
+- An unrecognized value is appended to the dropdown as its own option rather
+  than dropped. A `<select>` whose value matches no option renders the first
+  one, so without this a card stored as "PSA 10" would have shown as RAW and
+  been saved that way on the next edit — the field silently rewriting itself
+  on a form the user opened for an unrelated reason.
+- `backend/tests/fixtures/condition_cases.json`, a case table both suites
+  read — the same shape as the eBay-title parity fixture, and for the same
+  reason: `frontend/src/lib/condition.js` mirrors the backend table, so drift
+  on any listed case fails one suite or the other rather than diverging
+  quietly. 46 backend and 51 frontend cases, including the pass-through
+  guarantees above and a check that a card whose condition reads
+  `constructor` is not resolved off the lookup object's prototype.
 
 ## [Unreleased] — branch `fix/scan-nullish-result`
 

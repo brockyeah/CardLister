@@ -83,6 +83,68 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       size; add orphan count and bytes beside them so the existing tool gets
       used before the volume fills (quick win; implement directly; inline —
       reuses the cleanup endpoint's own preview query)
+- [ ] The cheat-sheet teaches the model both halves of a reversed correction
+      (2026-08-24 review): `build_cheatsheet` (`services/learning.py:74-87`)
+      dedups on the **whole rendered rule string**, so two corrections of the
+      same field in the same set produce two different strings and both survive
+      into the prompt. Correct "Chrome" → "Chrome Prospects" today and
+      "Chrome Prospects" → "Chrome" next week — because the first fix was
+      wrong — and every subsequent scan carries a pair of contradictory
+      instructions for the same field, with nothing marking the newer one as
+      the one that stands. Rows are already ordered `created_at desc`, so the
+      fix is a one-line change of the dedup key to `(context, field)`: the
+      first rule seen for a field is the newest and the only one that should
+      be taught. It also stops a much-corrected field from eating the 30-rule
+      budget and crowding out every other lesson, and it gets *worse* the
+      longer the app is used — the contradiction rate rises with the
+      correction count (quick win; implement directly; inline — learning.py
+      plus a test that a reversed correction yields one rule, not two)
+- [ ] The exact-match override silently stops firing as the collection grows
+      (2026-08-24 review): `find_exact_match` (`services/learning.py:99-110`)
+      pulls the **100 most recent corrections for the card's year** and then
+      linear-scans them in Python for a brand + card-number match. Past 100
+      corrections in one year — a single winter of listing gets there — an
+      older correction for the exact card being scanned falls out of the
+      window and the overlay just doesn't happen. There is no error and no
+      note; the feature quietly degrades into doing nothing for the earliest
+      cards, which are precisely the ones a user is most likely to have
+      already taught. Both match fields are already normalized on write
+      (`_norm` casefolds and strips), so the filter can move into SQL
+      (`func.lower(func.trim(...))`, as `check_duplicate` already does in
+      `routers/cards.py`) and drop the limit entirely — bounded by the match,
+      not by recency (quick win–medium; implement directly; inline — needs a
+      test with >100 corrections in one year pinning that the 101st still
+      matches)
+- [ ] A failed row-number parse duplicates a card in the Sheets mirror
+      (2026-08-24 review): `sync_card`'s append branch
+      (`services/google_sheets.py:292-306`) writes the row, then parses
+      `updates.updatedRange` to learn which row it landed on, and returns
+      `None` if that parse raises. `_sync_card_to_sheets` only persists
+      `sheets_row` when a row comes back, so the card keeps a NULL
+      `sheets_row` — and its **next** edit takes the append branch again,
+      adding a second row for the same card while the first stays behind.
+      Every later edit appends again. Nothing raises, nothing logs, and the
+      inventory silently grows copies in the sheet. The append itself
+      succeeded, so the recovery is to find the row rather than give up:
+      fall back to `_last_used_row` (already written, already called under
+      the same lock by `rewrite_all_rows`) when the range is unparseable.
+      Note the resync repair tool fixes the symptom but only when someone
+      notices (medium; implement directly; inline — needs a fake whose append
+      returns a malformed `updatedRange`)
+- [ ] Backfill the conditions already in the database (2026-08-24, follow-on
+      to the condition dropdown shipped the same day): `normalize_condition`
+      is applied at the two seams where new values arrive — the review form
+      and CSV import — so everything saved *before* today keeps whatever
+      spelling it has, in both the DB and the Sheets `Condition` column. The
+      fragmentation the dropdown was built to stop is therefore still sitting
+      in the existing inventory. Add a one-shot action on the Analytics
+      manage-data panel that reports how many rows would change and to what
+      **before** applying (the same dry-run-then-apply shape the CSV import
+      preview item asks for), then applies the fold and triggers the existing
+      Sheets resync. Unrecognized values are left alone by construction, so
+      the blast radius is exactly the rows whose spelling the app already
+      recognizes (quick win; implement directly; inline — reuses
+      `services/card_fields.py` and `POST /api/sheets/resync`)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -455,6 +517,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       with a select (RAW, GEM-MT, NM-MT, NM, EX, VG, POOR) and normalize known
       variants on CSV import (quick win; implement directly; inline — touches
       CardForm.jsx)
+- [ ] eBay fee + net-proceeds estimate: show the final-value fee (env-configurable
+      rate, default ~13.25% + $0.30) and net proceeds next to the price in the
+      Comps modal and mark-sold dialog — pricing today shows gross only, so
+      thin-margin cards look better than they are (quick win; implement directly —
+      display-only math, no schema; inline)
 - [ ] Scanner batch-review keyboard shortcuts: Enter = save & advance, ←/→ move
       through the queue — batch review is the highest-repetition flow in the app
       and is entirely mouse-driven today (quick win–medium; implement directly;
@@ -654,6 +721,26 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the PR: the first cut charged a flat $0.30, understating the fee on every
       card over $10. Two follow-ups are open above: pricing *to* a target net,
       and making the schedule settable on the Railway image.
+- [x] 2026-08-24 — Condition is a dropdown of canonical grades instead of a
+      free-text box: the field defaulted to "NM" but accepted anything, from
+      the form, from vision extraction, and from CSV import, so "NM", `"nm "`
+      and "Near Mint" all accumulated as distinct values in the inventory, the
+      Sheets `Condition` column and the sold-cards tax export. `CardForm` now
+      renders `RAW / GEM-MT / NM-MT / NM / EX / VG / POOR` and folds a
+      recognized spelling to its canonical grade on receipt, so a scanned
+      "Near Mint" arrives as NM; the CSV importer folds the same way, which is
+      where other people's spellings come in. `normalize_condition` returns
+      anything it does not recognize **unchanged** — "LP" and "PSA 10" survive
+      and are offered as their own dropdown option (a `<select>` with no
+      matching option renders the first one, which would have rewritten a
+      graded card to RAW on the next save), "Mint" and "PR" are deliberately
+      not folded because mapping a value onto a *different* grade restates
+      what the seller is claiming, and "-NM" keeps its leading `-` so the CSV
+      formula escape and the export/import round-trip still hold. Backend is
+      the source of truth (`services/card_fields.py`), the frontend mirrors it,
+      and both suites read `backend/tests/fixtures/condition_cases.json`.
+      `POST /api/cards` deliberately does not fold — that path stores strings
+      verbatim, which is what the formula-injection tests pin. (PR #57)
 - [x] 2026-08-19 — eBay titles truncate on unit boundaries instead of mid-token:
       an over-length title was cut with `title[:80]`, which sliced wherever the
       80th character landed — turning a `/99` serial into `/9`, `REFRACTOR`

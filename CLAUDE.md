@@ -68,6 +68,14 @@ CSV export escapes formula-leading cells (`=`, `+`, `-`, `@`, and apostrophe-led
 
 `POST /api/sheets/resync` is a **clear-then-rewrite** of the whole Inventory tab, so it is idempotent and safe to run repeatedly — that is what makes it a usable repair tool. Ordering is `created_at, id`; the `id` tiebreaker is load-bearing, since a CSV import stamps many rows in the same instant and without it two runs would assign different rows. `delete_card` **blanks** its row rather than removing it: removing a row shifts every row below it up and silently invalidates every later card's `sheets_row`. All three writers (`sync_card`, `rewrite_all_rows`, `blank_row`) serialize on a module-level `threading.Lock` and re-check their row *inside* it — dropping that guard lets a save or delete racing a resync write over another card's row.
 
+### Canonical field values (`services/card_fields.py`)
+
+`condition` reaches the DB from three places — the review form, vision extraction, and CSV import — and used to be free text on all three, so "NM", `"nm "`, and "Near Mint" accumulated as distinct values in the inventory, the Sheets `Condition` column, and the sold-cards tax export. `normalize_condition()` folds a *recognized spelling* to one of `CONDITION_VALUES`, and returns everything else **unchanged** — including non-strings. That pass-through is load-bearing twice over: `"-NM"` must keep its leading `-` or the CSV formula escape and the export/import round-trip both break, and `"Mint"`/`"PR"` are deliberately not folded because mapping a value onto a *different* grade restates what the seller is claiming about the card.
+
+Applied at two seams only: the CSV importer (where other people's spellings arrive) and `CardForm`'s dropdown, which folds on receipt so a scanned "Near Mint" selects NM. **`POST /api/cards` deliberately does not fold** — that path stores strings verbatim, which is what the formula-injection tests in `test_export_csv.py` pin.
+
+Same mirror shape as the eBay title: `frontend/src/lib/condition.js` duplicates the table, and `backend/tests/fixtures/condition_cases.json` is read by both suites so drift on a listed case fails loudly. An unrecognized value is appended to the dropdown as its own option — a `<select>` with no matching option renders the first one, which would silently rewrite a `PSA 10` card to `RAW` on the next save.
+
 ### Auth (`auth.py`)
 
 `CARDLISTER_USERS="user:pass,user2:pass2"` parsed per-request (no caching, so env changes take effect live and removing a user invalidates their tokens immediately), falling back to a single `owner` user. HS256 JWT, 30-day TTL, `hmac.compare_digest`. `validate_secrets()` runs at startup and **refuses to boot** in production with default secrets.
