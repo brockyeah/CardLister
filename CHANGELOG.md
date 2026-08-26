@@ -10,168 +10,11 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `claude/sweet-rubin-haleik`
+## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
 
-### Added
-- Every price the app puts in front of a pricing decision is gross, and eBay
-  takes ~13.25% + $0.30 off the top of a sale. The Comps modal and the Mark as
-  Sold dialog now show the estimated net beside the figure they already
-  showed: comps say $10, the seller receives $8.37. The gap is proportionally
-  worst on the cheap raw cards that make up most of the inventory — the flat
-  $0.30 alone is 3% of a $10 sale, and below about $0.35 the fee exceeds the
-  sale entirely, which the estimate reports as a negative net rather than
-  rounding it up to zero. In Mark as Sold the figure tracks the price as it is
-  typed, so it lands while the seller is deciding whether to accept the number,
-  not afterwards. It is labelled an estimate everywhere it renders and says
-  what it leaves out: eBay charges the fee on the total the buyer pays, which
-  includes shipping and the sales tax eBay collects and remits — money the
-  seller never receives but is charged a percentage of — and
-  promoted-listing fees are not modelled, so real proceeds run a little lower.
-  An unusable price shows the same em dash the comps list uses rather than a
-  plausible-looking `$0.00`.
-- Both halves of eBay's fee are **tiered**, and modelling either as a flat
-  number is wrong inside this inventory's ordinary range. The per-order charge
-  is $0.30 at or under $10 and **$0.40 above it**, so a flat $0.30 understated
-  the fee on every card over $10 — most of them; a $24.99 card nets $21.28,
-  not $21.38. The percentage is 13.25% up to $7,500 and 2.35% only on the
-  portion **above** that, applied per tier rather than as one rate chosen by
-  the total: a $10,000 card pays 13.25% on the first $7,500 and 2.35% on the
-  rest, and charging the low rate on the whole sale would understate the fee
-  by ~$820 on exactly the card where the number matters most. eBay's standing
-  50%-off promotion on singles at $1,000+ is deliberately not modelled — it is
-  a promotion rather than the schedule, and an estimate that errs optimistic
-  is worse than useless on a pricing decision. Every rate and threshold is
-  printed under the figure, so a stale rate is visible the day eBay changes
-  one. The flat-fee bug was caught by CodeRabbit on the PR and confirmed
-  against eBay's published 2026 schedule before the math changed.
-- The schedule lives in one place (`lib/fees.js`) and each field honours a
-  `VITE_EBAY_FEE_*` build override, rejecting a percentage written where a
-  fraction belongs — `13.25` would charge 1325% and turn every net negative.
-  The production Dockerfile passes no build args, so a Railway deploy uses the
-  defaults; wiring the override through the image is a backlog item.
-## [Unreleased] — branch `claude/sweet-rubin-1kofaj`
+### PR #52 — Pricing sources run concurrently
 
-### Changed
-- Condition is chosen from a list of grades instead of typed. The field
-  defaulted to "NM" but accepted any string, and three different paths wrote
-  to it — the review form, vision extraction, and CSV import — so the same
-  grade accumulated under several spellings: "NM", `"nm "` with the trailing
-  space a text box invites, and "Near Mint" as the model tends to phrase it.
-  Nothing downstream treated those as equal, so one physical grade fragmented
-  across the inventory table, the Google Sheet's `Condition` column, and the
-  sold-cards tax export, and no filter or grouping over condition could ever
-  be trusted. The review form now offers `RAW / GEM-MT / NM-MT / NM / EX / VG
-  / POOR`, and folds a recognized spelling to its canonical grade the moment
-  the form receives it — a scanned "Near Mint" shows, and saves, as NM.
-- The CSV importer folds the same way, because that is the one entry point
-  that sees spellings this app did not produce: a hand-edited sheet says
-  "Near Mint" where the app says "NM". `POST /api/cards` deliberately does
-  **not** fold. That path stores strings byte-for-byte, which is precisely
-  what the formula-injection tests in `test_export_csv.py` pin — a condition
-  of `" =cmd|' /c calc'!A1"` has to reach the exporter intact for the escape
-  to have something to escape.
-
-### Added
-- `normalize_condition` (`backend/services/card_fields.py`), deliberately
-  conservative in two ways that matter more than the tidying it does. It
-  returns anything it does not recognize **unchanged**: "LP" and "PSA 10" are
-  real grades this app has no opinion on, and `-NM` must keep its leading
-  hyphen or the CSV formula escape and the export/import round-trip both stop
-  being identities. And it folds only spellings that name the *same* grade —
-  "Mint" and "PR" are left alone on purpose, because "Mint" sits between
-  GEM-MT and NM-MT and picking one would restate what the seller is claiming
-  about the card. That is a different act from correcting a typo, and the
-  seller is the only one entitled to it.
-- An unrecognized value is appended to the dropdown as its own option rather
-  than dropped. A `<select>` whose value matches no option renders the first
-  one, so without this a card stored as "PSA 10" would have shown as RAW and
-  been saved that way on the next edit — the field silently rewriting itself
-  on a form the user opened for an unrelated reason.
-- `backend/tests/fixtures/condition_cases.json`, a case table both suites
-  read — the same shape as the eBay-title parity fixture, and for the same
-  reason: `frontend/src/lib/condition.js` mirrors the backend table, so drift
-  on any listed case fails one suite or the other rather than diverging
-  quietly. 46 backend and 51 frontend cases, including the pass-through
-  guarantees above and a check that a card whose condition reads
-  `constructor` is not resolved off the lookup object's prototype.
-## [Unreleased] — branch `claude/intelligent-babbage-s4at2t`
-
-### Fixed
-- A NUL byte in an `/uploads` filename (`/uploads/%00`) no longer raises a 500
-  with a traceback on a public route. `.resolve()` throws "embedded null byte"
-  before the containment check runs — the same 500-where-404-is-honest class
-  the `/uploads/%2e` fix closed, one syscall later, and reachable by any
-  unauthenticated scanner. Unresolvable names now 404 like every other
-  non-file, with a test pinning `%00` in both bare and embedded positions.
-- The eBay title preview now splits words on exactly the whitespace Python
-  does. The mirror used `\s`, which misses the C1 separators and NEL
-  (`\x85` — reachable as cp1252 `…` mojibake in a paste or CSV import) and
-  wrongly includes BOM/ZWNBSP, so near the 80-character cap the preview and
-  the backend could truncate at different unit boundaries — the exact
-  divergence the shared fixture exists to prevent, on characters no fixture
-  case contained. The mirror now uses a character class verified equal to
-  Python's whitespace set across the whole BMP, the serial number is stripped
-  the same way, and three new fixture cases pin NEL splitting, BOM
-  preservation, and a title whose truncation is decided by code-point (not
-  UTF-16) measurement. The JS parity test itself measured the cap in UTF-16
-  units — it would have *failed a correct implementation* on any fixture case
-  straddling the cap — and now measures in code points like the code it tests.
-- A 200 from `/api/scan` whose body is truthy but not a scan response (a proxy
-  or gateway answering with its own JSON or HTML) is now classified as a scan
-  failure. The nullish-body fix caught empty bodies, but a shapeless truthy one
-  still landed in `ready` — an inert Review button and no Retry, the same dead
-  end through a third door — and in single-scan mode it silently discarded the
-  staged photo. Both paths now key on the one field every real scan response
-  carries (`image_path`, stored before extraction in mock mode and on failure
-  alike); the batch item gets Retry and the single-scan photo stays staged.
-- Analytics and its manage-data panel no longer render a raw FastAPI `detail`
-  into JSX. Six catch blocks set `e.response?.data?.detail` directly into
-  state, and a 422's `detail` is an array of objects — rendering it crashes
-  React and white-screens the page, the exact bug class the Scanner's
-  `formatApiError` helper was built for in the same week. All six now go
-  through the helper; the one guarded spot (CSV import) loses its ad-hoc
-  `typeof` check for the shared one.
-- "Discard & Start Over" is disabled while a save is in flight. A discard
-  mid-save cannot stop the save — the request is already gone — so the form
-  cleared and then a "Card saved" toast contradicted the user's last action.
-
-### Removed
-- Two dependencies nothing imports: `passlib` (auth compares plaintext env
-  passwords with `hmac.compare_digest`; hashing never shipped) and
-  `python-dotenv` (the README tells the user to export `.env` themselves —
-  the app never loads it). Both were installed and pip-audited in every CI run
-  and deploy for zero imports. Also gone: the root `package-lock.json` (an
-  empty lockfile with no root `package.json`, untouched since the initial
-  commit), a dead `export default` in `api.js` every consumer ignores in
-  favour of named exports, and the stray `eslint-disable` comment CLAUDE.md
-  itself documented as reading to nothing.
-
-### Tests
-- The Sheets-mirror fake now slices `values().get` responses to the requested
-  column span like the real API. It answered every probe at full width, so
-  `test_resync_clears_residue_invisible_to_a_column_a_probe` passed even
-  against the regression it is named after (verified by reintroducing the
-  `A:A` probe: the suite stayed green before this change and fails after).
-- `UsageEvent` joins the `db_session` hard-delete list, per the repo's own
-  isolation rule — `test_user_admin`'s exact-count assertions only passed
-  because no alphabetically-earlier test happened to write usage rows.
-- The sold-CSV export's documented null-`sold_at` contract (excluded from a
-  year filter, listed last with an empty Date Sold in the unfiltered file) is
-  now pinned; previously a sort key that crashed on `None` passed the suite.
-  HEAD cache headers on the SPA shell and hashed assets are pinned too —
-  the header logic is shared with GET, but only GET was asserted.
-
-### Docs
-- CLAUDE.md refreshed against a re-derivation of every invariant: the
-  `(subscription)` cost rule is an `endswith` check with no leading space and
-  is now test-pinned on both sides; invariant #9 (single process) now names
-  the Sheets mirror lock as a second thing that silently breaks under
-  `--workers`; invariant #1 notes `SOLD_EXPORT_HEADERS` is a deliberately
-  separate contract from `SHEET_HEADERS`; the "two download endpoints" count
-  caught up with the third.
-## [Unreleased] — branch `feat/pricing-parallel-fanout`
-
-### Changed
+#### Changed
 - Pricing sources now run concurrently instead of one after another. The chain
   only ever expressed *preference* — no source's input comes from another's
   output — yet the user waited for the sum of four timeouts (15 + 20 + 15 +
@@ -189,15 +32,63 @@ only in `[Unreleased]` on a branch is not in prod yet.
   per-source `httpx` timeouts, which apply per connect/read/write/pool
   operation rather than as a request budget.
 
-### Added
+#### Added
 - First tests for the pricing endpoint (`test_pricing_chain.py`, 12 cases),
   which had none. The ten contract cases were written against the serial
   implementation and pass unchanged after the refactor, so they pin the
   behaviour rather than describing what it became; the two concurrency cases
   fail against the old code.
-## [Unreleased] — branch `claude/sweet-rubin-20mmgb`
 
-### Fixed
+### PR #53 — Listing text stops inventing $0.00; local mark-sold date
+
+#### Fixed
+- The eBay listing text no longer offers `$0.00` for a card that has no price.
+  `ebay_listing_text` fell back to `card.suggested_price or 0`, so a card saved
+  before the comps lookup resolved — or one where every pricing source failed —
+  produced `PRICE:\n$0.00` in the clipboard block that is pasted straight into
+  eBay's sell form. That is not a shortened truth the way a dropped title flag
+  is: a zero reads as a filled-in field, and unlike a wrong player name it is
+  not the kind of thing a seller catches on review, so the listing can go live
+  priced at nothing. The endpoint now says the price is not set instead of
+  inventing one, and returns `price: null` plus a `has_price` flag; a
+  non-positive price counts as unset for the same reason the comps panel renders
+  an unusable comp as unavailable. Both copy paths surface it before the paste —
+  the Scanner save toast and the Inventory Copy Text / Open eBay buttons say the
+  card has no price yet and point at Comps.
+- The mark-sold date picker pre-fills the day the user is actually having.
+  `MarkSoldModal` defaulted it from `new Date().toISOString().slice(0, 10)`,
+  which is the *UTC* date, so from 8pm EDT onward it offered **tomorrow** and an
+  evening sale was stamped a day late unless the user noticed and corrected it.
+  The submit half had the mirror-image problem: a bare `YYYY-MM-DD` handed to
+  `new Date()` parses as UTC midnight per spec, which sits against a boundary
+  that a reader west of UTC crosses. Sold dates feed the Sheets "Date Sold"
+  column, the tax-year CSV export and the planned days-to-sell analytics, so a
+  date off by one propagates — and a sale that slides across New Year's lands in
+  the wrong tax return. The default now comes from local calendar parts and the
+  submitted instant is anchored at noon UTC on the picked day, which keeps the
+  picked calendar date intact for every consumer that reads the stored
+  datetime's date part. Both halves live in a tested pure helper
+  (`frontend/src/lib/soldDate.js`). This is deliberately only the mark-sold
+  half of the app's UTC problem; the analytics day-boundary item stays
+  design-first, since changing it re-buckets every historical reading.
+- A four-digit year below 100 in the sold-date helper is taken literally.
+  `Date.UTC(year, …)` applies the legacy two-digit-year remapping, so
+  `0050-08-20` came back as **1950** — a year the user never typed, changed
+  with no error anywhere, which is precisely the class of silent substitution
+  the helper exists to prevent. It now builds the date with `setUTCFullYear`
+  and checks the year alongside the month and day, so a remap cannot slip past
+  the rollover guard (CodeRabbit, PR #53).
+- The frontend suite runs in a fixed non-UTC timezone (`America/New_York`, set
+  in `vite.config.js`). CI runners default to UTC, where a local date and a UTC
+  date are the same string — so the regression test for the mark-sold bug
+  passed just as happily against the bug it was written to catch. The zone is
+  the owner's own, west of UTC where the bug bit, and observes DST. A test
+  asserts the zone is not UTC rather than trusting the config silently, in the
+  spirit of the auth sweep's non-empty self-check (CodeRabbit, PR #53).
+
+### PR #54 — Backups on the volume; download race fix
+
+#### Fixed
 - Database backups are staged on the volume that holds the database, not on
   container-local disk. `download_backup` called `tempfile.mkstemp()` with no
   directory, which on Railway resolves to the container's `/tmp` — ephemeral
@@ -252,7 +143,7 @@ only in `[Unreleased]` on a branch is not in prod yet.
   what follows, treating a value with no ext-value structure as the whole name
   rather than discarding it (CodeRabbit, PR #54).
 
-### Added
+#### Added
 - `saveBlob`'s lifecycle is pinned by tests: the anchor is attached before the
   click, and the object URL survives it, being revoked only on a later task.
   That ordering *is* the download fix, and nothing tested it — a later
@@ -269,9 +160,10 @@ only in `[Unreleased]` on a branch is not in prod yet.
   in the one report that would show it. A preset refresh that updated
   `PRESETS` alone would have mispriced every scan taken through it with no
   error anywhere.
-## [Unreleased] — branch `claude/gifted-bell-0bowys`
 
-### Added
+### PR #55 — CARDLISTER_TZ design + plan (docs only)
+
+#### Added
 - Design doc + implementation plan for a configured local timezone
   (`docs/superpowers/specs/2026-08-22-local-timezone-design.md`,
   `docs/superpowers/plans/2026-08-22-local-timezone.md`). Every timestamp is
@@ -298,53 +190,181 @@ only in `[Unreleased]` on a branch is not in prod yet.
   approach and midnight contract, the default zone, and the Sheets
   date-column format change.
 
-## [Unreleased] — branch `fix/scan-nullish-result`
-## [Unreleased] — branch `claude/sweet-rubin-bnabr7`
 
-### Fixed
-- The eBay listing text no longer offers `$0.00` for a card that has no price.
-  `ebay_listing_text` fell back to `card.suggested_price or 0`, so a card saved
-  before the comps lookup resolved — or one where every pricing source failed —
-  produced `PRICE:\n$0.00` in the clipboard block that is pasted straight into
-  eBay's sell form. That is not a shortened truth the way a dropped title flag
-  is: a zero reads as a filled-in field, and unlike a wrong player name it is
-  not the kind of thing a seller catches on review, so the listing can go live
-  priced at nothing. The endpoint now says the price is not set instead of
-  inventing one, and returns `price: null` plus a `has_price` flag; a
-  non-positive price counts as unset for the same reason the comps panel renders
-  an unusable comp as unavailable. Both copy paths surface it before the paste —
-  the Scanner save toast and the Inventory Copy Text / Open eBay buttons say the
-  card has no price yet and point at Comps.
-- The mark-sold date picker pre-fills the day the user is actually having.
-  `MarkSoldModal` defaulted it from `new Date().toISOString().slice(0, 10)`,
-  which is the *UTC* date, so from 8pm EDT onward it offered **tomorrow** and an
-  evening sale was stamped a day late unless the user noticed and corrected it.
-  The submit half had the mirror-image problem: a bare `YYYY-MM-DD` handed to
-  `new Date()` parses as UTC midnight per spec, which sits against a boundary
-  that a reader west of UTC crosses. Sold dates feed the Sheets "Date Sold"
-  column, the tax-year CSV export and the planned days-to-sell analytics, so a
-  date off by one propagates — and a sale that slides across New Year's lands in
-  the wrong tax return. The default now comes from local calendar parts and the
-  submitted instant is anchored at noon UTC on the picked day, which keeps the
-  picked calendar date intact for every consumer that reads the stored
-  datetime's date part. Both halves live in a tested pure helper
-  (`frontend/src/lib/soldDate.js`). This is deliberately only the mark-sold
-  half of the app's UTC problem; the analytics day-boundary item stays
-  design-first, since changing it re-buckets every historical reading.
-- A four-digit year below 100 in the sold-date helper is taken literally.
-  `Date.UTC(year, …)` applies the legacy two-digit-year remapping, so
-  `0050-08-20` came back as **1950** — a year the user never typed, changed
-  with no error anywhere, which is precisely the class of silent substitution
-  the helper exists to prevent. It now builds the date with `setUTCFullYear`
-  and checks the year alongside the month and day, so a remap cannot slip past
-  the rollover guard (CodeRabbit, PR #53).
-- The frontend suite runs in a fixed non-UTC timezone (`America/New_York`, set
-  in `vite.config.js`). CI runners default to UTC, where a local date and a UTC
-  date are the same string — so the regression test for the mark-sold bug
-  passed just as happily against the bug it was written to catch. The zone is
-  the owner's own, west of UTC where the bug bit, and observes DST. A test
-  asserts the zone is not UTC rather than trusting the config silently, in the
-  spirit of the auth sweep's non-empty self-check (CodeRabbit, PR #53).
+#### Changed (reconciled in this integration)
+- The design and plan were written before PR #53 shipped and assumed mark-sold
+  would submit a bare date stored at midnight. #53 anchors the picked day at
+  noon UTC instead, which is timezone-safe under ordinary conversion — verified
+  for America/New_York in both EDT (noon UTC → 08:00 same day) and EST
+  (→ 07:00 same day), where midnight UTC renders as the *previous* day. Both
+  docs now record that: the exact-midnight carve-out narrows from "the
+  canonical representation of every date-only field" to "legacy rows and
+  CSV-imported bare dates", which puts strictly less weight on the one rule
+  with a documented misread case. Plan steps 3 and 6 become verification
+  rather than change, and a new step 6b pins the noon anchor with an EDT/EST
+  rendering test so a later simplification can't quietly revert it.
+
+### PR #56 — Weekly deep review: uploads NUL 500, title parity, dead weight
+
+#### Fixed
+- A NUL byte in an `/uploads` filename (`/uploads/%00`) no longer raises a 500
+  with a traceback on a public route. `.resolve()` throws "embedded null byte"
+  before the containment check runs — the same 500-where-404-is-honest class
+  the `/uploads/%2e` fix closed, one syscall later, and reachable by any
+  unauthenticated scanner. Unresolvable names now 404 like every other
+  non-file, with a test pinning `%00` in both bare and embedded positions.
+- The eBay title preview now splits words on exactly the whitespace Python
+  does. The mirror used `\s`, which misses the C1 separators and NEL
+  (`\x85` — reachable as cp1252 `…` mojibake in a paste or CSV import) and
+  wrongly includes BOM/ZWNBSP, so near the 80-character cap the preview and
+  the backend could truncate at different unit boundaries — the exact
+  divergence the shared fixture exists to prevent, on characters no fixture
+  case contained. The mirror now uses a character class verified equal to
+  Python's whitespace set across the whole BMP, the serial number is stripped
+  the same way, and three new fixture cases pin NEL splitting, BOM
+  preservation, and a title whose truncation is decided by code-point (not
+  UTF-16) measurement. The JS parity test itself measured the cap in UTF-16
+  units — it would have *failed a correct implementation* on any fixture case
+  straddling the cap — and now measures in code points like the code it tests.
+- A 200 from `/api/scan` whose body is truthy but not a scan response (a proxy
+  or gateway answering with its own JSON or HTML) is now classified as a scan
+  failure. The nullish-body fix caught empty bodies, but a shapeless truthy one
+  still landed in `ready` — an inert Review button and no Retry, the same dead
+  end through a third door — and in single-scan mode it silently discarded the
+  staged photo. Both paths now key on the one field every real scan response
+  carries (`image_path`, stored before extraction in mock mode and on failure
+  alike); the batch item gets Retry and the single-scan photo stays staged.
+- Analytics and its manage-data panel no longer render a raw FastAPI `detail`
+  into JSX. Six catch blocks set `e.response?.data?.detail` directly into
+  state, and a 422's `detail` is an array of objects — rendering it crashes
+  React and white-screens the page, the exact bug class the Scanner's
+  `formatApiError` helper was built for in the same week. All six now go
+  through the helper; the one guarded spot (CSV import) loses its ad-hoc
+  `typeof` check for the shared one.
+- "Discard & Start Over" is disabled while a save is in flight. A discard
+  mid-save cannot stop the save — the request is already gone — so the form
+  cleared and then a "Card saved" toast contradicted the user's last action.
+
+#### Removed
+- Two dependencies nothing imports: `passlib` (auth compares plaintext env
+  passwords with `hmac.compare_digest`; hashing never shipped) and
+  `python-dotenv` (the README tells the user to export `.env` themselves —
+  the app never loads it). Both were installed and pip-audited in every CI run
+  and deploy for zero imports. Also gone: the root `package-lock.json` (an
+  empty lockfile with no root `package.json`, untouched since the initial
+  commit), a dead `export default` in `api.js` every consumer ignores in
+  favour of named exports, and the stray `eslint-disable` comment CLAUDE.md
+  itself documented as reading to nothing.
+
+#### Tests
+- The Sheets-mirror fake now slices `values().get` responses to the requested
+  column span like the real API. It answered every probe at full width, so
+  `test_resync_clears_residue_invisible_to_a_column_a_probe` passed even
+  against the regression it is named after (verified by reintroducing the
+  `A:A` probe: the suite stayed green before this change and fails after).
+- `UsageEvent` joins the `db_session` hard-delete list, per the repo's own
+  isolation rule — `test_user_admin`'s exact-count assertions only passed
+  because no alphabetically-earlier test happened to write usage rows.
+- The sold-CSV export's documented null-`sold_at` contract (excluded from a
+  year filter, listed last with an empty Date Sold in the unfiltered file) is
+  now pinned; previously a sort key that crashed on `None` passed the suite.
+  HEAD cache headers on the SPA shell and hashed assets are pinned too —
+  the header logic is shared with GET, but only GET was asserted.
+
+#### Docs
+- CLAUDE.md refreshed against a re-derivation of every invariant: the
+  `(subscription)` cost rule is an `endswith` check with no leading space and
+  is now test-pinned on both sides; invariant #9 (single process) now names
+  the Sheets mirror lock as a second thing that silently breaks under
+  `--workers`; invariant #1 notes `SOLD_EXPORT_HEADERS` is a deliberately
+  separate contract from `SHEET_HEADERS`; the "two download endpoints" count
+  caught up with the third.
+
+### PR #57 — Condition dropdown of canonical grades
+
+#### Changed
+- Condition is chosen from a list of grades instead of typed. The field
+  defaulted to "NM" but accepted any string, and three different paths wrote
+  to it — the review form, vision extraction, and CSV import — so the same
+  grade accumulated under several spellings: "NM", `"nm "` with the trailing
+  space a text box invites, and "Near Mint" as the model tends to phrase it.
+  Nothing downstream treated those as equal, so one physical grade fragmented
+  across the inventory table, the Google Sheet's `Condition` column, and the
+  sold-cards tax export, and no filter or grouping over condition could ever
+  be trusted. The review form now offers `RAW / GEM-MT / NM-MT / NM / EX / VG
+  / POOR`, and folds a recognized spelling to its canonical grade the moment
+  the form receives it — a scanned "Near Mint" shows, and saves, as NM.
+- The CSV importer folds the same way, because that is the one entry point
+  that sees spellings this app did not produce: a hand-edited sheet says
+  "Near Mint" where the app says "NM". `POST /api/cards` deliberately does
+  **not** fold. That path stores strings byte-for-byte, which is precisely
+  what the formula-injection tests in `test_export_csv.py` pin — a condition
+  of `" =cmd|' /c calc'!A1"` has to reach the exporter intact for the escape
+  to have something to escape.
+
+#### Added
+- `normalize_condition` (`backend/services/card_fields.py`), deliberately
+  conservative in two ways that matter more than the tidying it does. It
+  returns anything it does not recognize **unchanged**: "LP" and "PSA 10" are
+  real grades this app has no opinion on, and `-NM` must keep its leading
+  hyphen or the CSV formula escape and the export/import round-trip both stop
+  being identities. And it folds only spellings that name the *same* grade —
+  "Mint" and "PR" are left alone on purpose, because "Mint" sits between
+  GEM-MT and NM-MT and picking one would restate what the seller is claiming
+  about the card. That is a different act from correcting a typo, and the
+  seller is the only one entitled to it.
+- An unrecognized value is appended to the dropdown as its own option rather
+  than dropped. A `<select>` whose value matches no option renders the first
+  one, so without this a card stored as "PSA 10" would have shown as RAW and
+  been saved that way on the next edit — the field silently rewriting itself
+  on a form the user opened for an unrelated reason.
+- `backend/tests/fixtures/condition_cases.json`, a case table both suites
+  read — the same shape as the eBay-title parity fixture, and for the same
+  reason: `frontend/src/lib/condition.js` mirrors the backend table, so drift
+  on any listed case fails one suite or the other rather than diverging
+  quietly. 46 backend and 51 frontend cases, including the pass-through
+  guarantees above and a check that a card whose condition reads
+  `constructor` is not resolved off the lookup object's prototype.
+
+### PR #58 — eBay fee + net-proceeds estimate
+
+#### Added
+- Every price the app puts in front of a pricing decision is gross, and eBay
+  takes ~13.25% + $0.30 off the top of a sale. The Comps modal and the Mark as
+  Sold dialog now show the estimated net beside the figure they already
+  showed: comps say $10, the seller receives $8.37. The gap is proportionally
+  worst on the cheap raw cards that make up most of the inventory — the flat
+  $0.30 alone is 3% of a $10 sale, and below about $0.35 the fee exceeds the
+  sale entirely, which the estimate reports as a negative net rather than
+  rounding it up to zero. In Mark as Sold the figure tracks the price as it is
+  typed, so it lands while the seller is deciding whether to accept the number,
+  not afterwards. It is labelled an estimate everywhere it renders and says
+  what it leaves out: eBay charges the fee on the total the buyer pays, which
+  includes shipping and the sales tax eBay collects and remits — money the
+  seller never receives but is charged a percentage of — and
+  promoted-listing fees are not modelled, so real proceeds run a little lower.
+  An unusable price shows the same em dash the comps list uses rather than a
+  plausible-looking `$0.00`.
+- Both halves of eBay's fee are **tiered**, and modelling either as a flat
+  number is wrong inside this inventory's ordinary range. The per-order charge
+  is $0.30 at or under $10 and **$0.40 above it**, so a flat $0.30 understated
+  the fee on every card over $10 — most of them; a $24.99 card nets $21.28,
+  not $21.38. The percentage is 13.25% up to $7,500 and 2.35% only on the
+  portion **above** that, applied per tier rather than as one rate chosen by
+  the total: a $10,000 card pays 13.25% on the first $7,500 and 2.35% on the
+  rest, and charging the low rate on the whole sale would understate the fee
+  by ~$820 on exactly the card where the number matters most. eBay's standing
+  50%-off promotion on singles at $1,000+ is deliberately not modelled — it is
+  a promotion rather than the schedule, and an estimate that errs optimistic
+  is worse than useless on a pricing decision. Every rate and threshold is
+  printed under the figure, so a stale rate is visible the day eBay changes
+  one. The flat-fee bug was caught by CodeRabbit on the PR and confirmed
+  against eBay's published 2026 schedule before the math changed.
+- The schedule lives in one place (`lib/fees.js`) and each field honours a
+  `VITE_EBAY_FEE_*` build override, rejecting a percentage written where a
+  fraction belongs — `13.25` would charge 1325% and turn every net negative.
+  The production Dockerfile passes no build args, so a Railway deploy uses the
+  defaults; wiring the override through the image is a backlog item.
 
 ## 2026-08-19 — Empty scan responses classified as errors (PR #51)
 

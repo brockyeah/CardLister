@@ -104,6 +104,22 @@ calendar date, verbatim". Real instants always come from `datetime.utcnow()`
 exact midnight only ever came from the date-picker and bare-date-import
 paths above.
 
+> **Revised 2026-08-25, after PR #53 shipped.** Mark-sold now submits the
+> picked day anchored at **noon UTC** (`frontend/src/lib/soldDate.js`), not a
+> bare date at midnight. That changes the scope of the carve-out below, and for
+> the better: noon UTC renders as the same calendar date under ordinary
+> conversion anywhere within ±12h of UTC — verified for America/New_York in
+> both EDT (noon UTC → 08:00 same day) and EST (→ 07:00 same day) — whereas
+> midnight UTC renders as the *previous* day in either. So new mark-sold rows
+> need no special-casing at all: plain conversion is already correct for them.
+>
+> The exact-midnight rule therefore stops being "the canonical representation of
+> every date-only field" and becomes the narrower "the representation of legacy
+> rows and CSV-imported bare dates". That is strictly less weight on the one
+> piece of this design with a documented misread case (an API caller sending
+> `...T00:00:00Z` and meaning that instant), because the misread can no longer
+> reach anything written by the app's own mark-sold path.
+
 This carve-out is a **contract, not a legacy accommodation** (revised after
 CodeRabbit's review of the first draft, which correctly observed that a
 heuristic without provenance can misread a deliberate midnight instant):

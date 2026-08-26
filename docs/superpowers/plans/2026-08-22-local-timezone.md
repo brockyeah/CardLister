@@ -51,6 +51,12 @@ Patch time via the module attribute per the conftest note.
 
 ## Step 3 — mark-sold write path (backend)
 
+> **Revised 2026-08-25:** PR #53 shipped the noon-UTC anchor, so this step is now
+> *verification*, not change. Confirm `mark_sold` stores what the modal sends and
+> that a noon-anchored row renders on the right calendar date through
+> `card_date()`; do not convert it to a bare-date write.
+
+
 - `backend/routers/cards.py:520`: `card.sold_at =
   timeutils.utc_naive(payload.sold_at) if payload.sold_at else
   datetime.utcnow()`.
@@ -100,6 +106,13 @@ date survives, by design (see the design's risk #7).
 
 ## Step 6 — frontend: modal defaults, date-only submit, `fmtDate`
 
+> **Revised 2026-08-25:** the "submit the picked `YYYY-MM-DD` as-is" bullet is
+> superseded — PR #53's `soldDate.js` already submits a noon-UTC anchor, which is
+> timezone-safe without the server needing date-only semantics. Keep
+> `displayDate`/`todayLocalDateInput` and the `CardTable` change; leave the
+> submit path alone.
+
+
 - New `frontend/src/lib/dates.js`: `todayLocalDateInput()` (browser-local
   `YYYY-MM-DD` from date parts — the picker default, the only remaining
   browser-timezone use) and `displayDate(iso)` — the `fmtDate` replacement
@@ -117,6 +130,14 @@ per the repo's no-jsdom testing note):** `todayLocalDateInput` composes
 from local date parts (mocked `Date` at ±11h offsets);
 `displayDate('2026-08-21T00:00:00')` → Aug 21 regardless of environment tz;
 `displayDate` of a real instant appends `Z` before parsing.
+
+## Step 6b — pin the noon anchor (new, 2026-08-25)
+
+Add a test that a noon-UTC `sold_at` renders on the correct calendar date under
+`CARDLISTER_TZ=America/New_York` in **both** EDT and EST — the property that
+lets step 6 leave PR #53's submit path untouched. Without it, a later
+"simplify" pass could revert the anchor to midnight and only the tax export
+would notice, a year later.
 
 ## Step 7 — docs and process
 

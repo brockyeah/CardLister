@@ -4,7 +4,6 @@ import {
   downloadBackup, importInventoryCsv, getUploadOrphans, cleanupUploadOrphans,
   getStorageUsage, resyncSheet, getSoldYears, downloadSoldCsv,
 } from '../api'
-import { formatApiError } from '../lib/apiError'
 import { formatApiError } from '../lib/apiError.js'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
