@@ -96,8 +96,14 @@ jobs:
           ok=$(jq -r '.ok' body.json)
           db=$(jq -r '.db' body.json)
           stale=$(jq -r '.poller.stale' body.json)
-          # Presentational only, so a default is fine for these three.
-          enabled=$(jq -r '.poller.enabled // "unknown"' body.json)
+          # Presentational only, so a default is fine for these three — but not
+          # via `//` for `enabled`. jq's alternative operator treats `false`
+          # exactly like `null`, and `enabled: false` is a real, deliberate
+          # state (DISABLE_CALLUP_POLLER), so `// "unknown"` would report a
+          # knowingly-disabled poller as if the field were missing. This is the
+          # one summary row that explains *why* alerts are not going out, so
+          # collapsing those two cases defeats its purpose. Test for null.
+          enabled=$(jq -r '.poller.enabled | if . == null then "unknown" else . end' body.json)
           last=$(jq -r '.poller.last_cycle_at // "never"' body.json)
           revision=$(jq -r '.revision // "unknown"' body.json)
 
