@@ -33,6 +33,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Probe /api/health
+        # Pinned rather than inherited. Without `shell:`, a `run:` block gets
+        # `bash -e {0}` — so `-e` is already on and the `set` line below only
+        # adds `-u` and `pipefail`, which is easy to misread when editing.
+        # Naming it makes `-eo pipefail` explicit and independent of runner
+        # defaults. Every command here that may legitimately exit non-zero is
+        # guarded by `||` or an `if`, and all six probe outcomes were verified
+        # under these flags.
+        shell: bash
         env:
           # Recorded in README.md as the production URL. Kept as an env var so
           # an environment rename is a one-line change here.
