@@ -11,8 +11,11 @@ describe('buildEbayTitle parity with backend build_title', () => {
     it(name, () => {
       const result = buildEbayTitle(card)
       expect(result.title).toBe(expected)
-      expect(result.title.length).toBeLessThanOrEqual(EBAY_TITLE_MAX)
-      expect(result.truncated).toBe(result.full.length > EBAY_TITLE_MAX)
+      // Measure in code points, the contract's unit — `.length` counts UTF-16
+      // code units, which double-counts non-BMP characters and would fail a
+      // CORRECT implementation on any fixture case that straddles the cap.
+      expect([...result.title].length).toBeLessThanOrEqual(EBAY_TITLE_MAX)
+      expect(result.truncated).toBe([...result.full].length > EBAY_TITLE_MAX)
     })
   }
 

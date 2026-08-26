@@ -170,6 +170,14 @@ export default function Scanner() {
         stagedBack ? downscaleImage(stagedBack) : null,
       ])
       const result = await scanCard(front, mode, back)
+      // A truthy 200 body without `image_path` is not a scan response (the
+      // real endpoint always includes it — the upload is stored before
+      // extraction). Bail before mutating state so the staged photo survives
+      // for a retry instead of silently vanishing back to the drop zone.
+      if (!result?.image_path) {
+        setError('Scan returned an unusable response — try again.')
+        return
+      }
       setImagePath(result.image_path)
       setMock(!!result.mock)
       setScanId(result.scan_id ?? null)
@@ -271,8 +279,13 @@ export default function Scanner() {
       // Workaround: copy a complete title+price+description block to the
       // clipboard, then open eBay's sell page so user can paste.
       let clipboardOk = false
+      // The listing text carries no price when the card was saved before
+      // pricing resolved. Say so here — the whole flow is "paste this into
+      // eBay", and a missing price is only noticeable before the paste.
+      let priceMissing = false
       try {
         const text = await getEbayListingText(created.id)
+        priceMissing = text.has_price === false
         await navigator.clipboard.writeText(text.clipboard_text)
         clipboardOk = true
       } catch {
@@ -285,7 +298,9 @@ export default function Scanner() {
       setToast({
         id: created.id,
         message: clipboardOk
-          ? 'Card saved. Listing text copied to clipboard — paste it into eBay.'
+          ? (priceMissing
+            ? 'Card saved. Listing text copied — but this card has no price yet, so the text has none either. Set one from Inventory → Comps.'
+            : 'Card saved. Listing text copied to clipboard — paste it into eBay.')
           : 'Card saved. (Could not access clipboard — open the card in Inventory to copy manually.)',
       })
       setTimeout(() => setToast(null), 8000)
@@ -592,6 +607,10 @@ export default function Scanner() {
                   setPricingSource('')
                   setPricingLoading(false)
                 }}
+                // A discard mid-save can't stop the save — createCard is
+                // already in flight — so the form would clear and then a
+                // "Card saved" toast would contradict it.
+                disabled={submitting}
                 className="btn-secondary w-full"
               >
                 Discard & Start Over

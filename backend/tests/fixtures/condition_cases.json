@@ -1,0 +1,253 @@
+{
+  "_comment": "Shared condition-normalization table. Consumed by backend/tests/test_condition_normalization.py and frontend/src/lib/condition.test.js. The backend (backend/services/card_fields.py) is authoritative; frontend/src/lib/condition.js mirrors it so the dropdown offers the same grades the importer folds to. Add a spelling here ONLY when it unambiguously names the same grade \u2014 mapping one grade onto a different one restates what the seller is claiming about the card.",
+  "canonical": [
+    "RAW",
+    "GEM-MT",
+    "NM-MT",
+    "NM",
+    "EX",
+    "VG",
+    "POOR"
+  ],
+  "labels": {
+    "RAW": "RAW \u2014 ungraded",
+    "GEM-MT": "GEM-MT \u2014 gem mint",
+    "NM-MT": "NM-MT \u2014 near mint to mint",
+    "NM": "NM \u2014 near mint",
+    "EX": "EX \u2014 excellent",
+    "VG": "VG \u2014 very good",
+    "POOR": "POOR"
+  },
+  "cases": [
+    {
+      "name": "canonical values are unchanged",
+      "input": "NM",
+      "expected": "NM"
+    },
+    {
+      "name": "every canonical value is idempotent (RAW)",
+      "input": "RAW",
+      "expected": "RAW"
+    },
+    {
+      "name": "every canonical value is idempotent (GEM-MT)",
+      "input": "GEM-MT",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "every canonical value is idempotent (NM-MT)",
+      "input": "NM-MT",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "every canonical value is idempotent (EX)",
+      "input": "EX",
+      "expected": "EX"
+    },
+    {
+      "name": "every canonical value is idempotent (VG)",
+      "input": "VG",
+      "expected": "VG"
+    },
+    {
+      "name": "every canonical value is idempotent (POOR)",
+      "input": "POOR",
+      "expected": "POOR"
+    },
+    {
+      "name": "trailing space \u2014 the typo the free-text input actually produced",
+      "input": "nm ",
+      "expected": "NM"
+    },
+    {
+      "name": "leading and trailing space",
+      "input": "  NM  ",
+      "expected": "NM"
+    },
+    {
+      "name": "lowercase",
+      "input": "nm",
+      "expected": "NM"
+    },
+    {
+      "name": "mixed case",
+      "input": "Nm",
+      "expected": "NM"
+    },
+    {
+      "name": "spelled out \u2014 what vision extraction tends to return",
+      "input": "Near Mint",
+      "expected": "NM"
+    },
+    {
+      "name": "spelled out, hyphenated",
+      "input": "near-mint",
+      "expected": "NM"
+    },
+    {
+      "name": "collapsed internal whitespace",
+      "input": "Near    Mint",
+      "expected": "NM"
+    },
+    {
+      "name": "tab counts as internal whitespace",
+      "input": "Near\tMint",
+      "expected": "NM"
+    },
+    {
+      "name": "NRMT shorthand",
+      "input": "nrmt",
+      "expected": "NM"
+    },
+    {
+      "name": "NR MT shorthand",
+      "input": "NR MT",
+      "expected": "NM"
+    },
+    {
+      "name": "near mint to mint, slashed",
+      "input": "NM/MT",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "near mint to mint, spaced",
+      "input": "nm mt",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "near mint to mint, run together",
+      "input": "NMMT",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "near mint to mint, spelled out",
+      "input": "Near Mint to Mint",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "near mint-mint, spelled out",
+      "input": "near mint-mint",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "gem mint spelled out",
+      "input": "Gem Mint",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mint with the grade number",
+      "input": "GEM MINT 10",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mt spaced",
+      "input": "gem mt",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "excellent spelled out",
+      "input": "Excellent",
+      "expected": "EX"
+    },
+    {
+      "name": "exc shorthand",
+      "input": "exc",
+      "expected": "EX"
+    },
+    {
+      "name": "very good spelled out",
+      "input": "Very Good",
+      "expected": "VG"
+    },
+    {
+      "name": "raw lowercase",
+      "input": "raw",
+      "expected": "RAW"
+    },
+    {
+      "name": "ungraded means raw",
+      "input": "Ungraded",
+      "expected": "RAW"
+    },
+    {
+      "name": "poor lowercase",
+      "input": "poor",
+      "expected": "POOR"
+    },
+    {
+      "name": "an unrecognized grade code is left exactly as it is",
+      "input": "LP",
+      "expected": "LP"
+    },
+    {
+      "name": "a graded-slab value is left alone rather than guessed at",
+      "input": "PSA 10",
+      "expected": "PSA 10"
+    },
+    {
+      "name": "MINT alone is not folded \u2014 it names a grade between GEM-MT and NM-MT, and picking one would restate the card",
+      "input": "Mint",
+      "expected": "Mint"
+    },
+    {
+      "name": "PR is not folded to POOR \u2014 a two-letter code that is not itself canonical stays whatever the seller wrote",
+      "input": "PR",
+      "expected": "PR"
+    },
+    {
+      "name": "a leading formula character is not stripped: the CSV round-trip and the injection escape both depend on it surviving",
+      "input": "-NM",
+      "expected": "-NM"
+    },
+    {
+      "name": "an apostrophe-led value survives verbatim, escape and all",
+      "input": "' ",
+      "expected": "' "
+    },
+    {
+      "name": "empty stays empty",
+      "input": "",
+      "expected": ""
+    },
+    {
+      "name": "whitespace-only is unrecognized, so it is not trimmed either",
+      "input": "   ",
+      "expected": "   "
+    },
+    {
+      "name": "hyphenated ungraded spelling",
+      "input": "UN-GRADED",
+      "expected": "RAW"
+    },
+    {
+      "name": "gem mint with no separator",
+      "input": "GEMMT",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mint spelled out",
+      "input": "GEM-MINT",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "gem mint with the numeric grade",
+      "input": "GEM MT 10",
+      "expected": "GEM-MT"
+    },
+    {
+      "name": "near mint-mint abbreviation",
+      "input": "NM-M",
+      "expected": "NM-MT"
+    },
+    {
+      "name": "very good hyphenated",
+      "input": "VERY-GOOD",
+      "expected": "VG"
+    },
+    {
+      "name": "very good contracted",
+      "input": "VGOOD",
+      "expected": "VG"
+    }
+  ]
+}

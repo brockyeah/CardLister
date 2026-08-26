@@ -34,7 +34,7 @@ cd frontend && npm run build        # → frontend/dist
 
 Must be `python -m pytest` from the repo root — there is no `pytest.ini`/`pyproject.toml`, so bare `pytest` fails to resolve `backend.`. CI, the Dockerfile, and the local venv are all Python 3.11.
 
-**There is no linter or formatter in this repo** (no eslint/prettier/ruff/black). A stray `eslint-disable` comment in `CardForm.jsx` reads to nothing.
+**There is no linter or formatter in this repo** (no eslint/prettier/ruff/black).
 
 ## Architecture
 
@@ -48,7 +48,7 @@ The 15–30s Anthropic call is sync, so `scan.py` wraps it in `run_in_threadpool
 
 ### Pricing chain (`routers/pricing.py`)
 
-Tries in order, each returning a median of up to 10 comps: **eBay Browse API** (only when `EBAY_APP_ID` + `EBAY_CERT_ID` are set) → 130point → Mavin → eBay HTML scrape → mock $9.99. When a source succeeds, its fixed note is what the UI shows; only the final all-failed mock branch joins every attempted source's note with ` | `.
+Sources run **concurrently** and are resolved by walking the preference order — **eBay Browse API** (submitted only when `EBAY_APP_ID` + `EBAY_CERT_ID` are set) → 130point → Mavin → eBay HTML scrape → mock $9.99 — each returning a median of up to 10 comps. Resolution is by preference, **never** first-to-finish: a fast weak source must not beat a slow strong one. When a source succeeds, its fixed note is what the UI shows; only the final all-failed mock branch joins every attempted source's note with ` | `. `PRICING_DEADLINE_SECONDS` caps the whole lookup on our own wall clock, because a scalar `httpx` timeout applies per connect/read/write/pool rather than as a request budget.
 
 Critical distinction: the Browse API returns **active listings (asking prices), not sales**. True sold comps need eBay's gated Marketplace Insights API. So the highest-priority source is structurally the least accurate comp type, while the scrapers return real sold prices — and the scrapers routinely 403 from a datacenter IP. Every source is written to never raise; each degrades to empty comps + a note (most return `([], None, note)`; Mavin returns a 4-tuple `(comps, price, source, note)`).
 
@@ -68,6 +68,14 @@ CSV export escapes formula-leading cells (`=`, `+`, `-`, `@`, and apostrophe-led
 
 `POST /api/sheets/resync` is a **clear-then-rewrite** of the whole Inventory tab, so it is idempotent and safe to run repeatedly — that is what makes it a usable repair tool. Ordering is `created_at, id`; the `id` tiebreaker is load-bearing, since a CSV import stamps many rows in the same instant and without it two runs would assign different rows. `delete_card` **blanks** its row rather than removing it: removing a row shifts every row below it up and silently invalidates every later card's `sheets_row`. All three writers (`sync_card`, `rewrite_all_rows`, `blank_row`) serialize on a module-level `threading.Lock` and re-check their row *inside* it — dropping that guard lets a save or delete racing a resync write over another card's row.
 
+### Canonical field values (`services/card_fields.py`)
+
+`condition` reaches the DB from three places — the review form, vision extraction, and CSV import — and used to be free text on all three, so "NM", `"nm "`, and "Near Mint" accumulated as distinct values in the inventory, the Sheets `Condition` column, and the sold-cards tax export. `normalize_condition()` folds a *recognized spelling* to one of `CONDITION_VALUES`, and returns everything else **unchanged** — including non-strings. That pass-through is load-bearing twice over: `"-NM"` must keep its leading `-` or the CSV formula escape and the export/import round-trip both break, and `"Mint"`/`"PR"` are deliberately not folded because mapping a value onto a *different* grade restates what the seller is claiming about the card.
+
+Applied at two seams only: the CSV importer (where other people's spellings arrive) and `CardForm`'s dropdown, which folds on receipt so a scanned "Near Mint" selects NM. **`POST /api/cards` deliberately does not fold** — that path stores strings verbatim, which is what the formula-injection tests in `test_export_csv.py` pin.
+
+Same mirror shape as the eBay title: `frontend/src/lib/condition.js` duplicates the table, and `backend/tests/fixtures/condition_cases.json` is read by both suites so drift on a listed case fails loudly. An unrecognized value is appended to the dropdown as its own option — a `<select>` with no matching option renders the first one, which would silently rewrite a `PSA 10` card to `RAW` on the next save.
+
 ### Auth (`auth.py`)
 
 `CARDLISTER_USERS="user:pass,user2:pass2"` parsed per-request (no caching, so env changes take effect live and removing a user invalidates their tokens immediately), falling back to a single `owner` user. HS256 JWT, 30-day TTL, `hmac.compare_digest`. `validate_secrets()` runs at startup and **refuses to boot** in production with default secrets.
@@ -82,11 +90,14 @@ An in-process asyncio task polls MLB transactions every `CALLUP_POLL_MINUTES`, e
 
 SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTERs — so **every new column on an existing table needs an entry in `_COLUMN_MIGRATIONS`**, a hand-maintained list applied idempotently at startup. New *tables* need nothing. `uploads_dir()` is derived as `Path(DB_PATH).parent / "uploads"`, so one Railway volume at `/data` holds both the DB and every photo.
 
+`GET /api/analytics/backup.db` stages its `VACUUM INTO` snapshot in that same directory rather than a system temp dir — the container's `/tmp` is ephemeral disk sized for neither a full copy of the DB nor its growth. A backup therefore briefly doubles the DB's footprint on the volume; out-of-space returns 507 rather than a blank 500. The staging file is unlinked by a `BackgroundTask`, which a client disconnect skips, so each request first sweeps `cardlister-backup-*.db` files older than an hour — without that, a leak is permanent and invisible to `storage_usage`, which counts only the DB file and the uploads dir.
+
 ### Frontend (`frontend/src`)
 
 **React 19 + react-router v8** — import from `'react-router'`; `react-router-dom` is not installed. Tailwind v3. Plain declarative `<Routes>`, no data-router APIs.
 
-JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Two download endpoints fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
+JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. The download endpoints (DB backup and both CSV exports) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
+JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Three download endpoints (backup, inventory CSV, sold CSV) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links. They share `lib/download.js`, which exists because hand-rolling that anchor gets two things wrong: revoking the object URL in the same tick as `click()` races the browser's own fetch of it (revoke on a later task), and with `responseType: 'blob'` axios hands back the *error* body as a Blob too, so an API `detail` is unreadable until it is re-parsed.
 
 `Scanner.jsx` is the center of gravity: a batch queue (`queued → scanning → ready → saved`) processed one item at a time behind a ref guard, front images only. Pricing lookups carry a monotonic `pricingSeq` and every write path bails if a newer lookup has started — this is a shipped race fix, so **any new async state write in Scanner needs the same guard**.
 
@@ -96,18 +107,19 @@ Uploads are downscaled client-side before hitting the API, with EXIF rotation ba
 
 These have no compile-time or test-time guard unless noted — they fail in production or cost money.
 
-1. **`SHEET_HEADERS` is append-only.** New columns go at the end, with a matching trailing element in `_card_to_row`. Inserting mid-list misaligns every already-synced sheet row, since `Card.sheets_row` writes a fixed bounded range.
-2. **The `" (subscription)"` model suffix is load-bearing.** `analytics.py:_cost()` prices anything with that exact suffix at $0.00. Change the format and subscription-billed scans start reporting phantom Opus dollars.
+1. **`SHEET_HEADERS` is append-only.** New columns go at the end, with a matching trailing element in `_card_to_row`. Inserting mid-list misaligns every already-synced sheet row, since `Card.sheets_row` writes a fixed bounded range. `SOLD_EXPORT_HEADERS`/`_sold_row` in `routers/cards.py` is a deliberately *separate* contract for the tax export — don't "unify" it with `SHEET_HEADERS`, or every future mirror column silently widens the tax report (the comment there says why).
+2. **The `(subscription)` model suffix is load-bearing.** `analytics.py:_cost()` prices any model string *ending in* `(subscription)` at $0.00 (an `endswith` check, no leading-space requirement). Change the format the producer writes in `claude_vision.py` and subscription-billed scans start reporting phantom Opus dollars. Now pinned on both sides by `test_analytics_cost.py` and `test_vision_fallback.py`.
 3. **Literal-path GET routes must be declared above `/{card_id}`** in `routers/cards.py`, or they 422 against the int path param. `export.csv` carries a comment saying so.
 4. **New columns on existing tables need a `_COLUMN_MIGRATIONS` entry** — otherwise they work on a fresh DB and break every deployed one.
 5. **New routers need `dependencies=[Depends(require_auth)]`** — `test_auth_sweep.py` walks the OpenAPI schema and fails CI otherwise. A genuinely public route means updating `PUBLIC`/`PUBLIC_PREFIXES` there.
 6. **`VISION_MAX_IMAGE_PX=0` overrides every preset's cap** (pinned by a test), quietly multiplying token cost.
 7. **Changing the eBay title format is a three-file change**: `routers/ebay.py:build_title`, `frontend/src/lib/ebayTitle.js`, and regenerated `expected` values in `backend/tests/fixtures/ebay_title_cases.json` — a fixture both suites read, the frontend one importing it across the repo boundary. Backend is the source of truth; the JS is preview-only.
 8. **`MAX_DIMENSION_PX = 2000` in `downscaleImage.js` shadows the `accuracy` preset.** Raising the preset above 2000 does nothing until the client cap moves too.
-9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers.
+9. **Never add `--workers` or a second replica** without moving the poller out of process — two pollers means duplicate call-up emails, plus a per-process health heartbeat and SQLite writers. The Sheets mirror lock (`google_sheets._sheets_lock`) is also a `threading.Lock`, atomic only inside one process — a second worker silently reopens the save-vs-resync row race it exists to close.
 10. **Never add a `startCommand` to `railway.toml`** — Railway passes it literally and won't expand `$PORT`; the Dockerfile's `sh -c` does.
 11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment (case-folded), so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
-12. **The year-long `immutable` cache on `/uploads` and `/assets` depends on names never being reused.** Uploads are minted as `uuid.uuid4().hex` in `routers/scan.py` and Vite content-hashes bundle names — any future change that derives a filename from user input, reuses a name, or rewrites a file in place (e.g. a server-side thumbnail/re-encode pass) will serve year-stale bytes with no error anywhere. `index.html` is the deliberate exception: `SpaStaticFiles` stamps it `no-cache` so a cached shell can't outlive its bundles across a deploy.
+12. **Pricing resolution must stay preference-ordered, and its note strings are a contract.** `routers/pricing.py` fans the sources out concurrently; resolving by whoever finishes first would return a weaker comp with the wrong note and look entirely healthy. Do not introduce `concurrent.futures.wait()` before the cascade — it defaults to `ALL_COMPLETED`, which makes every lookup as slow as the slowest source. Keep the executor per-request so pools don't accumulate — but note it does not make shutdown instant: `cancel_futures` can't stop running work and the workers are non-daemon, so an abandoned source is still joined at exit. Shutdown is bounded by each source's network timeout, so those must stay bounded. A test that fakes a hanging source must release it (an `Event`, not `sleep`), or it adds that delay to every suite run — invisibly, since pytest's timer excludes the exit join. `test_pricing_chain.py` pins the order and every note string.
+13. **The year-long `immutable` cache on `/uploads` and `/assets` depends on names never being reused.** Uploads are minted as `uuid.uuid4().hex` in `routers/scan.py` and Vite content-hashes bundle names — any future change that derives a filename from user input, reuses a name, or rewrites a file in place (e.g. a server-side thumbnail/re-encode pass) will serve year-stale bytes with no error anywhere. `index.html` is the deliberate exception: `SpaStaticFiles` stamps it `no-cache` so a cached shell can't outlive its bundles across a deploy.
 
 ## Testing notes
 

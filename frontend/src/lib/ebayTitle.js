@@ -4,6 +4,21 @@
 // with the backend (see test_first_bowman.py for the canonical flag order).
 export const EBAY_TITLE_MAX = 80
 
+// The exact character set Python's no-arg str.split() (and rstrip()) treats as
+// whitespace, which JS \s is not: \s misses the C1 separators (\x1c-\x1f) and
+// NEL (\x85 — reachable as cp1252 mojibake in a paste or CSV import), and
+// wrongly includes BOM/ZWNBSP (﻿), which Python keeps as text. Splitting
+// on \s made the two sides disagree about unit boundaries, so near the 80-char
+// cap the preview and the backend could truncate at different places.
+const PY_WHITESPACE = '\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
+const PY_WHITESPACE_RUN = new RegExp(`[${PY_WHITESPACE}]+`)
+const PY_WHITESPACE_TRAILING = new RegExp(`[${PY_WHITESPACE}]+$`)
+const PY_WHITESPACE_LEADING = new RegExp(`^[${PY_WHITESPACE}]+`)
+// str.strip() the way Python does it — .trim() strips/keeps the same
+// characters \s gets wrong.
+const pyStrip = (v) =>
+  String(v).replace(PY_WHITESPACE_LEADING, '').replace(PY_WHITESPACE_TRAILING, '')
+
 export function buildEbayTitle(card) {
   const flags = []
   if (card.is_rookie) flags.push('RC')
@@ -12,7 +27,7 @@ export function buildEbayTitle(card) {
   if (card.is_patch) flags.push('PATCH')
   if (card.is_refractor) flags.push('REFRACTOR')
   if (card.serial_number) {
-    const sn = String(card.serial_number).trim()
+    const sn = pyStrip(card.serial_number)
     if (sn) flags.push(sn.startsWith('/') ? sn : `/${sn}`)
   }
   if (card.parallel_color) flags.push(String(card.parallel_color).toUpperCase())
@@ -20,7 +35,7 @@ export function buildEbayTitle(card) {
   // Units the title may be cut between: free-text fields contribute one unit
   // per word, identifiers (each flag, and the card number) stay indivisible
   // even when they contain a space.
-  const words = (v) => String(v || '').split(/\s+/).filter(Boolean)
+  const words = (v) => String(v || '').split(PY_WHITESPACE_RUN).filter(Boolean)
   // Normalized like the serial above: whitespace-only contributes nothing
   // rather than a bare "#".
   const cardNoValue = words(card.card_number).join(' ')
@@ -74,7 +89,7 @@ export function truncateTitle(units) {
       // A first unit over the cap has no boundary to fall back to. Slice by
       // code point, not code unit, so the cut can't land inside a surrogate
       // pair and leave a lone surrogate in the title.
-      return kept || [...unit].slice(0, EBAY_TITLE_MAX).join('').replace(/\s+$/, '')
+      return kept || [...unit].slice(0, EBAY_TITLE_MAX).join('').replace(PY_WHITESPACE_TRAILING, '')
     }
     kept = candidate
   }

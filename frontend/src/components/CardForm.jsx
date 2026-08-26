@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { buildEbayTitle, EBAY_TITLE_MAX } from '../lib/ebayTitle.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
+import { conditionLabel, conditionOptions, normalizeCondition } from '../lib/condition.js'
 
 const FIELDS = [
   { key: 'player_name', label: 'Player', type: 'text', wide: true },
@@ -11,7 +12,10 @@ const FIELDS = [
   { key: 'team', label: 'Team', type: 'text' },
   { key: 'parallel_color', label: 'Parallel Color', type: 'text' },
   { key: 'serial_number', label: 'Serial Number (e.g. /99)', type: 'text' },
-  { key: 'condition', label: 'Condition', type: 'text' },
+  // A dropdown rather than a text box: this was free text, so "NM", "nm " and
+  // "Near Mint" all landed in the DB as distinct values and fragmented the
+  // inventory, the Sheets "Condition" column, and the sold-cards tax export.
+  { key: 'condition', label: 'Condition', type: 'select' },
   { key: 'quantity', label: 'Quantity', type: 'number', min: '1' },
 ]
 
@@ -37,7 +41,6 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
       setData(next)
       onChange?.(next)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedPrice])
 
   const update = (key, value) => {
@@ -45,6 +48,18 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
     setData(next)
     onChange?.(next)
   }
+
+  // Vision extraction writes condition as free text, so a scanned card can
+  // arrive as "Near Mint" — a value the dropdown has no option for, which a
+  // <select> would render as the first grade in the list and then save. Fold a
+  // recognized spelling to its canonical value as soon as the form receives it;
+  // unrecognized values are left alone and offered as their own option instead.
+  // The fold is idempotent (every canonical value maps to itself), so this
+  // settles after one pass rather than looping.
+  useEffect(() => {
+    const folded = normalizeCondition(data.condition)
+    if (folded !== data.condition) update('condition', folded)
+  }, [data.condition])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -71,15 +86,33 @@ export default function CardForm({ initial, onChange, onSubmit, submitting, comp
         {FIELDS.map((f) => (
           <div key={f.key} className={f.wide ? 'md:col-span-2' : ''}>
             <label className="label">{f.label}</label>
-            <input
-              type={f.type}
-              min={f.min}
-              value={data[f.key] ?? ''}
-              onChange={(e) =>
-                update(f.key, f.type === 'number' ? (e.target.value ? Number(e.target.value) : null) : e.target.value)
-              }
-              className="input"
-            />
+            {f.type === 'select' ? (
+              <select
+                value={data[f.key] ?? ''}
+                onChange={(e) => update(f.key, e.target.value)}
+                className="input"
+              >
+                {/* Options come from the current value, so a grade this app
+                    doesn't know ("LP", "PSA 10") is listed rather than dropped
+                    — a select with no matching option shows the first one and
+                    would rewrite the card on the next save. */}
+                {conditionOptions(data[f.key]).map((value) => (
+                  <option key={value} value={value}>
+                    {conditionLabel(value)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={f.type}
+                min={f.min}
+                value={data[f.key] ?? ''}
+                onChange={(e) =>
+                  update(f.key, f.type === 'number' ? (e.target.value ? Number(e.target.value) : null) : e.target.value)
+                }
+                className="input"
+              />
+            )}
           </div>
         ))}
       </div>

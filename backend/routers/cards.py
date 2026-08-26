@@ -18,6 +18,7 @@ from ..schemas import (
     DuplicateCheckRequest, DuplicateCheckResponse,
     EbayListingUpdate, MarkSoldRequest,
 )
+from ..services.card_fields import normalize_condition
 from ..services.google_sheets import SHEET_HEADERS, _card_to_row, blank_row, sync_card
 from ..services.learning import record_correction
 
@@ -338,7 +339,17 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
             skipped.append({"row": line_no, "reason": "missing player name"})
             continue
 
-        fields = {"player_name": player, "condition": val("condition") or "NM"}
+        # Import is the one entry point that sees other people's spellings — a
+        # hand-edited sheet says "Near Mint" where the app says "NM" — so fold a
+        # recognized spelling to its canonical grade here. Unrecognized values
+        # come back untouched, which is what keeps the export/import round-trip
+        # (and the formula-injection escape, whose test value is "-NM") intact.
+        # POST /api/cards deliberately does NOT fold: that path stores strings
+        # verbatim so the escape has something to escape.
+        fields = {
+            "player_name": player,
+            "condition": normalize_condition(val("condition")) or "NM",
+        }
         try:
             fields["year"] = _parse_int(val("year")) if val("year") else None
             fields["listed_price"] = _parse_money(val("listed price")) if val("listed price") else None

@@ -37,7 +37,7 @@ app.add_middleware(
 # process and when its loop last completed a cycle (success or error — either
 # proves the loop is alive).
 POLL_MINUTES = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
-_poller_state = {"enabled": False, "last_cycle_at": None}
+_poller_state = {"enabled": False, "last_cycle_at": None, "task": None}
 _started_at = datetime.utcnow()
 
 
@@ -76,7 +76,9 @@ def on_startup():
     # Background call-up poller — skip in tests/dev via env.
     if os.getenv("DISABLE_CALLUP_POLLER") != "1":
         _poller_state["enabled"] = True
-        asyncio.create_task(_callup_poller())
+        # Keep a reference: asyncio holds only a weak ref to running tasks, so
+        # an unreferenced background task is (per the docs) eligible for GC.
+        _poller_state["task"] = asyncio.create_task(_callup_poller())
 
 
 # --- Auth route ---
@@ -182,7 +184,14 @@ def serve_upload(filename: str):
     # static analysis recognizes (CodeQL flags `.name` sinks as path injection
     # because it does not model `.name` as a sanitizer).
     uploads_root = uploads_dir().resolve()
-    file_path = (uploads_root / safe_name).resolve()
+    try:
+        file_path = (uploads_root / safe_name).resolve()
+    except (ValueError, OSError):
+        # A NUL byte in the name (`/uploads/%00`) makes `.resolve()` raise
+        # "embedded null byte" before either containment check below runs —
+        # the same 500-where-404-is-honest class the `%2e` fix closed, one
+        # syscall later. Nothing unresolvable names a real upload.
+        raise HTTPException(status_code=404, detail="Image not found")
     # is_file(), not exists(): `Path(".").name` and `Path("..").name` are both
     # "", so a request for /uploads/%2e resolved to the uploads *directory*,
     # passed exists(), and then raised inside FileResponse ("is not a file") —

@@ -159,6 +159,31 @@ def test_unmarking_a_sale_removes_it_from_the_export(db_session):
         assert client.get("/api/cards/sold-years", headers=headers).json() == {"years": []}
 
 
+def test_sold_card_with_no_sale_date_is_excluded_from_a_year_but_kept_in_all(db_session):
+    """The documented null-sold_at contract (a legacy or hand-edited row): it
+    belongs to no tax year, so a filtered export excludes it, and the
+    unfiltered export lists it last with an empty Date Sold rather than hiding
+    a real sale. Only reachable by a direct DB write — the API always stamps."""
+    from backend.models import Card
+
+    with TestClient(app) as client:
+        headers = _auth(client)
+        dated = _create(client, headers, player_name="Dated")
+        undated = _create(client, headers, player_name="Undated")
+        _sell(client, headers, dated, 9.0, datetime(2026, 3, 1, 12, 0))
+        _sell(client, headers, undated, 9.0, datetime(2026, 6, 1, 12, 0))
+        card = db_session.query(Card).filter(Card.id == undated).first()
+        card.sold_at = None
+        db_session.commit()
+
+        filtered = _rows(client.get("/api/cards/export-sold.csv?year=2026", headers=headers))
+        assert [r[SOLD_EXPORT_HEADERS.index("Player")] for r in filtered[1:]] == ["Dated"]
+
+        unfiltered = _rows(client.get("/api/cards/export-sold.csv", headers=headers))
+        assert [r[SOLD_EXPORT_HEADERS.index("Player")] for r in unfiltered[1:]] == ["Dated", "Undated"]
+        assert unfiltered[2][SOLD_EXPORT_HEADERS.index("Date Sold")] == ""
+
+
 def test_literal_routes_are_not_shadowed_by_the_card_id_route(db_session):
     """Invariant #3: a literal GET path declared below /{card_id} 422s against
     the int path param. Both new routes must resolve as themselves."""
