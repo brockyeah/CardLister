@@ -57,9 +57,10 @@ conflicting change to the same heading. Whichever of those merges owns it.
   `Bowman Chrome` + set `Prospects` both render `2024 Bowman Chrome Prospects`.
   Keying on that string dropped one of two genuinely different sets' lessons.
   Normalizing each part closes the mirror image at the same time — `Bowman` and
-  `bowman ` *are* the same set, so they must share a key rather than yield two
-  competing rules, which is the same `_norm` identity comparison the rest of
-  the module already uses. The rendered line stays, for display only.
+  `bowman` with a trailing space *are* the same set, so they must share a key
+  rather than yield two competing rules, which is the same `_norm` identity
+  comparison the rest of the module already uses. The rendered line stays, for
+  display only.
 - `created_at` ties now break on `id` in both `build_cheatsheet` and
   `find_exact_match`. Both queries mean "the latest correction wins", and both
   left same-timestamp rows to resolve in whatever order SQLite happened to
