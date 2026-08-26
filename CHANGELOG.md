@@ -195,6 +195,80 @@ only in `[Unreleased]` on a branch is not in prod yet.
   implementation and pass unchanged after the refactor, so they pin the
   behaviour rather than describing what it became; the two concurrency cases
   fail against the old code.
+## [Unreleased] — branch `claude/sweet-rubin-20mmgb`
+
+### Fixed
+- Database backups are staged on the volume that holds the database, not on
+  container-local disk. `download_backup` called `tempfile.mkstemp()` with no
+  directory, which on Railway resolves to the container's `/tmp` — ephemeral
+  disk that is neither sized for a full copy of the database nor persistent —
+  while the database itself lives on the mounted volume. `VACUUM INTO` writes
+  exactly such a copy, so the app's one recovery tool got less reliable
+  precisely as the data it protects grew, and it failed with a bare 500 that
+  said nothing about disk. Snapshots now stage beside the database (a
+  directory sized for at least one copy of it by definition), an out-of-space
+  failure returns 507 and says so — SQLite reports it in a message, the OS as
+  ENOSPC, and both now read the same to the person looking at the screen —
+  and anything else still returns the generic 500 rather than guessing.
+- An abandoned backup snapshot is reclaimed instead of sitting on the volume
+  forever. The staging file is unlinked by a `BackgroundTask` once the
+  response is delivered, which does not run if the client disconnects
+  mid-download. That leak used to die with the container; on the volume it is
+  permanent, and `storage_usage` reports only the database file and the
+  uploads directory, so nothing would ever have shown it. Each backup request
+  now sweeps snapshots older than an hour before staging its own, leaving one
+  a concurrent request is still streaming alone.
+- File downloads no longer race the browser's own fetch of the blob. All three
+  authenticated downloads — database backup, inventory CSV, sold-cards CSV —
+  fetch bytes and synthesize an `<a download>`, because a plain href cannot
+  carry the Bearer header. Each revoked the object URL in the same tick as the
+  click, but `click()` only *schedules* the download and the browser reads the
+  `blob:` URL after the current task ends, so the URL could already be dead
+  when it got there — a download that silently does nothing, most reliably on
+  Firefox. The anchor was also never attached to the document. Both are now
+  handled in one shared helper (`frontend/src/lib/download.js`), which revokes
+  on a later task.
+- A failed download shows what the server said. With `responseType: 'blob'`
+  axios hands back the *error* body as a Blob too, so `detail` was unreadable
+  and every caller fell through to a fixed string — the new "not enough disk
+  space" message would have been swallowed by "Backup failed." on the way to
+  the screen. The blob body is now re-read as JSON before the promise rejects,
+  and all three call sites — the backup and sold-export handlers on Analytics
+  and Inventory's Export CSV button — render the API's message rather than a
+  fixed one (the Inventory site by way of the Claude review action on PR #54,
+  which caught it still discarding the detail the others now show).
+- Downloads are named by the server rather than by the browser clock. The
+  backup filename was built from `new Date().toISOString()` — the UTC date,
+  the same class of bug as the mark-sold default — and carried no time, so two
+  snapshots taken on one day collided in the downloads folder. The
+  `Content-Disposition` filename is used when present (parsed in a tested pure
+  helper, RFC 5987 form included, basenamed and sanitized), falling back to the
+  old name.
+- The RFC 5987 filename parser drops a language tag instead of keeping it in
+  the name. The ext-value grammar is `charset "'" [ language ] "'" value`, and
+  the language half is optional but legal, so matching the literal prefix
+  `UTF-8''` missed `UTF-8'en'caf%C3%A9.db` entirely and left `UTF-8'en'` sitting
+  in the downloaded filename. It now splits on the two apostrophes and takes
+  what follows, treating a value with no ext-value structure as the whole name
+  rather than discarding it (CodeRabbit, PR #54).
+
+### Added
+- `saveBlob`'s lifecycle is pinned by tests: the anchor is attached before the
+  click, and the object URL survives it, being revoked only on a later task.
+  That ordering *is* the download fix, and nothing tested it — a later
+  simplification could have folded the revoke back into the same tick and the
+  suite would have stayed green. The four DOM/URL calls it makes are stubbed
+  rather than pulling in jsdom, so the suite stays pure-function and
+  node-environment as CLAUDE.md requires; the tests were checked to fail
+  against a same-tick revoke (CodeRabbit, PR #54).
+- A test that every model the scan presets can select is priced explicitly in
+  `analytics.MODEL_PRICES`. Nothing connected those two tables. The
+  `_DEFAULT_PRICE` fallback is right for a model nobody chose — overcounting
+  is the safe direction — but wrong for a preset: the Cost preset exists to be
+  cheaper, and priced at Opus rates its whole reason for existing is invisible
+  in the one report that would show it. A preset refresh that updated
+  `PRESETS` alone would have mispriced every scan taken through it with no
+  error anywhere.
 
 ## [Unreleased] — branch `fix/scan-nullish-result`
 

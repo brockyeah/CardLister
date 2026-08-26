@@ -5,6 +5,7 @@ import {
   getStorageUsage, resyncSheet, getSoldYears, downloadSoldCsv,
 } from '../api'
 import { formatApiError } from '../lib/apiError'
+import { formatApiError } from '../lib/apiError.js'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -257,8 +258,11 @@ function ManageData({ users, onDone }) {
     try {
       await downloadBackup()
       setMsg('Backup downloaded.')
-    } catch {
-      setMsg('Backup failed.')
+    } catch (e) {
+      // Show what the server said. A snapshot that fails for want of disk
+      // space says so now, and "Backup failed." would swallow the one detail
+      // that tells the owner what to do about it.
+      setMsg(formatApiError(e, 'Backup failed.'))
     } finally { setBusy(false) }
   }
 
@@ -267,8 +271,8 @@ function ManageData({ users, onDone }) {
     try {
       await downloadSoldCsv(soldYear || undefined)
       setMsg(soldYear ? `Sold cards for ${soldYear} downloaded.` : 'All sold cards downloaded.')
-    } catch {
-      setMsg('Sold export failed.')
+    } catch (e) {
+      setMsg(formatApiError(e, 'Sold export failed.'))
     } finally { setBusy(false) }
   }
 
