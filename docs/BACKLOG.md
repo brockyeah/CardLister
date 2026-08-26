@@ -326,29 +326,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       a pydantic model and add a parity test asserting every source's parser
       emits it, using the saved fixture HTML the scraper tests already carry
       (medium; implement directly; inline)
-- [ ] Mark-sold date is computed in UTC, so it is off by a day for part of the
-      day: `MarkSoldModal` defaults the picker to `new Date().toISOString()
-      .slice(0, 10)` — the *UTC* date — so from 8pm EDT onward it pre-fills
-      **tomorrow**, and a card sold in the evening gets stamped a day late
-      unless the user notices. On submit it does `new Date(date).toISOString()`,
-      and a bare `YYYY-MM-DD` parses as UTC midnight per spec, which renders as
-      the *previous* day anywhere west of UTC. Sold dates feed the Sheets "Date
-      Sold" column, the now-shipped tax-year export (2026-08-19), and
-      days-to-sell analytics, so the error propagates — a late-evening Dec 31
-      sale lands in the wrong year's tax file. The backend fallbacks
-      (`mark_sold`'s `datetime.utcnow()` and the CSV import's stamp) carry the
-      same skew. Fix by composing the default from local date parts
-      and submitting local noon, in a tested pure helper (quick win; implement
-      directly; inline — Inventory.jsx plus a lib function)
-      Sold" column, the planned tax-year export, and days-to-sell analytics, so
-      the error propagates. Fix by composing the default from local date parts
-      and submitting the picked `YYYY-MM-DD` string as-is — the server owns
-      the date semantics (quick win; implement directly; inline —
-      Inventory.jsx plus a lib function) — **do not implement separately:
-      covered as step 6 of
-      `docs/superpowers/plans/2026-08-22-local-timezone.md`**, and the
-      backend half (aware-datetime normalization at the boundary) is step 3
-      there
 - [ ] Pricing lookups are never cached, so the same card re-runs the whole
       chain every time (2026-08-19 review): `get_pricing` takes a
       `PricingRequest` and goes straight to the sources — no memoization
@@ -397,30 +374,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       mark-sold item above, the Sheets date columns, and the tax-year export
       in one pass. **Awaiting owner approval on the three decisions listed at
       the end of the plan doc.**
-- [ ] Listing text offers `$0.00` for a card with no price (2026-08-19
-      review): `ebay_listing_text` computes
-      `card.listed_price if not None else (card.suggested_price or 0)`, so a
-      card saved before pricing resolved yields `PRICE:\n$0.00` in the
-      clipboard block — pasted straight into eBay's sell form, which is the
-      entire point of the feature. `$0.00` is not a plausible typo a seller
-      catches on review the way a wrong player name is; it reads as a filled-in
-      field. Either omit the price section and say the card has no price yet,
-      or keep it but label it, and have the Scanner/Inventory copy buttons
-      surface that (quick win; implement directly; inline — `routers/ebay.py`
-      plus its test)
-- [ ] Backup snapshots are written to container-local disk, not the volume
-      (2026-08-19 review): `download_backup` calls `tempfile.mkstemp()`, which
-      lands in the container's `/tmp` rather than on the Railway volume that
-      holds the database. `VACUUM INTO` writes a full copy of the DB there, so
-      the one recovery tool the app has gets less reliable exactly as the
-      database it protects grows, and it fails with a bare 500 ("Backup
-      snapshot failed") that says nothing about disk. Point the temp file at
-      the DB's own directory (guaranteed to be sized for at least one copy of
-      it) or honour a `TMPDIR`, and distinguish "out of space" from "snapshot
-      failed" in the error. Note the export must still be deleted on the way
-      out — the existing `BackgroundTask(os.unlink, …)` covers that, and moving
-      the file onto the volume makes forgetting it much more expensive (quick
-      win; implement directly; inline)
 - [ ] eBay title truncation cannot spare the flags, because it can only cut a
       prefix (2026-08-19 review, deferred out of the truncation fix that
       shipped the same day). **Current behaviour:** unit order is
@@ -667,16 +620,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       exception middleware that records recent errors to a small table with a
       "recent errors" readout on Analytics manage-data, reusing the ntfy push
       for spikes (medium; **plan doc first** — new table/schema; inline)
-- [ ] Condition dropdown with canonical values: `condition` is a free-text input
-      (defaults "NM"), so typos like "nm "/"Near Mint" fragment the data; replace
-      with a select (RAW, GEM-MT, NM-MT, NM, EX, VG, POOR) and normalize known
-      variants on CSV import (quick win; implement directly; inline — touches
-      CardForm.jsx)
-- [ ] eBay fee + net-proceeds estimate: show the final-value fee (env-configurable
-      rate, default ~13.25% + $0.30) and net proceeds next to the price in the
-      Comps modal and mark-sold dialog — pricing today shows gross only, so
-      thin-margin cards look better than they are (quick win; implement directly —
-      display-only math, no schema; inline)
 - [ ] Scanner batch-review keyboard shortcuts: Enter = save & advance, ←/→ move
       through the queue — batch review is the highest-repetition flow in the app
       and is entirely mouse-driven today (quick win–medium; implement directly;

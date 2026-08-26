@@ -10,7 +10,7 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
+## 2026-08-26 — Integration of PRs #52–#58 (PR #59)
 
 ### PR #52 — Pricing sources run concurrently
 
