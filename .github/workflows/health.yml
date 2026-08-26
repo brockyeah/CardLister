@@ -1,0 +1,115 @@
+name: Production health
+
+# Watches production from somewhere that can actually reach it.
+#
+# Phase 1 of the daily routine (docs/notes/daily-routine-prompt.md) pings
+# /api/health itself, but that routine runs in a scheduled cloud sandbox whose
+# egress proxy answers 403 to CONNECT for the Railway host. The check therefore
+# could not run at all — and its failure mode was a *missing sentence* in a
+# report nobody diffs, which is the worst possible shape for the one step meant
+# to notice a failed deploy or a dead call-up poller. GitHub's runners have open
+# egress, so the same check here fails loudly as a red scheduled run instead.
+#
+# The routine still attempts its own ping (when it works it is free and
+# immediate); this is the copy that is guaranteed to run.
+
+on:
+  schedule:
+    # Every 3 hours. The poller staleness threshold is 3 × CALLUP_POLL_MINUTES
+    # (45 min at the default 15), so this samples several times per window
+    # without being chatty.
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-health
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe /api/health
+        env:
+          # Recorded in README.md as the production URL. Kept as an env var so
+          # an environment rename is a one-line change here.
+          HEALTH_URL: https://cardlister-production.up.railway.app/api/health
+        run: |
+          set -uo pipefail
+
+          # --retry covers a cold container or a deploy rolling over: a single
+          # refused connection is not an outage, three failures 10s apart is.
+          # -w captures the status separately from the body so a 503 (which the
+          # endpoint returns deliberately when the DB is unreachable) is still
+          # parsed rather than discarded by --fail.
+          status=$(curl -sS --max-time 30 --retry 3 --retry-delay 10 \
+            --retry-all-errors -o body.json -w '%{http_code}' "$HEALTH_URL") || {
+              echo "::error::Could not reach $HEALTH_URL at all (curl exit $?)."
+              echo "❌ Production health: unreachable." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            }
+
+          echo "HTTP $status"
+          cat body.json
+          echo
+
+          if ! jq -e . body.json >/dev/null 2>&1; then
+            echo "::error::/api/health returned HTTP $status with a non-JSON body."
+            echo "❌ Production health: non-JSON response (HTTP $status)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          ok=$(jq -r '.ok // false' body.json)
+          db=$(jq -r '.db // false' body.json)
+          stale=$(jq -r '.poller.stale // false' body.json)
+          enabled=$(jq -r '.poller.enabled // false' body.json)
+          last=$(jq -r '.poller.last_cycle_at // "never"' body.json)
+          revision=$(jq -r '.revision // "unknown"' body.json)
+
+          {
+            echo "### Production health"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| HTTP | \`$status\` |"
+            echo "| ok / db | \`$ok\` / \`$db\` |"
+            echo "| poller enabled | \`$enabled\` |"
+            echo "| poller stale | \`$stale\` |"
+            echo "| poller last cycle | \`$last\` |"
+            echo "| revision | \`$revision\` |"
+            echo "| main HEAD | \`${GITHUB_SHA:0:7}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          failed=0
+
+          if [ "$status" != "200" ]; then
+            echo "::error::/api/health returned HTTP $status (expected 200; it returns 503 when the DB is unreachable)."
+            failed=1
+          fi
+
+          if [ "$ok" != "true" ] || [ "$db" != "true" ]; then
+            echo "::error::Health reports ok=$ok db=$db — the database is unreachable from the app."
+            failed=1
+          fi
+
+          if [ "$stale" = "true" ]; then
+            echo "::error::The call-up poller is stale (last cycle: $last). Call-up alerts are not being sent."
+            failed=1
+          fi
+
+          # Deploy lag is a *warning*, not a failure. The revision only tracks
+          # main once Railway finishes building, so a run that lands minutes
+          # after a merge legitimately sees the old SHA — failing on that would
+          # flap red on every merge and train everyone to ignore this workflow.
+          # Lag that persists shows up as the same warning on run after run,
+          # which is the signal worth acting on.
+          if [ "$revision" != "unknown" ] && [ "${GITHUB_SHA:0:7}" != "$revision" ]; then
+            echo "::warning::Deployed revision $revision does not match main HEAD ${GITHUB_SHA:0:7} — a deploy may have failed, or one is still building."
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ Deployed revision \`$revision\` != main HEAD \`${GITHUB_SHA:0:7}\` (still building, or the deploy failed)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          exit "$failed"
