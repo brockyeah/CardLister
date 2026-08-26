@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -66,6 +67,72 @@ def test_cheatsheet_caps_distinct_rules_at_max(db_session):
     db_session.commit()
     sheet = build_cheatsheet(db_session)
     assert sheet.count("\n") == CHEATSHEET_MAX_RULES - 1
+
+
+def test_cheatsheet_teaches_only_the_newest_correction_of_a_field(db_session):
+    # A reversed correction: the user fixed set_name one way, then fixed it
+    # back a week later because the first fix was wrong. Deduping on the
+    # rendered rule kept both, so every later scan carried a contradictory
+    # pair with nothing marking which one still stood.
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome",
+        card_number="BCP-1", created_at=datetime(2026, 8, 1, 12, 0, 0),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome",
+        card_number="BCP-2", created_at=datetime(2026, 8, 8, 12, 0, 0),
+        diff_json=json.dumps({"set_name": {"from": "Chrome Prospects", "to": "Chrome"}}),
+    ))
+    db_session.commit()
+
+    sheet = build_cheatsheet(db_session)
+    assert sheet.count("\n") == 0, f"expected one rule, got:\n{sheet}"
+    # The surviving rule is the *newer* one — the correction that still stands.
+    assert "you said set_name='Chrome Prospects'" in sheet
+    assert "corrected it to 'Chrome'" in sheet
+
+
+def test_cheatsheet_keeps_one_rule_per_field_not_per_value(db_session):
+    # A single field corrected over and over in one set used to emit a distinct
+    # rule per value and could consume the whole 30-rule budget, crowding out
+    # every lesson from every other set. Only the newest survives now, leaving
+    # room for the other field's rule.
+    for i in range(40):
+        db_session.add(Correction(
+            username="tester", year=2024, brand="Bowman", set_name="Chrome",
+            card_number=f"BCP-{i}", created_at=datetime(2026, 8, 1, 12, 0, i),
+            diff_json=json.dumps({"card_number": {"from": f"{i}", "to": f"BCP-{i}"}}),
+        ))
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome",
+        card_number="BCP-99", created_at=datetime(2026, 8, 1, 11, 0, 0),
+        diff_json=json.dumps({"team": {"from": "Nationals", "to": "Washington Nationals"}}),
+    ))
+    db_session.commit()
+
+    sheet = build_cheatsheet(db_session)
+    lines = sheet.splitlines()
+    assert len(lines) == 2, f"expected one card_number rule + one team rule, got:\n{sheet}"
+    assert any("card_number='39'" in line for line in lines)  # the newest of the 40
+    assert any("team=" in line for line in lines)
+
+
+def test_cheatsheet_keeps_the_same_field_across_different_sets(db_session):
+    # Dedup is per (context, field), not per field: two sets that each need a
+    # naming rule must both be taught.
+    for set_name in ("Chrome", "Draft"):
+        db_session.add(Correction(
+            username="tester", year=2024, brand="Bowman", set_name=set_name,
+            card_number="BCP-1",
+            diff_json=json.dumps({"set_name": {"from": set_name, "to": f"{set_name} Prospects"}}),
+        ))
+    db_session.commit()
+
+    sheet = build_cheatsheet(db_session)
+    assert sheet.count("\n") == 1
+    assert "2024 Bowman Chrome:" in sheet
+    assert "2024 Bowman Draft:" in sheet
 
 
 def test_create_card_with_scan_id_records_correction(db_session):
