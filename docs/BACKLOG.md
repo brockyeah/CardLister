@@ -342,6 +342,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       same skew. Fix by composing the default from local date parts
       and submitting local noon, in a tested pure helper (quick win; implement
       directly; inline — Inventory.jsx plus a lib function)
+      Sold" column, the planned tax-year export, and days-to-sell analytics, so
+      the error propagates. Fix by composing the default from local date parts
+      and submitting the picked `YYYY-MM-DD` string as-is — the server owns
+      the date semantics (quick win; implement directly; inline —
+      Inventory.jsx plus a lib function) — **do not implement separately:
+      covered as step 6 of
+      `docs/superpowers/plans/2026-08-22-local-timezone.md`**, and the
+      backend half (aware-datetime normalization at the boundary) is step 3
+      there
 - [ ] Pricing lookups are never cached, so the same card re-runs the whole
       chain every time (2026-08-19 review): `get_pricing` takes a
       `PricingRequest` and goes straight to the sources — no memoization
@@ -375,7 +384,21 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       is harder to reason about than a consistently-UTC one (medium; **design
       first** — a timezone change silently re-buckets every historical
       analytics reading, and the choice of "what does a stored naive datetime
-      mean" has to be made explicitly; inline)
+      mean" has to be made explicitly; inline) — **design + plan written
+      2026-08-22**
+      (`docs/superpowers/specs/2026-08-22-local-timezone-design.md`,
+      `docs/superpowers/plans/2026-08-22-local-timezone.md`): recommends
+      storage staying naive UTC with conversion at the edges via
+      `CARDLISTER_TZ` (default America/New_York), an explicit
+      midnight-means-date-only contract (mark-sold and CSV import have been
+      minting UTC-midnight rows, so naive conversion would shift every
+      historical sold date back a day; the modal now submits the bare date
+      so new writes share the representation — no data migration), and a
+      `tzdata` pip pin (the `python:3.11-slim` image has no zoneinfo, so the
+      gap crashes only in production while CI stays green). Covers the
+      mark-sold item above, the Sheets date columns, and the tax-year export
+      in one pass. **Awaiting owner approval on the three decisions listed at
+      the end of the plan doc.**
 - [ ] Listing text offers `$0.00` for a card with no price (2026-08-19
       review): `ebay_listing_text` computes
       `card.listed_price if not None else (card.suggested_price or 0)`, so a

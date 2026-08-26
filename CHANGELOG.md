@@ -269,6 +269,34 @@ only in `[Unreleased]` on a branch is not in prod yet.
   in the one report that would show it. A preset refresh that updated
   `PRESETS` alone would have mispriced every scan taken through it with no
   error anywhere.
+## [Unreleased] — branch `claude/gifted-bell-0bowys`
+
+### Added
+- Design doc + implementation plan for a configured local timezone
+  (`docs/superpowers/specs/2026-08-22-local-timezone-design.md`,
+  `docs/superpowers/plans/2026-08-22-local-timezone.md`). Every timestamp is
+  naive UTC and every calendar-day conversion happens in UTC, so for an
+  east-coast owner the day rolls over at 8pm: evening scans land on
+  tomorrow's analytics bar, the mark-sold picker pre-fills tomorrow and then
+  stores an instant that renders as yesterday, and a Dec-31-evening sale is
+  exported into the wrong tax year. Recommends keeping storage UTC and
+  converting at the edges via a `CARDLISTER_TZ` zone (default
+  America/New_York), with exact-midnight values defined as date-only — the
+  mark-sold and CSV-import paths have been minting UTC-midnight rows all
+  along, and converting those naively would shift every historical sold
+  date back a day. Revised after CodeRabbit's review of the first draft
+  from a legacy-only read rule into an explicit contract: the mark-sold
+  modal submits the bare picked date (pydantic already parses it to naive
+  midnight — verified, no schema change), so legacy rows and new writes
+  share one representation, export/import round-trips are value-exact, and
+  the browser's timezone can never shift a stored date. Records three facts
+  proven against the runtime: that pydantic parse, the pinned SQLAlchemy
+  SQLite dialect dropping tzinfo *without converting* (a `+05:00` payload
+  stores its local clock reading), and the `python:3.11-slim` image having
+  no timezone database, so without a `tzdata` pip pin the deploy crashes
+  while CI stays green. Docs only; awaiting approval on the no-migration
+  approach and midnight contract, the default zone, and the Sheets
+  date-column format change.
 
 ## [Unreleased] — branch `fix/scan-nullish-result`
 ## [Unreleased] — branch `claude/sweet-rubin-bnabr7`
