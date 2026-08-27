@@ -10,6 +10,77 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `claude/sweet-rubin-oas8tk`
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PR #63
+left it alone: PRs #60, #61 and #62 were each opened to date that one line, and
+a fourth edit of it would be a fourth conflicting change to the same heading.
+Whichever of those merges owns it.
+-->
+
+### Fixed
+- A failing mailer no longer swallows call-up alerts in silence. Being told a
+  prospect got called up while you hold his 1st Bowman is the feature this app
+  was built around, and it had exactly one failure mode where it stayed quiet
+  and looked healthy: `run_poll_cycle` only stamps `emailed_at` when
+  `mailer.send_email` returns true, so a broken mailer — wrong SendGrid
+  credentials after a Railway env edit, a provider outage, a rate limit —
+  retried the same events every cycle until they crossed the 48-hour window,
+  at which point they left it **permanently, unemailed, with nothing anywhere
+  recording that an alert had been dropped**. `/api/health` reported the poller
+  perfectly fresh throughout, because the heartbeat is stamped after a failed
+  cycle too. The window itself is right — it bounds retries so one broken send
+  cannot keep the poller emailing week-old news — so what was added is the
+  record, at both ends of the problem: a failed send now logs an error and
+  fires an out-of-band owner alert immediately, and events that pass the cutoff
+  unsent are counted and reported. The alert goes out through the ntfy push
+  that `billing_alerts` already had wired, which is the point — the app's own
+  email is the thing that is broken. It says which failure this is, too:
+  "no email delivery is configured" and "configured but the send failed" look
+  identical from the outside and have completely different fixes.
+- The abandoned count is a rolling figure over a bounded band (events aged
+  48–96 hours), not a per-event notification. There is no column marking a row
+  as abandoned, and adding one would be a schema change for a number that is
+  only ever reported; without the lower bound the count would instead grow
+  forever and re-alert next season about call-ups from this one. The alert
+  therefore says "in the last two days" rather than "just now", and the
+  6-hourly throttle keeps an ongoing outage to four pushes a day. It has its
+  own throttle clock rather than sharing the credits-exhausted one: the two
+  report unrelated outages that can be live at the same time, and one clock
+  would let whichever fired first suppress the other.
+- The Scanner stops saving the pricing chain's $9.99 mock as if it were a real
+  comp. `fetchPricing` wrote any truthy `suggested_price` into the review form
+  without looking at `source`, so when every comp source failed and the chain
+  fell through to its fixed `MOCK_PRICE`, the card was saved carrying $9.99 as
+  though a median of ten sales had produced it — mirrored to the Sheet, and
+  pasted into eBay's sell form from the clipboard. On Railway that is the
+  common case rather than the edge: the scrapers routinely 403 from a
+  datacenter IP, which was reproduced against a running app while making this
+  change (all three sources failed; the endpoint returned `source: "mock"`,
+  `suggested_price: 9.99`). It also defeated the no-price listing-text fix — a
+  mocked $9.99 makes `has_price` true, so the seller got a confident wrong
+  price instead of being told the card has no price yet. The Inventory comps
+  modal had always refused a mock, so the two pricing surfaces disagreed, and
+  the one that disagreed was the one whose value gets *persisted*.
+- Both surfaces now ask the same tested helper (`frontend/src/lib/pricing.js`)
+  rather than each carrying its own guard, so they cannot drift apart again.
+  It refuses a non-positive price for the same reason the listing-text endpoint
+  treats one as unset — a zero reads as a filled-in field rather than an empty
+  one — and guards the *type* as well as the value, since `suggested_price` is
+  `Optional[float]` on the wire and a string would survive a `> 0` comparison
+  and then throw on `.toFixed()` at the call site. Only `mock` is
+  disqualifying: an unlabelled response is a real lookup whose source field
+  went missing, and refusing it would silently discard a good comp. The scan
+  page still renders the failure note it always did, so an empty price field
+  arrives with the explanation beside it.
+
+### Changed
+- `run_poll_cycle` returns `pending` and `abandoned` alongside `new` and
+  `emailed`, and `POST /api/news/poll-now` passes them through — a manual poll
+  that reports a bare `"emailed": 0` reads exactly like "nothing to send".
+
 ## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
 
 ### PR #52 — Pricing sources run concurrently
