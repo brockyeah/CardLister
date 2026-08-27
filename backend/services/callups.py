@@ -12,7 +12,9 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..models import Card, CallupEvent
-from . import mailer
+# Modules, not the functions inside them, so tests can patch the attribute
+# (see the testing notes in CLAUDE.md).
+from . import billing_alerts, mailer
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,36 @@ def is_alertable(type_desc: str, inventory_match: bool) -> bool:
 ALERT_MAX_AGE_HOURS = 48  # don't email events older than this (bounds retry)
 
 
+def _recently_abandoned(db: Session, now: datetime) -> list:
+    """Alertable events that left the retry window unemailed in the last
+    ALERT_MAX_AGE_HOURS.
+
+    The window itself is right — it bounds retries, so one broken send cannot
+    keep the poller emailing stale news forever. What was missing is the
+    record: an event crossing the cutoff simply stopped appearing in `pending`
+    and nothing anywhere said an alert had been dropped.
+
+    This is a rolling count over a band, not a per-event notification. There
+    is no column marking a row as abandoned (adding one would be a schema
+    change for a number that is only ever reported), so the band bounds the
+    query instead: without a lower bound the count would grow forever and
+    include every non-alertable row the app has ever recorded. An event is
+    therefore counted on every cycle for the two days it sits in the band —
+    which is why the alert says "in the last two days" rather than "just now".
+    """
+    cutoff = now - timedelta(hours=ALERT_MAX_AGE_HOURS)
+    floor = cutoff - timedelta(hours=ALERT_MAX_AGE_HOURS)
+    rows = db.query(CallupEvent).filter(
+        CallupEvent.emailed_at.is_(None),
+        CallupEvent.created_at < cutoff,
+        CallupEvent.created_at >= floor,
+    ).all()
+    # Most un-emailed events are un-emailed on purpose (a Recalled for a player
+    # the owner does not own is never alertable), so the same filter the
+    # pending query uses has to run here or the count is meaningless.
+    return [e for e in rows if is_alertable(e.type_desc, e.inventory_match)]
+
+
 def _compose_digest(events: list) -> tuple[str, str]:
     """(subject, plaintext body) for a batch of alertable CallupEvents.
     Inventory matches lead per spec — the owner's sell signal leads the
@@ -160,21 +192,50 @@ def run_poll_cycle(db: Session) -> dict:
     if new_count:
         db.commit()
 
-    # Collect alertable, un-emailed, recent events.
-    cutoff = datetime.utcnow() - timedelta(hours=ALERT_MAX_AGE_HOURS)
+    # Collect alertable, un-emailed, recent events. One clock for the whole
+    # step, so `pending` and `abandoned` are split on exactly the same cutoff
+    # and an event cannot fall in both or neither.
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=ALERT_MAX_AGE_HOURS)
     pending = [
         e for e in db.query(CallupEvent).filter(
             CallupEvent.emailed_at.is_(None), CallupEvent.created_at >= cutoff
         ).all()
         if is_alertable(e.type_desc, e.inventory_match)
     ]
+    abandoned = _recently_abandoned(db, now)
     emailed = 0
+    send_failed = False
     if pending:
         subject, body = _compose_digest(pending)
         if mailer.send_email(subject, body):
-            now = datetime.utcnow()
             for e in pending:
                 e.emailed_at = now
             db.commit()
             emailed = len(pending)
-    return {"new": new_count, "emailed": emailed}
+        else:
+            send_failed = True
+            logger.error(
+                "Call-up digest could not be emailed; %s alert(s) held for retry "
+                "until they are %sh old", len(pending), ALERT_MAX_AGE_HOURS,
+            )
+    if abandoned:
+        logger.error(
+            "%s call-up alert(s) passed %sh unsent and will never be retried: %s",
+            len(abandoned), ALERT_MAX_AGE_HOURS,
+            ", ".join(sorted(e.player_name for e in abandoned)),
+        )
+    if send_failed or abandoned:
+        # Out-of-band on purpose: the app's own email is the thing that is
+        # broken, so the ntfy push inside this call is what actually reaches
+        # the owner. Throttled there, not here — every cycle of an ongoing
+        # outage calls it and at most one alert per window goes out.
+        billing_alerts.notify_callup_alerts_undelivered(
+            len(pending) if send_failed else 0, len(abandoned), ALERT_MAX_AGE_HOURS,
+        )
+    return {
+        "new": new_count,
+        "emailed": emailed,
+        "pending": len(pending),
+        "abandoned": len(abandoned),
+    }
