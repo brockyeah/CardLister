@@ -6,6 +6,7 @@ import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayLi
 import { downscaleImage } from '../lib/downscaleImage'
 import { formatApiError } from '../lib/apiError.js'
 import { queueLossSummary, retryQueueItem, scanResultPatch } from '../lib/scanQueue.js'
+import { usableSuggestedPrice } from '../lib/pricing.js'
 
 const EMPTY_FORM = {
   player_name: '',
@@ -142,8 +143,13 @@ export default function Scanner() {
       setComps(pricing.comps || [])
       setPricingNote(pricing.note || '')
       setPricingSource(pricing.source || '')
-      if (pricing.suggested_price) {
-        setForm((prev) => ({ ...prev, suggested_price: pricing.suggested_price }))
+      // Only a real comp gets written into the form. A fully failed lookup
+      // still returns a price — the chain's $9.99 mock — and writing that
+      // saved the card at a number no sale supports. The comps panel still
+      // renders the response and its note, so the failure stays visible.
+      const suggested = usableSuggestedPrice(pricing)
+      if (suggested != null) {
+        setForm((prev) => ({ ...prev, suggested_price: suggested }))
       }
     } catch {
       if (seq !== pricingSeq.current) return
