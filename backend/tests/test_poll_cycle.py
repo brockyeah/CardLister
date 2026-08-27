@@ -25,8 +25,11 @@ def test_poll_cycle_records_and_emails(db_session):
          patch("backend.services.callups.mailer.send_email", return_value=True) as send:
         result = callups.run_poll_cycle(db_session)
 
-    # Selected + owned Recalled(x2); Nobody skipped
-    assert result == {"new": 4, "emailed": 3, "pending": 3, "abandoned": 0}
+    # Selected + owned Recalled(x2); Nobody skipped. pending is 0, not 3: it
+    # counts what is still awaiting a retry, and a successful send stamps every
+    # candidate — reporting the pre-send count would say three alerts are
+    # waiting on the very cycle that just delivered them.
+    assert result == {"new": 4, "emailed": 3, "pending": 0, "abandoned": 0}
     send.assert_called_once()
     subject, body = send.call_args.args
     assert "Owned Guy" in subject                       # inventory match leads per spec
@@ -188,20 +191,53 @@ def test_undelivered_alert_pushes_and_names_a_missing_mail_config(monkeypatch):
     assert sent["email"][0] == subject      # both channels carry the same alert
 
 
-def test_undelivered_alert_distinguishes_an_outage_from_no_config(monkeypatch):
-    _reset_callup_throttle()
+def _capture_body(monkeypatch, configured=True):
     bodies = []
     monkeypatch.setattr(callups.billing_alerts, "send_email", lambda s, b: True)
     monkeypatch.setattr(callups.billing_alerts, "_push_via_ntfy",
                         lambda s, b: bodies.append(b) or True)
-    monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: True)
+    monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: configured)
+    return bodies
 
-    callups.billing_alerts.notify_callup_alerts_undelivered(0, 2, 48)
+
+def test_undelivered_alert_distinguishes_an_outage_from_no_config(monkeypatch):
+    _reset_callup_throttle()
+    bodies = _capture_body(monkeypatch, configured=True)
+
+    # A send failed on this cycle, so a live provider problem is the diagnosis.
+    callups.billing_alerts.notify_callup_alerts_undelivered(1, 2, 48)
     body = bodies[0]
     assert "passed 48h unsent" in body
     assert "never be retried" in body
     assert "ALERT_EMAILS" not in body       # configured — do not misdiagnose it
     assert "provider credentials" in body
+
+
+def test_abandoned_only_alert_does_not_claim_a_live_provider_failure(monkeypatch):
+    # Nothing failed on this cycle — the sends that lost these alerts may have
+    # been days ago and may since have cleared. Claiming a current outage is a
+    # diagnosis of something that is not happening, and this very alert can go
+    # out *by email* while its body tells the owner email is down.
+    _reset_callup_throttle()
+    bodies = _capture_body(monkeypatch, configured=True)
+
+    callups.billing_alerts.notify_callup_alerts_undelivered(0, 2, 48)
+    body = bodies[0]
+    assert "passed 48h unsent" in body
+    assert "provider credentials" not in body
+    assert "nothing failed on this cycle" in body
+    assert "could not be emailed just now" not in body   # no live failure to report
+
+
+def test_missing_mail_config_is_reported_even_with_no_failed_send(monkeypatch):
+    # Unlike a provider outage, this is a standing condition rather than an
+    # event, so it holds whether or not a send was attempted this cycle.
+    _reset_callup_throttle()
+    bodies = _capture_body(monkeypatch, configured=False)
+
+    callups.billing_alerts.notify_callup_alerts_undelivered(0, 2, 48)
+    assert "ALERT_EMAILS" in bodies[0]
+    assert "provider credentials" not in bodies[0]
 
 
 def test_undelivered_alert_is_throttled(monkeypatch):

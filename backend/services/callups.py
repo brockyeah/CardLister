@@ -225,17 +225,23 @@ def run_poll_cycle(db: Session) -> dict:
             len(abandoned), ALERT_MAX_AGE_HOURS,
             ", ".join(sorted(e.player_name for e in abandoned)),
         )
+    # What is *still* waiting on a retry, which is what "pending" has to mean
+    # to be worth reporting. A successful send stamps every candidate, so the
+    # pre-send count would say alerts are awaiting delivery when none are —
+    # and a healthy cycle would read as {"emailed": 3, "pending": 3}
+    # (CodeRabbit, PR #64).
+    still_pending = len(pending) if send_failed else 0
     if send_failed or abandoned:
         # Out-of-band on purpose: the app's own email is the thing that is
         # broken, so the ntfy push inside this call is what actually reaches
         # the owner. Throttled there, not here — every cycle of an ongoing
         # outage calls it and at most one alert per window goes out.
         billing_alerts.notify_callup_alerts_undelivered(
-            len(pending) if send_failed else 0, len(abandoned), ALERT_MAX_AGE_HOURS,
+            still_pending, len(abandoned), ALERT_MAX_AGE_HOURS,
         )
     return {
         "new": new_count,
         "emailed": emailed,
-        "pending": len(pending),
+        "pending": still_pending,
         "abandoned": len(abandoned),
     }

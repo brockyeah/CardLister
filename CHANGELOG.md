@@ -76,6 +76,20 @@ Whichever of those merges owns it.
   page still renders the failure note it always did, so an empty price field
   arrives with the explanation beside it.
 
+- The reported `pending` count is what is *still* waiting on a retry, not the
+  number of candidates the cycle started with. A successful send stamps every
+  candidate, so the pre-send count said alerts were awaiting delivery when none
+  were — a healthy cycle read as `{"emailed": 3, "pending": 3}`, and the count
+  contradicted the contract its own endpoint docstring stated (CodeRabbit,
+  PR #64).
+- The undelivered-alerts notice stops diagnosing a live provider failure when
+  nothing failed on the cycle that sent it. With only abandoned events to
+  report — sends that may have failed days ago and may since have cleared — the
+  message still read "the send failed, check the provider credentials", so the
+  alert could be **delivered by email** while its body told the owner email was
+  down. A missing mail configuration is still reported either way, because that
+  is a standing condition rather than an event (CodeRabbit, PR #64).
+
 ### Changed
 - `run_poll_cycle` returns `pending` and `abandoned` alongside `new` and
   `emailed`, and `POST /api/news/poll-now` passes them through — a manual poll

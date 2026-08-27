@@ -142,15 +142,27 @@ def notify_callup_alerts_undelivered(
     if not mailer.is_configured():
         # A permanent misconfiguration and a provider outage produce the same
         # symptom, and the fix for each is completely different — so say which
-        # one this is rather than leaving the owner to guess.
+        # one this is rather than leaving the owner to guess. This one holds
+        # whether or not a send was attempted this cycle: it is a standing
+        # condition, not an event.
         lines.append(
             "No email delivery is configured: set SENDGRID_API_KEY (or "
             "SMTP_USERNAME/SMTP_PASSWORD) together with ALERT_EMAILS."
         )
-    else:
+    elif pending:
         lines.append(
             "Email delivery is configured but the send failed — check the "
             "provider credentials, the sending account, and the Railway logs."
+        )
+    else:
+        # Abandoned-only: nothing failed on *this* cycle, so claiming a live
+        # provider failure would be a diagnosis of something that may have
+        # cleared days ago — and this very alert can go out by email while its
+        # body tells the owner email is down (CodeRabbit, PR #64).
+        lines.append(
+            "Email delivery is configured and nothing failed on this cycle — "
+            "these alerts were lost to an earlier failure that may since have "
+            "cleared. Check the Railway logs around when they were recorded."
         )
     body = "\n\n".join(lines) + (
         f"\n\n(Repeat alerts suppressed for {CALLUP_ALERT_THROTTLE_SECONDS // 3600}h.)"
