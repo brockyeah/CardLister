@@ -87,13 +87,33 @@ export const resyncSheet = () =>
 export const getNews = () => api.get('/api/news').then((r) => r.data)
 
 // --- Scan ---
-export const scanCard = (file, preset = 'balance', backFile = null) => {
+// A scan legitimately takes 15-30s, so it needs a far longer ceiling than any
+// other call here — but it needs *a* ceiling. With none (the axios default is
+// no timeout at all), a request that never settles leaves its queue item in
+// `scanning` forever: the one status that renders no Retry, behind a
+// single-flight guard that never releases, so every later item in the batch
+// waits on it too.
+//
+// The number is chosen to sit above the server's own worst case rather than
+// picked for feel: the subscription path is hard-capped at
+// SUBSCRIPTION_SCAN_TIMEOUT (150s by default) and the API path answers in
+// 15-30s. Five minutes clears both with room for a slow upload on a phone
+// connection, so this can only ever fire on a scan that was never coming back.
+// Erring long is the right direction — aborting here does not stop the server,
+// which has already spent the tokens.
+export const SCAN_TIMEOUT_MS = 300_000
+
+export const scanCard = (file, preset = 'balance', backFile = null, { signal } = {}) => {
   const fd = new FormData()
   fd.append('image', file)
   fd.append('preset', preset)
   if (backFile) fd.append('back', backFile)
   return api
-    .post('/api/scan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    .post('/api/scan', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: SCAN_TIMEOUT_MS,
+      signal,
+    })
     .then((r) => r.data)
 }
 
