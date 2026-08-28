@@ -5,6 +5,7 @@ import {
   getStorageUsage, resyncSheet, getSoldYears, downloadSoldCsv,
 } from '../api'
 import { formatApiError } from '../lib/apiError.js'
+import { isBulkOrphanSweep, orphanCount, orphanHint } from '../lib/orphans.js'
 
 const fmt = (n) => (n ?? 0).toLocaleString()
 const usd = (n) => `$${(n ?? 0).toFixed(2)}`
@@ -26,11 +27,14 @@ const RANGES = [
   { key: 'all', label: 'All time' },
 ]
 
-function Tile({ label, value }) {
+function Tile({ label, value, hint, warn }) {
   return (
     <div className="card-panel">
       <div className="text-xs text-gray-400 uppercase tracking-wide">{label}</div>
       <div className="text-2xl font-black text-emerald-400 mt-1">{value}</div>
+      {hint && (
+        <div className={`text-xs mt-1 ${warn ? 'text-amber-400' : 'text-gray-500'}`}>{hint}</div>
+      )}
     </div>
   )
 }
@@ -205,12 +209,22 @@ function ManageData({ users, onDone }) {
   const [msg, setMsg] = useState('')
   const [targets, setTargets] = useState([])
   const [storage, setStorage] = useState(null)
+  // Reclaimable photos, reported beside the storage figures rather than only
+  // behind the button that offers to delete them. Nothing used to say there
+  // was anything to sweep, so the cleanup tool ran when someone thought to
+  // look — which on a volume that fills silently is not a plan.
+  const [orphans, setOrphans] = useState(null)
   // Years that actually have sales, so the tax export offers real choices
   // rather than a free-text box that can quietly produce an empty file.
   const [soldYears, setSoldYears] = useState([])
   const [soldYear, setSoldYear] = useState('')
 
-  const loadStorage = () => getStorageUsage().then(setStorage).catch(() => setStorage(null))
+  const loadStorage = () => Promise.all([
+    getStorageUsage().then(setStorage).catch(() => setStorage(null)),
+    // Null, not an empty object: the tile has to be able to say "could not
+    // check" rather than report a failed lookup as a tidy volume.
+    getUploadOrphans().then(setOrphans).catch(() => setOrphans(null)),
+  ])
 
   useEffect(() => {
     getConfiguredUsers().then((d) => setTargets(d.users || [])).catch(() => setTargets([]))
@@ -325,6 +339,9 @@ function ManageData({ users, onDone }) {
     setBusy(true); setMsg('')
     try {
       const o = await getUploadOrphans()
+      // Re-read rather than trusting the tile: the figure it shows was fetched
+      // on mount and a scan since then will have moved it.
+      setOrphans(o)
       if (!o.count) {
         setMsg('No orphaned photos to clean up.')
         return
@@ -332,8 +349,9 @@ function ManageData({ users, onDone }) {
       const mb = (o.bytes / (1024 * 1024)).toFixed(1)
       // Most of the uploads dir flagged at once usually means the cards no
       // longer reference their photos (e.g. inventory restored from CSV,
-      // which has no photo columns) — not genuinely abandoned scans.
-      const bulk = o.total_files > 0 && o.count >= 10 && o.count / o.total_files >= 0.5
+      // which has no photo columns) — not genuinely abandoned scans. Shared
+      // with the storage tile, which warns before this point is reached.
+      const bulk = isBulkOrphanSweep(o)
       const ok = window.confirm(
         (bulk
           ? `WARNING: this would delete ${o.count} of the ${o.total_files} photos on the server. ` +
@@ -361,10 +379,16 @@ function ManageData({ users, onDone }) {
         Download a database backup regularly — inventory, scans, and usage history all live in it.
       </p>
       {storage && (
-        <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
           <Tile label="Database size" value={fmtBytes(storage.db_bytes)} />
           <Tile label="Photos on server" value={fmt(storage.uploads_count)} />
           <Tile label="Photo storage" value={fmtBytes(storage.uploads_bytes)} />
+          <Tile
+            label="Reclaimable"
+            value={orphanCount(orphans) == null ? '—' : fmt(orphanCount(orphans))}
+            hint={orphanHint(orphans, fmtBytes)}
+            warn={isBulkOrphanSweep(orphans)}
+          />
         </div>
       )}
       <div className="mb-3 flex flex-wrap gap-3">
