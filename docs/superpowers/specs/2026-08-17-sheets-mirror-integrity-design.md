@@ -1,6 +1,9 @@
 # Google Sheets Mirror Integrity — Design
 
-**Status:** proposed, awaiting owner approval
+**Status:** base design implemented (PR #46, merged 2026-08-17). The
+**2026-08-29 addendum below** is proposed and awaiting owner approval — it
+closes the gap between the lock protocol this document specified and the one
+PR #46 actually shipped.
 **Filed:** 2026-08-17 (daily review run; all three defects verified against the code)
 **Scope:** `backend/services/google_sheets.py`, `backend/routers/sheets.py`,
 `backend/routers/cards.py` (delete path only)
@@ -240,3 +243,215 @@ scale.
 - Cover an overlapping save and resync: a `sync_card` that read a `sheets_row`
   before a rewrite reassigned it must not write afterwards, and the rewritten
   row must still belong to the card the rewrite assigned it to.
+
+---
+
+# Addendum (2026-08-29): the `sheets_row` commit runs outside the lock the protocol requires
+
+**Status:** proposed, awaiting owner approval
+**Filed:** 2026-08-29 (weekly deep-work run, from the 2026-08-23 weekly-review
+backlog item; every claim re-verified against the code as shipped)
+**Scope:** `backend/services/google_sheets.py`, `backend/routers/cards.py`
+(the two background tasks), `backend/routers/sheets.py`
+**Plan:** `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`
+
+## The defect, concretely
+
+The base design's race analysis ("What could go wrong", first bullet) is
+explicit that the lock must span **re-read → Sheet write → `sheets_row`
+commit**, and the shipped lock's own comment repeats the claim verbatim
+(`google_sheets.py:19-22`: "Held across re-read -> Sheet write -> sheets_row
+commit"). The implementation does not do this. Every writer releases the lock
+when it returns, and the DB commit runs in the caller, after the release:
+
+- `sync_card` takes the lock at `google_sheets.py:273` and releases it on
+  return (`:289` update branch, `:304` append branch). The commit of the row
+  it returns happens in `_sync_card_to_sheets` at `routers/cards.py:49-51`.
+- `rewrite_all_rows` takes the lock at `google_sheets.py:184` and releases it
+  on return (`:222`). The stamping loop and its commit run in `resync_all` at
+  `routers/sheets.py:50-53`, and the `"cleared"`-branch nulling at
+  `routers/sheets.py:38-41` — both after the lock is gone.
+- `blank_row` does hold the lock across its `is_owned` check and its write
+  (`google_sheets.py:241-251`), but the DB that `_is_owned`
+  (`routers/cards.py:68-69`) consults can lag the sheet, because a resync's
+  new assignments are committed only after the resync released the lock.
+
+The invariant the lock exists to provide — *while it is held, the sheet and
+the committed `Card.sheets_row` values agree* — is therefore not provided at
+exactly the moments two writers interleave, which is the only time the lock
+matters at all.
+
+## The two concrete losses
+
+**(a) A save racing a resync corrupts the sheet, then the DB.** Thread T1
+(request) runs `resync_all`: `rewrite_all_rows` takes the lock, clears and
+rewrites the tab — card X now lives at row 9 — and releases; the stamping loop
+has not yet committed. Thread T2 (a save's background task) now enters
+`sync_card`, takes the lock, and `_reread` (`cards.py:44-46`) refreshes X from
+the DB — which still says row 5, because T1 hasn't committed. T2 writes X's
+data over row 5, **a row the rewrite just assigned to a different card**, and
+nothing raises. The DB half corrupts too, in the append-branch variant: a
+sync that appended and returned row 12 commits `sheets_row = 12` at
+`cards.py:49-51` *after* the resync committed row 9, so X's next edit writes
+into row 12 — outside the rewritten block, or over whatever card the next
+resync puts there. This is the base design's "stale ownership back in the
+database after the sheet had already moved on", verbatim — the case the lock
+was specified to close.
+
+**(b) A delete racing a resync erases a live card from the mirror.**
+`delete_card` captures row 7 (`cards.py:502`) and queues `_blank_sheets_row`.
+A resync rewrites the tab, and live card Z now occupies row 7; the lock is
+released; the stamping is not yet committed. The blank task takes the lock and
+asks `_is_owned(7)` — which queries **committed** state, where no card claims
+row 7 — so the blank lands and erases Z from the sheet. The resync then
+commits `Z.sheets_row = 7`, pointing Z at a blank row until its next edit
+happens to rewrite it.
+
+**(c) `resync_one` bypasses the protocol entirely and has no caller.**
+`POST /api/sheets/sync/{card_id}` (`routers/sheets.py:67-76`) calls
+`sync_card` with no `reread_row` and commits outside the lock. Nothing invokes
+it: `frontend/src/api.js:83-84` posts only to `/api/sheets/resync`, and no
+test exercises the route.
+
+## Why the existing tests can't see it
+
+All 14 tests in `test_sheets_mirror.py` are single-threaded and stub the
+callbacks: `test_sync_card_rereads_row_inside_the_lock`
+(`test_sheets_mirror.py:318-333`) passes `reread_row=lambda: 9`, pinning the
+callback's plumbing but not the locking, and
+`test_delete_does_not_erase_a_row_a_resync_reassigned` (`:292-305`) passes
+`lambda r: True`. Moving the reread *outside* the lock passes the whole file.
+The lock has zero concurrency coverage.
+
+## Approaches
+
+### A. Commit callbacks passed into the writers (recommended)
+
+Extend the shape `reread_row` already established: the caller owns the DB
+work, the service owns the lock, and the service invokes the caller's DB work
+at the right moment — inside the lock.
+
+- `sync_card(card, reread_row=None, commit_row=None)`: after a successful
+  sheet write, invoke `commit_row(row)` before releasing.
+  `_sync_card_to_sheets` passes a callback that sets `card.sheets_row` and
+  commits, and drops its post-hoc commit.
+- `rewrite_all_rows(cards, commit_rows=None, null_rows=None)`: invoke
+  `commit_rows(rows)` inside the lock once the update succeeds, and
+  `null_rows()` inside the lock on the `"cleared"` path (an empty sheet with
+  live indices pointing into it is exactly the state a racing save must not
+  observe). `resync_all` moves its stamping loop and its nulling into the
+  callbacks; the response contract — reason strings `"unconfigured"`,
+  `"setup"`, `"cleared"`, `"commit"` — is unchanged.
+- `blank_row` needs **no change**: once the two committing writers finish
+  their commits before releasing, `_is_owned` always reads a DB that agrees
+  with the sheet. Fixing (a)'s commit placement is what fixes (b).
+
+Two narrow, obviously-named callbacks are deliberate — a single polymorphic
+`on_result(rows, error)` would push the resync's branch logic into the service
+and make the failure mapping implicit.
+
+### B. Expose the lock and have callers hold it (rejected)
+
+A `google_sheets.mirror_lock()` context manager, with callers running
+re-read → write → commit inside it. Flatter control flow, but the protocol
+becomes something every caller must remember rather than something the
+writers enforce — and this defect *is* a caller getting the protocol wrong
+while the module's comment said otherwise. The writers can't verify their
+caller holds the lock without re-entrant bookkeeping that costs more than the
+callbacks do.
+
+### C. Pass the DB session into the service (rejected)
+
+`google_sheets.py` is deliberately ORM-ignorant (its imports are `os`,
+`json`, `logging`, `threading`); giving it the session couples the mirror to
+the models, drags SQLAlchemy into every mirror test, and still needs a
+callback-equivalent for the resync's stamping order. Strictly worse than A.
+
+### `resync_one`: delete it (recommended) rather than fix it
+
+It is dead code on the wrong side of the protocol. Its job — "push one card
+to the sheet" — is what every mutating card route already does via
+`_sync_card_to_sheets`, and the repair story is `resync_all`. Fixing it means
+wiring `reread_row` + `commit_row` into a route nothing calls; deleting it
+removes a bypass. `test_auth_sweep.py` walks the live OpenAPI schema, so
+removal needs no test edits there.
+
+## The lock-ordering hazard the fix introduces — and its resolution
+
+Moving `db.commit()` inside `_sheets_lock` creates an ABBA shape with
+SQLite's file lock that does not exist today, and the design is not sound
+without naming it. The DB runs in rollback-journal mode (the storage backlog
+item notes `-wal` sidecars would appear only "if journal mode is ever
+changed"), where a read transaction holds SHARED for its lifetime, and
+SQLAlchemy's autobegin opens one on the first query:
+
+- T1 (resync) holds `_sheets_lock`; its under-lock commit needs EXCLUSIVE.
+- T2 (`_sync_card_to_sheets`) ran `db.query(Card)...first()` (`cards.py:38`)
+  before calling `sync_card`, so it holds SHARED — and is blocked waiting on
+  `_sheets_lock`.
+
+Neither yields; SQLite's busy timeout (~5s default) breaks it by failing T1's
+commit with "database is locked", which maps to the `"commit"` failure — a
+designed-in stall plus a spurious repair-tool failure in precisely the racing
+case the lock exists to serve.
+
+**Resolution:** the background tasks must wait on the lock holding no DB
+transaction. `_sync_card_to_sheets` calls `db.rollback()` after loading the
+card and before calling `sync_card`; `_reread`'s `db.refresh(card)` then
+reopens the transaction *inside* the lock, where it is the only thread in the
+protocol, and `commit_row` commits on the same session. `_blank_sheets_row`
+already runs its first query inside the lock (`_is_owned` is only ever called
+there) and must stay that way — the plan pins this with a comment, since it
+is invisible load-bearing ordering. `resync_all`'s own session holds SHARED
+from its card query and upgrades to EXCLUSIVE itself, which is ordinary
+single-connection promotion, not the ABBA case: other request threads' reads
+can stall the commit up to the busy timeout exactly as they can today, but
+with the rollback fix no thread that waits on `_sheets_lock` holds SHARED.
+
+## What could go wrong
+
+- **`commit_row` failing after an append** leaves the row landed in the sheet
+  and `sheets_row` NULL, so the card's next edit appends a duplicate row. This
+  is the same degradation the open "malformed `updatedRange`" backlog item
+  documents for the parse-failure case, it requires the local SQLite commit to
+  fail (far rarer than the Sheets call failing), and it is logged. Accepted;
+  the fallback-to-`_last_used_row` fix in that backlog item shrinks it further
+  when it lands.
+- **`commit_rows` failing under the lock** keeps today's exact semantics: the
+  sheet is full and correct, indices are stale-but-valid, the response says
+  `"commit"`, and re-running the resync re-records them (positions are
+  deterministic, `index + 2`). The base design's asymmetry — null when the
+  sheet is empty, never when it is full — is untouched.
+- **Longer lock holds.** The commit adds local-disk milliseconds to a lock
+  whose holds are already seconds of Sheets network I/O. Waiters are
+  background tasks and the manual resync; nothing a user watches.
+- **A future second worker** breaks this exactly as it breaks the existing
+  lock — invariant #9 already forbids that, and this changes nothing about it.
+
+## Cost impact (required check)
+
+No Anthropic calls; scan cost delta is zero. No new Sheets API requests
+either — the same calls happen in the same order; only the DB commits move.
+
+## Verification
+
+See the plan for the ordered steps; the properties are:
+
+- A real two-thread save-vs-resync interleaving, gated by `threading.Event`
+  (released in `finally` — never `sleep`, per the pricing-suite lesson in
+  CLAUDE.md invariant #12), asserting every card's data sits in the row its
+  committed `sheets_row` names. Fails against today's code.
+- The same shape for delete-vs-resync: the blank must be dropped once the
+  resync's assignments are committed under the lock. Fails against today's
+  code.
+- `commit_row` / `commit_rows` observe `_sheets_lock.locked() is True` when
+  invoked — pins "under the lock" directly, so a refactor that moves the
+  callback after the `with` block fails a unit test, not just the (timing-
+  sensitive) interleaving tests.
+- The resync `"commit"` failure branch gets its first test (the branch at
+  `routers/sheets.py:52-62` is currently uncovered).
+- A post-resync invariant assertion — every `sheets_row` equals the card's
+  sheet position — reused across the new tests.
+- The two-thread tests run against the real temp-file SQLite DB the suite
+  already uses, so a regression on the rollback-before-wait rule surfaces as
+  the resync's commit failing "database is locked" rather than passing.

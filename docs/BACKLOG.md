@@ -166,6 +166,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       matches its sheet position (large; **design first** — data integrity
       across `google_sheets.py`/`cards.py`/`sheets.py`; extend the existing
       2026-08-17 Sheets integrity design doc rather than starting a new one)
+      — **design + plan written 2026-08-29** (addendum in
+      `docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+      plan in `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`):
+      recommends caller-supplied commit callbacks invoked inside the lock
+      (mirroring the `reread_row` shape), deleting the caller-less
+      `resync_one`, and names the SQLite ABBA deadlock the move introduces
+      plus its fix (background tasks `rollback()` before waiting on the
+      lock). Zero scan-cost delta. **Awaiting owner approval on the three
+      decisions at the end of the plan doc.**
 - [ ] Scanner `resetAfterSave` advances the batch queue from a stale snapshot
       (2026-08-23 weekly review): it computes `nextReady` from the render
       closure captured when Save was pressed, but `doSave` awaits two network
