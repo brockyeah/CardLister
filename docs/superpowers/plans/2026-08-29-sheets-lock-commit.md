@@ -85,6 +85,10 @@ stays byte-identical (`_FAILURE_DETAIL` is a UI contract).
 - Existing tests `test_cleared_but_not_rewritten_nulls_every_row` and
   `test_setup_failure_leaves_indices_alone` must pass unchanged — they pin
   the asymmetry the callbacks must preserve.
+- **Deliberately no test for a `null_rows` failure surfacing as a 500**: that
+  is unchanged behavior being documented, not behavior this change introduces,
+  and pinning a bare FastAPI 500 would test the framework, not the mirror.
+  A conscious omission, not an oversight.
 
 ## Step 3 — delete `resync_one`
 
