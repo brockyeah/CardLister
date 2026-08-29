@@ -67,9 +67,14 @@ the callback mechanism that makes it true.
 In `resync_all` (`routers/sheets.py:20-64`): move the stamping loop + commit
 (`:50-53`) into `commit_rows`, and the nulling (`:38-41`) into `null_rows`;
 wrap the `rewrite_all_rows` call so a `commit_rows` failure still rolls back
-and returns the existing `"commit"` reason with indices untouched. Every
-reason string and response shape stays byte-identical (`_FAILURE_DETAIL` is a
-UI contract).
+and returns the existing `"commit"` reason with indices untouched. A
+`null_rows()` failure is deliberately **not** wrapped — today's nulling commit
+at `sheets.py:38-41` has no handler either, so it propagates as a 500 exactly
+as it does now; that is acceptable because the `"cleared"` recovery ("run this
+again") still holds — a retry re-clears an already-empty tab (a no-op) and
+re-nulls. State this in a comment rather than adding a handler, so it doesn't
+get relitigated mid-implementation. Every reason string and response shape
+stays byte-identical (`_FAILURE_DETAIL` is a UI contract).
 
 **Test (same step).**
 - `commit_rows` and `null_rows` each observe `_sheets_lock.locked() is True`.

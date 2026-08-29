@@ -422,6 +422,12 @@ with the rollback fix no thread that waits on `_sheets_lock` holds SHARED.
   `"commit"`, and re-running the resync re-records them (positions are
   deterministic, `index + 2`). The base design's asymmetry — null when the
   sheet is empty, never when it is full — is untouched.
+- **`null_rows` failing under the lock** (the nulling commit itself raising,
+  after a real clear-then-rewrite failure) propagates out of `resync_all` as a
+  500 — unchanged from today, where the nulling at `routers/sheets.py:38-41`
+  has no handler either. The `"cleared"` recovery still holds: re-running the
+  resync re-clears an already-empty tab (a no-op) and re-nulls. Accepted
+  as-is rather than wrapped; the plan pins it with a comment.
 - **Longer lock holds.** The commit adds local-disk milliseconds to a lock
   whose holds are already seconds of Sheets network I/O. Waiters are
   background tasks and the manual resync; nothing a user watches.
