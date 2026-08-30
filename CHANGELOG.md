@@ -10,7 +10,45 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
+## [Unreleased] — branch `claude/intelligent-babbage-9tyod1` (2026-08-30 weekly deep review)
+
+### Fixed
+- Percent-encoded dot segments no longer let an API-shaped URL render the SPA
+  shell. `StaticFiles` normalizes the request path before `SpaStaticFiles`'
+  fallback sees it, so `GET /api/%2e%2e/whatever` arrived as `whatever`,
+  missed the `NON_SPA_ROOTS` check, and returned 200 + HTML — the exact
+  misreport the roots list exists to prevent (a link checker or API client
+  sees success for a path that does not exist). No security impact: file
+  lookup was always confined and no auth was exposed. `_is_page_load` now
+  checks the raw request path's first segment too, and the encoded spellings
+  are pinned in `test_spa_fallback.py`. (weekly review)
+- The `"NEAR MINT MINT"` condition spelling was in both variant tables but had
+  no case in the shared parity fixture — the only one of 31 keys unguarded, so
+  either side could drop or retarget it with both suites green, splitting the
+  CSV-import fold from the review-form fold. Added the fixture case plus a
+  backend meta-test asserting every `_VARIANTS` key has a case, so the next
+  added spelling cannot skip the fixture either. (weekly review)
+- The fees tier-boundary test asserted the same value on both sides of the
+  $7,500 tier ("one cent more crosses" — it doesn't: the marginal formula is
+  continuous there, so any tier-comparison mutant passed). Corrected the
+  comment and added an assertion at $7,510, where the tiered fee ($994.39) is
+  visibly cheaper than a flat-rate one ($995.48). (weekly review)
+
+### Changed
+- Doc/config drift swept: removed CLAUDE.md's stale pre-`lib/download.js`
+  download paragraph (its current twin survives), updated `.coderabbit.yaml`'s
+  "two blob download helpers in api.js" line to the three that now share
+  `lib/download.js`, documented `BACKUP_SNAPSHOT_TTL_SECONDS` in
+  `.env.example`, dropped two unused test imports, and added invariants #14
+  (condition spellings are a three-file change, JS-only drift still silent)
+  and #15 (the eBay fee schedule is a dated snapshot whose `VITE_EBAY_FEE_*`
+  overrides are build-time-only and inert on Railway) to CLAUDE.md. Backlog:
+  the two already-shipped features still listed as open in "Later" (condition
+  dropdown, fee estimate) are removed — their Shipped entries stand — and the
+  fee-env-var item now names all six override vars, not the original two.
+  (weekly review)
+
+## 2026-08-25 — Integration of PRs #52–#58 (PR #59)
 
 ### PR #52 — Pricing sources run concurrently
 

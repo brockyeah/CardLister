@@ -46,9 +46,15 @@ describe('estimateFees', () => {
   })
 
   it('treats the tier itself as fully within the higher rate', () => {
-    // $7,500 * 13.25% = $993.75, + $0.40 = $994.15. One cent more crosses.
+    // $7,500 * 13.25% = $993.75, + $0.40 = $994.15. The marginal formula is
+    // continuous at the tier, so one cent more is invisible at cent
+    // resolution ($0.0001 of reduced-rate fee) — the bend only shows a few
+    // dollars past it: $7,510 pays 2.35% on the last $10 ($994.39), where the
+    // flat 13.25% would charge $995.48. That last assertion is the one that
+    // fails if the tier comparison or the marginal split regresses.
     expect(estimateFees(7500, S).fee).toBe(994.15)
     expect(estimateFees(7500.01, S).fee).toBe(994.15)
+    expect(estimateFees(7510, S).fee).toBe(994.39)
   })
 
   it('returns null for a price there is nothing to estimate from', () => {

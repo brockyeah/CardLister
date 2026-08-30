@@ -97,9 +97,10 @@ reviews:
         Repo-specific: any new async state write in pages/Scanner.jsx must
         carry the monotonic pricingSeq guard (bail if a newer lookup started)
         — dropping it reintroduces a shipped race where a stale comps
-        response overwrites the newer card. The two blob download helpers in
-        api.js synthesize an <a download> because a plain href cannot carry
-        the Bearer header; do not simplify them into links. MAX_DIMENSION_PX
+        response overwrites the newer card. The three blob downloads (backup,
+        inventory CSV, sold CSV) go through lib/download.js, which synthesizes
+        an <a download> because a plain href cannot carry the Bearer header;
+        do not simplify them into links. MAX_DIMENSION_PX
         in lib/downscaleImage.js must stay >= the largest max_px in the
         backend PRESETS. Prefer the shared component classes in index.css
         (.btn-primary, .card-panel, .input, .label) and the ink/emerald

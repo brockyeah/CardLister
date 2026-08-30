@@ -1,5 +1,4 @@
 import httpx
-import os
 from unittest.mock import MagicMock, patch
 
 from backend.services import mailer
