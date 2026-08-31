@@ -81,11 +81,11 @@ def test_export_sold_without_a_year_returns_every_sale(db_session):
 
 
 def test_export_sold_is_ordered_by_sale_date(db_session):
-    # Sales are seeded across a year that has fully elapsed. The dates used to
-    # be 2026's, which put the December one *ahead of the runner's clock* for
-    # most of that year — harmless while nothing bounded a sale date, and a
-    # calendar-dependent failure the moment mark-sold started refusing a future
-    # one. A completed year is stable in both directions.
+    """Sales are seeded across a year that has fully elapsed. The dates used to
+    be 2026's, which put the December one *ahead of the runner's clock* for most
+    of that year — harmless while nothing bounded a sale date, and a
+    calendar-dependent failure the moment mark-sold started refusing a future
+    one. A completed year is stable in both directions."""
     with TestClient(app) as client:
         headers = _auth(client)
         # Created out of order so insertion order can't accidentally pass.
