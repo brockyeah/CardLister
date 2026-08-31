@@ -10,6 +10,62 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `claude/sweet-rubin-l1g3u3`
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PRs #63,
+#64 and #65 left it alone: PRs #60, #61 and #62 were each opened to date that
+one line, PR #67 dates it too, and a sixth edit of the same heading would be a
+sixth conflicting change. Whichever of those merges owns it.
+-->
+
+### Fixed
+- A sale can no longer be dated in the future. Nothing bounded `sold_at` at
+  all — `MarkSoldRequest` validated only that `sold_price > 0`, and the picker
+  carried no `max` — so a mistyped year was accepted in silence and then
+  became permanent furniture: it joins the sold-years picker forever, sorts to
+  the end of every tax export, and the only way back is unmark-sold and redo.
+  The picker is now capped at the local date it already defaults to, the
+  server rejects anything more than a day ahead of its own clock, and the
+  modal renders the rejection instead of dropping it — a failed confirm used
+  to reject its promise into nothing, leaving the dialog open and unchanged as
+  though the click had not happened. A day of slack is deliberate: the client
+  submits an instant built from *its* clock and the two need not agree.
+  Backdating stays unbounded, because recording a sale weeks after the fact is
+  ordinary and a floor would refuse it.
+- The bound is checked on the value as it will be **stored**, not as it was
+  sent. SQLAlchemy's SQLite dialect drops tzinfo without converting (a
+  runtime-proven fact recorded in the local-timezone design doc), so an aware
+  `2026-09-01T12:00+14:00` validated as the instant it really is would then be
+  stored as the wall-clock `2026-09-01 12:00` — a day past the bound that had
+  just admitted it. Submitted values are normalized to naive UTC first, which
+  is what the rest of the app already assumes (`mark_sold`'s own fallback is
+  `datetime.utcnow()`) and what the modal already sends. When
+  `backend/timeutils.py` lands from the local-timezone plan, that normalization
+  becomes a call to its `utc_naive()`.
+- The CSV importer applies the same bound to a `Date Sold` column, because that
+  is the other route a sale date takes into the database and the one where the
+  value came out of a file someone else edited. A future date is dropped with a
+  per-row warning rather than failing the row — the rest of it is fine, and the
+  row falls back to the same default a sold row carrying no date at all already
+  gets.
+- `suggested_price` has the `ge=0` floor `listed_price` has always had. The two
+  are the same kind of value read by the same consumers — the Sheets price
+  column, the eBay listing text, the inventory value tile — and only one was
+  guarded, so a negative comp median or a hand-crafted PATCH was stored and
+  mirrored. The floors are stated on the **input** models only:
+  FastAPI validates responses too, so inheriting them onto `CardOut` would turn
+  a single legacy row saved before the floor existed into a 500 on
+  `GET /api/cards` — the entire inventory unreadable because one price is
+  wrong. Reads report what is stored; only writes are bounded, and a test pins
+  that distinction (it fails, with a 500, if the floors are inherited).
+- A test fixture that had been quietly ahead of the calendar. The sold-export
+  ordering test marked a card sold on `2026-12-20`, which is a *future* sale
+  for most of the year it names — harmless while nothing bounded a sale date,
+  and a date-dependent failure the moment one existed. Its sales now sit in a
+  year that has fully elapsed, which is stable in both directions.
+
 ## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
 
 ### PR #52 — Pricing sources run concurrently

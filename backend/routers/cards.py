@@ -16,7 +16,7 @@ from ..models import Card, Scan
 from ..schemas import (
     CardCreate, CardUpdate, CardOut,
     DuplicateCheckRequest, DuplicateCheckResponse,
-    EbayListingUpdate, MarkSoldRequest,
+    EbayListingUpdate, MarkSoldRequest, reject_future_sold_at,
 )
 from ..services.card_fields import normalize_condition
 from ..services.google_sheets import SHEET_HEADERS, _card_to_row, blank_row, sync_card
@@ -391,6 +391,18 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
                 parsed = _parse_date(val(col))
                 if parsed is None:
                     warnings.append(f"row {line_no}: unparseable {col} ignored")
+                elif field == "sold_at":
+                    # Same bound as the mark-sold picker, applied here because
+                    # this is the other way a sale date gets into the database
+                    # — and the one where the value came from a file someone
+                    # else edited. Dropped rather than rejected: the rest of the
+                    # row is fine, and a sold row with no date still gets the
+                    # default below, which is the existing behaviour for a row
+                    # that carried no Date Sold at all.
+                    try:
+                        fields[field] = reject_future_sold_at(parsed)
+                    except ValueError:
+                        warnings.append(f"row {line_no}: {col} is in the future — ignored")
                 else:
                     fields[field] = parsed
 

@@ -81,17 +81,22 @@ def test_export_sold_without_a_year_returns_every_sale(db_session):
 
 
 def test_export_sold_is_ordered_by_sale_date(db_session):
+    # Sales are seeded across a year that has fully elapsed. The dates used to
+    # be 2026's, which put the December one *ahead of the runner's clock* for
+    # most of that year — harmless while nothing bounded a sale date, and a
+    # calendar-dependent failure the moment mark-sold started refusing a future
+    # one. A completed year is stable in both directions.
     with TestClient(app) as client:
         headers = _auth(client)
         # Created out of order so insertion order can't accidentally pass.
         late = _create(client, headers, player_name="December")
         early = _create(client, headers, player_name="February")
         mid = _create(client, headers, player_name="July")
-        _sell(client, headers, late, 9.0, datetime(2026, 12, 20, 10, 0))
-        _sell(client, headers, early, 9.0, datetime(2026, 2, 3, 10, 0))
-        _sell(client, headers, mid, 9.0, datetime(2026, 7, 8, 10, 0))
+        _sell(client, headers, late, 9.0, datetime(2025, 12, 20, 10, 0))
+        _sell(client, headers, early, 9.0, datetime(2025, 2, 3, 10, 0))
+        _sell(client, headers, mid, 9.0, datetime(2025, 7, 8, 10, 0))
 
-        rows = _rows(client.get("/api/cards/export-sold.csv?year=2026", headers=headers))
+        rows = _rows(client.get("/api/cards/export-sold.csv?year=2025", headers=headers))
         players = [r[SOLD_EXPORT_HEADERS.index("Player")] for r in rows[1:]]
         assert players == ["February", "July", "December"]
 
