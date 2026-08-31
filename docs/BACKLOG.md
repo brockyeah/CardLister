@@ -26,6 +26,27 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       directly; inline — `docs/notes/daily-routine-prompt.md`, and the live
       routine prompt in the cloud must be edited to match or the doc is
       fiction)
+- [ ] CodeRabbit has stopped reviewing, and the process still assumes it does
+      (2026-08-31 daily run, verified on two PRs): CodeRabbit's only comment on
+      PR #65 and PR #68 is the same notice — *"This repository does not receive
+      automatic reviews because it has fewer than 10 stars"* — with a "Trigger
+      review" checkbox. It reads `.coderabbit.yaml` (the run configuration is
+      quoted in the notice) and then reviews nothing. Older PRs really were
+      reviewed — #53 and #64 both carry CodeRabbit findings that were fixed —
+      so this is a policy change on their side, not a misconfiguration here.
+      Two things follow. First, **the repo currently has one automated reviewer,
+      not two**, while `docs/notes/daily-routine-prompt.md` tells every run that
+      "three reviewers cover it" and uses that as the reason not to self-review;
+      a premise that is no longer true is worse than no premise. Second,
+      `.coderabbit.yaml` is being actively maintained for a reviewer that is not
+      running — PR #67 updated its download-helper instruction this week. Cheapest
+      fix is to have whoever opens the PR post `@coderabbitai review` on it (the
+      notice's own escape hatch), which is a one-line addition to the routine
+      prompt; the alternatives are ten stars or a paid plan, and both are the
+      owner's call. Either way the routine doc needs correcting to say what is
+      actually reviewing (quick win; implement directly; inline —
+      `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
+      only the owner can edit)
 - [ ] An implausible sale price is accepted as readily as a plausible one
       (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
       validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
