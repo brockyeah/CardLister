@@ -4,7 +4,7 @@ import CardForm from '../components/CardForm.jsx'
 import NewsSection from '../components/NewsSection.jsx'
 import { scanCard, getPricing, createCard, updateCard, checkDuplicate, getEbayListingText } from '../api'
 import { downscaleImage } from '../lib/downscaleImage'
-import { formatApiError } from '../lib/apiError.js'
+import { formatApiError, isCanceled } from '../lib/apiError.js'
 import { queueLossSummary, retryQueueItem, scanResultPatch } from '../lib/scanQueue.js'
 import { usableSuggestedPrice } from '../lib/pricing.js'
 
@@ -70,6 +70,7 @@ export default function Scanner() {
   const [queue, setQueue] = useState([])            // [{key, file, status, result, error}]
   const [activeKey, setActiveKey] = useState(null)  // queue item currently in the form
   const processingRef = useRef(false)
+  const scanAbortRef = useRef(null)                 // AbortController for the scan in flight
 
   const [form, setForm] = useState(EMPTY_FORM)
   const [imagePath, setImagePath] = useState('')          // server path once scanned
@@ -210,13 +211,32 @@ export default function Scanner() {
     const mark = (key, patch) =>
       setQueue((prev) => prev.map((q) => (q.key === key ? { ...q, ...patch } : q)))
     mark(next.key, { status: 'scanning' })
+    // Held so clearing the queue can actually release the scan in flight
+    // rather than leaving the single-flight guard held by a request nobody is
+    // waiting for any more.
+    const controller = new AbortController()
+    scanAbortRef.current = controller
     downscaleImage(next.file)
-      .then((file) => scanCard(file, mode))
+      .then((file) => scanCard(file, mode, null, { signal: controller.signal }))
       // A failed extraction arrives as a 200 with an `error` field, not a
       // rejection — see scanResultPatch.
       .then((result) => mark(next.key, scanResultPatch(result)))
-      .catch((e) => mark(next.key, { status: 'error', error: formatApiError(e, 'Scan failed') }))
-      .finally(() => { processingRef.current = false })
+      .catch((e) => {
+        // A cancel is the user's own doing — they cleared the queue, and the
+        // item this would mark is already gone. Rendering "Scan failed" for it
+        // would report their own action back to them as an error.
+        if (isCanceled(e)) return
+        mark(next.key, { status: 'error', error: formatApiError(e, 'Scan failed') })
+      })
+      .finally(() => {
+        // Only release the guard if this scan is still the current one. A
+        // late-settling abandoned request must not hand the queue to a second
+        // scan that has already started.
+        if (scanAbortRef.current === controller) {
+          scanAbortRef.current = null
+          processingRef.current = false
+        }
+      })
   }, [queue, mode])
 
   // Re-queue a failed batch item. Scans fail for transient reasons (a dropped
@@ -233,6 +253,14 @@ export default function Scanner() {
     if (loss && !window.confirm(loss.message)) return
     setQueue([])
     setActiveKey(null)
+    // Clearing has to release the scan in flight too, or the queue stays
+    // wedged: `processingRef` is only cleared by the request settling, so a
+    // hung scan held it forever and every later batch sat at "waiting…" with
+    // no way out short of reloading the page. Aborting settles the promise,
+    // which releases the guard through the same path a normal scan takes.
+    scanAbortRef.current?.abort()
+    scanAbortRef.current = null
+    processingRef.current = false
   }
 
   // Review a queue item (loads it into the existing form + fetches pricing):

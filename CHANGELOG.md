@@ -209,6 +209,70 @@ sixth conflicting change. Whichever of those merges owns it.
   for most of the year it names — harmless while nothing bounded a sale date,
   and a date-dependent failure the moment one existed. Its sales now sit in a
   year that has fully elapsed, which is stable in both directions.
+## [Unreleased] — branch `claude/sweet-rubin-ebfisn`
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PRs #63
+and #64 left it alone: PRs #60, #61 and #62 were each opened to date that one
+line, and a fifth edit of it would be a fifth conflicting change to the same
+heading. Whichever of those merges owns it.
+-->
+
+### Fixed
+- A hung scan no longer wedges the batch queue with no way out. `scanCard` was
+  the only request in the app with no ceiling of any kind — the axios instance
+  sets no timeout — so a request that never settled left its queue item in
+  `scanning`, which is precisely the one status that renders no Retry button,
+  behind a single-flight guard that is only ever released by the request
+  settling. Every later item in the batch waited on it, and the escape hatch
+  did not work either: **Clear queue** emptied the list without touching the
+  guard, so staging a fresh batch produced a queue that sat at "waiting…"
+  forever and the only real fix was reloading the page. Both halves are closed.
+  The scan carries a five-minute client timeout, chosen to sit above the
+  server's own worst case rather than picked for feel — the subscription path
+  is hard-capped at `SUBSCRIPTION_SCAN_TIMEOUT` (150s) and the API path answers
+  in 15–30s — so it can only ever fire on a scan that was never coming back.
+  Clearing the queue now aborts the request in flight, which releases the guard
+  through the same path a normal scan takes; the guard is only released by the
+  scan that still owns it, so a late-settling abandoned request cannot hand the
+  queue to a scan that has already started. Verified end to end against a
+  running app with `/api/scan` held open: before the change a cleared queue left
+  the next batch at "waiting…" indefinitely, after it the next batch scans.
+- A request abandoned on a timeout says so, instead of reporting "Scan failed."
+  Aborting here does not stop the server, which has already spent the tokens
+  and may well have finished the extraction and recorded it — so the one thing
+  the message must not do is imply nothing happened, because a blind retry pays
+  Opus for the same photo twice. `formatApiError` now recognizes the shape
+  axios produces for a timeout (no response, `code: 'ECONNABORTED'`) and says
+  the server may have finished the work anyway; a server that did answer still
+  wins, since its `detail` is preferred over the guess. A *cancelled* request —
+  the user clearing the queue — is suppressed rather than rendered, because
+  reporting someone's own action back to them as an error is not an error
+  report.
+
+### Added
+- Reclaimable photos are reported beside the storage figures on the Analytics
+  manage-data panel. `/api/scan` writes the upload to the Railway volume before
+  extraction and only records a `Scan` row when the extraction both succeeded
+  and was real, so every failed or mock scan leaves a file referenced by
+  nothing. The tool that sweeps them has existed since 2026-07-30, but the only
+  way to find out whether there was anything to sweep was to press the button
+  that offers to delete — so it ran when someone thought to look, which on a
+  volume that fills silently is not a plan. A fourth tile now shows the count
+  and the space it would free, from the endpoint the cleanup flow already used.
+- The "this is most of the photos on the server" guard moved onto that tile.
+  It exists for one specific case — inventory restored from CSV, which carries
+  no photo columns, so every restored card loses its `image_path` and the
+  entire photo library reads as orphaned — and it was previously only shown
+  inside the confirmation dialog, which is read by someone who has already
+  decided to clean up. That is the worst moment to learn that cleaning up is
+  the wrong thing to do. The heuristic is now a tested pure helper
+  (`frontend/src/lib/orphans.js`) shared by the tile and the dialog, so the two
+  cannot disagree about what counts as a bulk sweep, and it distinguishes a
+  lookup that returned zero from one that failed — rendering a failed check as
+  "0 reclaimable" would report a tidy volume on exactly the request that could
+  not check.
 
 ## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
 

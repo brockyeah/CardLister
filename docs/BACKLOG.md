@@ -123,6 +123,79 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the moment of the mistake, not a refusal (quick win; implement directly;
       inline — `Inventory.jsx` plus a tested pure helper, no schema change)
 
+- [ ] A scan the client gave up on is billed, stored, and unreachable
+      (2026-08-28 review, direct follow-on to the scan timeout that shipped the
+      same day): `/api/scan` writes its `UsageEvent` and its `Scan` row —
+      `extracted_json` and all — from the server side, and none of that depends
+      on the client still listening. Aborting the request does not stop the
+      work, so a scan that times out (or a tab closed mid-scan, or a dropped
+      connection on a phone) has been paid for in Opus tokens, has a complete
+      extraction sitting in the database, and offers the user nothing but a
+      Retry button that will bill them a second time for the same photo. The
+      pieces to fix it already exist: the `Scan` table keys on `username` and
+      carries `image_path` and the extraction, so a "recent scans" list — or
+      simply an offer to restore the last unsaved scan when one exists for this
+      user in the last hour — turns a lost scan into a resumed one. Decide as
+      part of it whether restoring should re-run the pricing lookup or leave
+      the price empty, since the comps at scan time were never stored (medium;
+      implement directly; inline — a read-only endpoint beside `/api/scan`
+      plus a Scanner affordance)
+- [ ] `POST /api/cards/import.csv` reads an unbounded upload into memory before
+      any cap applies (2026-08-28 review): `import_csv` does `raw = await
+      file.read()`, then `.decode()`, then `list(csv.reader(...))` — three full
+      copies of the file resident at once — and only *then* checks
+      `MAX_IMPORT_ROWS`. The row cap therefore protects the database and
+      protects nothing else: a 500 MB file is fully read, decoded and parsed
+      before the 5000-row limit rejects it. This is the one endpoint that takes
+      an arbitrary-size upload with no byte ceiling; `/api/scan` has had
+      `MAX_UPLOAD_BYTES` with chunked reads since the magic-byte work, and the
+      same shape applies here. It matters more than it looks because there is
+      exactly one worker and one container: an OOM here is the whole app, not
+      one request, and it is reachable by either logged-in user with a
+      mis-selected file — a video, a database backup — not just by an attacker
+      (quick win; implement directly; inline — `routers/cards.py`, chunked read
+      against a byte cap plus a test with an oversized body)
+- [ ] Every request in `api.js` except the scan still has no client timeout
+      (2026-08-28 review, the general form of the wedge fixed the same day):
+      the axios instance is created with no `timeout`, and today's fix set one
+      on `scanCard` alone because that was where the damage was worst. The
+      others fail the same way, more quietly: a hung `/api/pricing` leaves the
+      Comps modal spinning with no error and `pricingLoading` stuck true, a
+      hung save leaves the Save button disabled with the card unsaved, and an
+      Inventory load that never settles shows an empty table that looks like an
+      empty inventory. Set a default on the instance — 30s is generous for
+      everything here, since the one call that legitimately runs longer already
+      names its own — and let `scanCard`'s own value override it, which it does
+      today by passing `timeout` per request. The `formatApiError` timeout
+      wording added today already covers what the user sees (quick win;
+      implement directly; inline — `api.js` only)
+- [ ] Nothing shows the user what the scanner has *learned*, or lets them
+      unteach it (2026-08-28 review): every save that differs from its scan
+      writes a `Correction` row, `build_cheatsheet` renders the 200 most recent
+      into up to 30 rules appended to every scan prompt, and `find_exact_match`
+      overlays identity fields on a brand + card # + year hit. All of that is
+      invisible from the app. One mis-saved card — a typo'd set name, a player
+      corrected onto the wrong card — becomes a standing instruction to the
+      model that shapes every later scan, and the only way to see it is to read
+      the database, the only way to remove it is to make an equal and opposite
+      correction and hope it wins the dedup. The learning loop is the feature
+      that makes the tool get better with use, and it currently has no undo. A
+      read-only "what the scanner has learned" list of the current rules on
+      Analytics would be most of the value on its own; deleting a rule is the
+      other half (medium; implement directly; inline — a `GET` beside the
+      existing analytics endpoints plus a panel, reusing `build_cheatsheet`'s
+      own selection so the list is the rules actually sent)
+- [ ] Fold the orphan figures into `GET /api/analytics/storage` (2026-08-28,
+      honest follow-on to the reclaimable tile that shipped the same day): the
+      manage-data panel now calls `/storage` and `/uploads/orphans` on mount,
+      and both walk the uploads directory and stat every file — two full scans
+      per page load where one would do, plus an extra round trip. Nothing hurts
+      today at four figures of photos, and the split kept the shipped change to
+      one small diff, but the two endpoints answer one question about one
+      directory and should share one walk. `/uploads/orphans` needs a DB
+      session that `/storage` does not, which is the only reason they are
+      separate — a decision worth revisiting rather than inheriting (quick win;
+      implement directly; inline — `routers/analytics.py` plus the two tiles)
 - [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
       (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
       `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
@@ -1023,6 +1096,23 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       `GET /api/cards`, the whole inventory unreadable because one price is
       wrong. A test pins that split and fails (with the 500) if the floors are
       inherited
+- [x] 2026-08-28 — A hung scan no longer wedges the batch queue: `scanCard`
+      carries a 5-minute client timeout (above the server's own 150s
+      subscription ceiling, so it can only fire on a scan that was never coming
+      back) and clearing the queue aborts the request in flight, which is what
+      finally releases the single-flight guard. Verified against a running app
+      with `/api/scan` held open: before the fix, a cleared queue left every
+      later batch at "waiting…" forever; after it, the next batch scans
+      normally. A timed-out request now says the server may have finished the
+      work anyway rather than reporting a bare "Scan failed."
+- [x] 2026-08-28 — Reclaimable photos are reported beside the storage figures
+      on the Analytics manage-data panel, instead of only behind the button
+      that offers to delete them: nothing said there was anything to sweep, so
+      the cleanup tool ran when someone thought to look. The "this is most of
+      the photos on the server" guard — the one that catches a CSV restore
+      having orphaned the whole photo library — now warns on the tile, before
+      the destructive press rather than during it, and is a tested pure helper
+      shared with the confirmation dialog
 - [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
       Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
       when the seller receives $8.37. `lib/fees.js` holds the schedule — both
