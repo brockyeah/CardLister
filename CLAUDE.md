@@ -153,6 +153,15 @@ to push" does not work across the two.
 - **To fix something on a routine's PR, branch off `main` instead** and open a
   separate PR, or hand the finding to the owner to relay. The exception is the
   owner explicitly saying the routine is stopped.
+- **Changelog housekeeping happens on its own branch, once.** Dating a merged
+  PR's `[Unreleased]` entries belongs on a `chore/changelog-<date>` branch, and
+  only when no such PR is already open. A feature PR must not bundle it: CI's
+  `changelog-guard` job fails any PR that adds or removes a dated (`## YYYY-MM-DD`)
+  heading unless the branch is named `chore/changelog-*`. This exists because
+  four separate PRs once raced to date the same PR #59 section — each routine run
+  noticed the undated heading independently, and the "check first" rule below was
+  not enough on its own, since all four checked at moments when the answer was
+  honestly "not done yet".
 - **Changelog housekeeping is idempotent — check before doing it.** Dating a
   merged PR's `[Unreleased]` entries is the routine's step 11, but a conflict
   resolution may need it too. Before adding a dated heading, check whether it

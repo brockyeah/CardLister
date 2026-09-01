@@ -10,12 +10,9 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## 2026-08-26 — Pricing fan-out, volume backups, deep-review fixes, condition dropdown, eBay fees (PR #59)
+## [Unreleased] — branch `integration/prs-63-68` (integrates PRs #63–#68)
 
-PRs #52–#58 were reconciled on one integration branch and merged together, so
-they share a merge date and this one heading; the per-PR subheadings below keep
-each change attributable to the PR it came from.
-## [Unreleased] — branch `claude/sweet-rubin-jts11w`
+### PR #63 — Production health probe + cheat-sheet dedup
 
 <!--
 The #52–#58 integration section below is still headed `[Unreleased]` even
@@ -24,7 +21,7 @@ each opened to date it, so a fourth edit of that one line would be a fourth
 conflicting change to the same heading. Whichever of those merges owns it.
 -->
 
-### Added
+#### Added
 - Production health is now watched from somewhere that can actually reach it.
   Phase 1 of the daily routine pings `/api/health` itself, but that routine
   runs in a scheduled cloud sandbox whose egress proxy answers 403 to CONNECT
@@ -40,7 +37,7 @@ conflicting change to the same heading. Whichever of those merges owns it.
   to ignore; persistent lag shows up as the same warning run after run. The
   routine keeps its own attempt, since when it works it is free and immediate.
 
-### Fixed
+#### Fixed
 - The scan cheat-sheet no longer teaches the model both halves of a reversed
   correction. `build_cheatsheet` deduped on the **whole rendered rule string**,
   so correcting a field one way and later correcting it back produced two rules
@@ -70,7 +67,8 @@ conflicting change to the same heading. Whichever of those merges owns it.
   `find_exact_match`. Both queries mean "the latest correction wins", and both
   left same-timestamp rows to resolve in whatever order SQLite happened to
   return — the same reason the Sheets resync orders by `(created_at, id)`.
-## [Unreleased] — branch `claude/sweet-rubin-oas8tk`
+
+### PR #64 — Dropped call-up alerts; mock price guard
 
 <!--
 The #52–#58 integration section below is still headed `[Unreleased]` even
@@ -80,7 +78,7 @@ a fourth edit of it would be a fourth conflicting change to the same heading.
 Whichever of those merges owns it.
 -->
 
-### Fixed
+#### Fixed
 - A failing mailer no longer swallows call-up alerts in silence. Being told a
   prospect got called up while you hold his 1st Bowman is the feature this app
   was built around, and it had exactly one failure mode where it stayed quiet
@@ -150,11 +148,141 @@ Whichever of those merges owns it.
   down. A missing mail configuration is still reported either way, because that
   is a standing condition rather than an event (CodeRabbit, PR #64).
 
-### Changed
+#### Changed
 - `run_poll_cycle` returns `pending` and `abandoned` alongside `new` and
   `emailed`, and `POST /api/news/poll-now` passes them through — a manual poll
   that reports a bare `"emailed": 0` reads exactly like "nothing to send".
-## [Unreleased] — branch `claude/sweet-rubin-l1g3u3`
+
+### PR #65 — Hung-scan timeout + reclaimable-photo readout
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PRs #63
+and #64 left it alone: PRs #60, #61 and #62 were each opened to date that one
+line, and a fifth edit of it would be a fifth conflicting change to the same
+heading. Whichever of those merges owns it.
+-->
+
+#### Fixed
+- A hung scan no longer wedges the batch queue with no way out. `scanCard` was
+  the only request in the app with no ceiling of any kind — the axios instance
+  sets no timeout — so a request that never settled left its queue item in
+  `scanning`, which is precisely the one status that renders no Retry button,
+  behind a single-flight guard that is only ever released by the request
+  settling. Every later item in the batch waited on it, and the escape hatch
+  did not work either: **Clear queue** emptied the list without touching the
+  guard, so staging a fresh batch produced a queue that sat at "waiting…"
+  forever and the only real fix was reloading the page. Both halves are closed.
+  The scan carries a five-minute client timeout, chosen to sit above the
+  server's own worst case rather than picked for feel — the subscription path
+  is hard-capped at `SUBSCRIPTION_SCAN_TIMEOUT` (150s) and the API path answers
+  in 15–30s — so it can only ever fire on a scan that was never coming back.
+  Clearing the queue now aborts the request in flight, which releases the guard
+  through the same path a normal scan takes; the guard is only released by the
+  scan that still owns it, so a late-settling abandoned request cannot hand the
+  queue to a scan that has already started. Verified end to end against a
+  running app with `/api/scan` held open: before the change a cleared queue left
+  the next batch at "waiting…" indefinitely, after it the next batch scans.
+- A request abandoned on a timeout says so, instead of reporting "Scan failed."
+  Aborting here does not stop the server, which has already spent the tokens
+  and may well have finished the extraction and recorded it — so the one thing
+  the message must not do is imply nothing happened, because a blind retry pays
+  Opus for the same photo twice. `formatApiError` now recognizes the shape
+  axios produces for a timeout (no response, `code: 'ECONNABORTED'`) and says
+  the server may have finished the work anyway; a server that did answer still
+  wins, since its `detail` is preferred over the guess. A *cancelled* request —
+  the user clearing the queue — is suppressed rather than rendered, because
+  reporting someone's own action back to them as an error is not an error
+  report.
+
+#### Added
+- Reclaimable photos are reported beside the storage figures on the Analytics
+  manage-data panel. `/api/scan` writes the upload to the Railway volume before
+  extraction and only records a `Scan` row when the extraction both succeeded
+  and was real, so every failed or mock scan leaves a file referenced by
+  nothing. The tool that sweeps them has existed since 2026-07-30, but the only
+  way to find out whether there was anything to sweep was to press the button
+  that offers to delete — so it ran when someone thought to look, which on a
+  volume that fills silently is not a plan. A fourth tile now shows the count
+  and the space it would free, from the endpoint the cleanup flow already used.
+- The "this is most of the photos on the server" guard moved onto that tile.
+  It exists for one specific case — inventory restored from CSV, which carries
+  no photo columns, so every restored card loses its `image_path` and the
+  entire photo library reads as orphaned — and it was previously only shown
+  inside the confirmation dialog, which is read by someone who has already
+  decided to clean up. That is the worst moment to learn that cleaning up is
+  the wrong thing to do. The heuristic is now a tested pure helper
+  (`frontend/src/lib/orphans.js`) shared by the tile and the dialog, so the two
+  cannot disagree about what counts as a bulk sweep, and it distinguishes a
+  lookup that returned zero from one that failed — rendering a failed check as
+  "0 reclaimable" would report a tidy volume on exactly the request that could
+  not check.
+
+### PR #66 — Design + plan: sheets_row commit inside the mirror lock
+
+#### Docs only — design for committing `sheets_row` inside the mirror lock
+
+#### Added
+- Design addendum + implementation plan for the Sheets mirror lock protocol
+  (2026-08-29 addendum in
+  `docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+  plan in `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`). PR #46
+  specified — and the lock's own comment still claims — that `_sheets_lock`
+  is held across re-read → Sheet write → `sheets_row` commit, but every
+  writer releases it on return and the commit runs in the caller. A save
+  racing a resync can therefore write one card's data over the row the
+  rewrite just gave another card and then commit the stale index back over
+  the fresh one, and a delete racing a resync can blank a row the rewrite
+  just assigned to a live card, because `_is_owned` reads committed state the
+  resync hasn't committed yet. All 14 mirror tests stub the callbacks and
+  pass with the reread moved *outside* the lock, so nothing pins the
+  protocol. The recommendation extends the shape `reread_row` already set:
+  callers pass commit callbacks the writers invoke before releasing, the
+  caller-less `resync_one` bypass is deleted, and the background tasks
+  `rollback()` before waiting on the lock — without which moving the commit
+  inside would deadlock a racing save against the resync's commit until
+  SQLite's busy timeout fails it. Docs only; no behaviour change until the
+  owner approves the three decisions listed in the plan.
+
+### PR #67 — Weekly deep review: SPA escape, condition parity, doc drift
+
+#### Fixed
+- Percent-encoded dot segments no longer let an API-shaped URL render the SPA
+  shell. `StaticFiles` normalizes the request path before `SpaStaticFiles`'
+  fallback sees it, so `GET /api/%2e%2e/whatever` arrived as `whatever`,
+  missed the `NON_SPA_ROOTS` check, and returned 200 + HTML — the exact
+  misreport the roots list exists to prevent (a link checker or API client
+  sees success for a path that does not exist). No security impact: file
+  lookup was always confined and no auth was exposed. `_is_page_load` now
+  checks the raw request path's first segment too, and the encoded spellings
+  are pinned in `test_spa_fallback.py`. (weekly review)
+- The `"NEAR MINT MINT"` condition spelling was in both variant tables but had
+  no case in the shared parity fixture — the only one of 31 keys unguarded, so
+  either side could drop or retarget it with both suites green, splitting the
+  CSV-import fold from the review-form fold. Added the fixture case plus a
+  backend meta-test asserting every `_VARIANTS` key has a case, so the next
+  added spelling cannot skip the fixture either. (weekly review)
+- The fees tier-boundary test asserted the same value on both sides of the
+  $7,500 tier ("one cent more crosses" — it doesn't: the marginal formula is
+  continuous there, so any tier-comparison mutant passed). Corrected the
+  comment and added an assertion at $7,510, where the tiered fee ($994.39) is
+  visibly cheaper than a flat-rate one ($995.48). (weekly review)
+
+#### Changed
+- Doc/config drift swept: removed CLAUDE.md's stale pre-`lib/download.js`
+  download paragraph (its current twin survives), updated `.coderabbit.yaml`'s
+  "two blob download helpers in api.js" line to the three that now share
+  `lib/download.js`, documented `BACKUP_SNAPSHOT_TTL_SECONDS` in
+  `.env.example`, dropped two unused test imports, and added invariants #14
+  (condition spellings are a three-file change, JS-only drift still silent)
+  and #15 (the eBay fee schedule is a dated snapshot whose `VITE_EBAY_FEE_*`
+  overrides are build-time-only and inert on Railway) to CLAUDE.md. Backlog:
+  the two already-shipped features still listed as open in "Later" (condition
+  dropdown, fee estimate) are removed — their Shipped entries stand — and the
+  fee-env-var item now names all six override vars, not the original two.
+  (weekly review)
+
+### PR #68 — Future-dated sale + negative price validation
 
 <!--
 The #52–#58 integration section below is still headed `[Unreleased]` even
@@ -164,7 +292,7 @@ one line, PR #67 dates it too, and a sixth edit of the same heading would be a
 sixth conflicting change. Whichever of those merges owns it.
 -->
 
-### Fixed
+#### Fixed
 - A sale can no longer be dated in the future. Nothing bounded `sold_at` at
   all — `MarkSoldRequest` validated only that `sold_price > 0`, and the picker
   carried no `max` — so a mistyped year was accepted in silence and then
@@ -209,138 +337,13 @@ sixth conflicting change. Whichever of those merges owns it.
   for most of the year it names — harmless while nothing bounded a sale date,
   and a date-dependent failure the moment one existed. Its sales now sit in a
   year that has fully elapsed, which is stable in both directions.
-## [Unreleased] — branch `claude/sweet-rubin-ebfisn`
 
-<!--
-The #52–#58 integration section below is still headed `[Unreleased]` even
-though PR #59 has merged. Left alone deliberately, for the same reason PRs #63
-and #64 left it alone: PRs #60, #61 and #62 were each opened to date that one
-line, and a fifth edit of it would be a fifth conflicting change to the same
-heading. Whichever of those merges owns it.
--->
+## 2026-08-26 — Pricing fan-out, volume backups, deep-review fixes, condition dropdown, eBay fees (PR #59)
 
-### Fixed
-- A hung scan no longer wedges the batch queue with no way out. `scanCard` was
-  the only request in the app with no ceiling of any kind — the axios instance
-  sets no timeout — so a request that never settled left its queue item in
-  `scanning`, which is precisely the one status that renders no Retry button,
-  behind a single-flight guard that is only ever released by the request
-  settling. Every later item in the batch waited on it, and the escape hatch
-  did not work either: **Clear queue** emptied the list without touching the
-  guard, so staging a fresh batch produced a queue that sat at "waiting…"
-  forever and the only real fix was reloading the page. Both halves are closed.
-  The scan carries a five-minute client timeout, chosen to sit above the
-  server's own worst case rather than picked for feel — the subscription path
-  is hard-capped at `SUBSCRIPTION_SCAN_TIMEOUT` (150s) and the API path answers
-  in 15–30s — so it can only ever fire on a scan that was never coming back.
-  Clearing the queue now aborts the request in flight, which releases the guard
-  through the same path a normal scan takes; the guard is only released by the
-  scan that still owns it, so a late-settling abandoned request cannot hand the
-  queue to a scan that has already started. Verified end to end against a
-  running app with `/api/scan` held open: before the change a cleared queue left
-  the next batch at "waiting…" indefinitely, after it the next batch scans.
-- A request abandoned on a timeout says so, instead of reporting "Scan failed."
-  Aborting here does not stop the server, which has already spent the tokens
-  and may well have finished the extraction and recorded it — so the one thing
-  the message must not do is imply nothing happened, because a blind retry pays
-  Opus for the same photo twice. `formatApiError` now recognizes the shape
-  axios produces for a timeout (no response, `code: 'ECONNABORTED'`) and says
-  the server may have finished the work anyway; a server that did answer still
-  wins, since its `detail` is preferred over the guess. A *cancelled* request —
-  the user clearing the queue — is suppressed rather than rendered, because
-  reporting someone's own action back to them as an error is not an error
-  report.
+PRs #52–#58 were reconciled on one integration branch and merged together, so
+they share a merge date and this one heading; the per-PR subheadings below keep
+each change attributable to the PR it came from.
 
-### Added
-- Reclaimable photos are reported beside the storage figures on the Analytics
-  manage-data panel. `/api/scan` writes the upload to the Railway volume before
-  extraction and only records a `Scan` row when the extraction both succeeded
-  and was real, so every failed or mock scan leaves a file referenced by
-  nothing. The tool that sweeps them has existed since 2026-07-30, but the only
-  way to find out whether there was anything to sweep was to press the button
-  that offers to delete — so it ran when someone thought to look, which on a
-  volume that fills silently is not a plan. A fourth tile now shows the count
-  and the space it would free, from the endpoint the cleanup flow already used.
-- The "this is most of the photos on the server" guard moved onto that tile.
-  It exists for one specific case — inventory restored from CSV, which carries
-  no photo columns, so every restored card loses its `image_path` and the
-  entire photo library reads as orphaned — and it was previously only shown
-  inside the confirmation dialog, which is read by someone who has already
-  decided to clean up. That is the worst moment to learn that cleaning up is
-  the wrong thing to do. The heuristic is now a tested pure helper
-  (`frontend/src/lib/orphans.js`) shared by the tile and the dialog, so the two
-  cannot disagree about what counts as a bulk sweep, and it distinguishes a
-  lookup that returned zero from one that failed — rendering a failed check as
-  "0 reclaimable" would report a tidy volume on exactly the request that could
-  not check.
-
-## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
-## [Unreleased] — branch `claude/intelligent-babbage-9tyod1` (2026-08-30 weekly deep review)
-
-### Fixed
-- Percent-encoded dot segments no longer let an API-shaped URL render the SPA
-  shell. `StaticFiles` normalizes the request path before `SpaStaticFiles`'
-  fallback sees it, so `GET /api/%2e%2e/whatever` arrived as `whatever`,
-  missed the `NON_SPA_ROOTS` check, and returned 200 + HTML — the exact
-  misreport the roots list exists to prevent (a link checker or API client
-  sees success for a path that does not exist). No security impact: file
-  lookup was always confined and no auth was exposed. `_is_page_load` now
-  checks the raw request path's first segment too, and the encoded spellings
-  are pinned in `test_spa_fallback.py`. (weekly review)
-- The `"NEAR MINT MINT"` condition spelling was in both variant tables but had
-  no case in the shared parity fixture — the only one of 31 keys unguarded, so
-  either side could drop or retarget it with both suites green, splitting the
-  CSV-import fold from the review-form fold. Added the fixture case plus a
-  backend meta-test asserting every `_VARIANTS` key has a case, so the next
-  added spelling cannot skip the fixture either. (weekly review)
-- The fees tier-boundary test asserted the same value on both sides of the
-  $7,500 tier ("one cent more crosses" — it doesn't: the marginal formula is
-  continuous there, so any tier-comparison mutant passed). Corrected the
-  comment and added an assertion at $7,510, where the tiered fee ($994.39) is
-  visibly cheaper than a flat-rate one ($995.48). (weekly review)
-
-### Changed
-- Doc/config drift swept: removed CLAUDE.md's stale pre-`lib/download.js`
-  download paragraph (its current twin survives), updated `.coderabbit.yaml`'s
-  "two blob download helpers in api.js" line to the three that now share
-  `lib/download.js`, documented `BACKUP_SNAPSHOT_TTL_SECONDS` in
-  `.env.example`, dropped two unused test imports, and added invariants #14
-  (condition spellings are a three-file change, JS-only drift still silent)
-  and #15 (the eBay fee schedule is a dated snapshot whose `VITE_EBAY_FEE_*`
-  overrides are build-time-only and inert on Railway) to CLAUDE.md. Backlog:
-  the two already-shipped features still listed as open in "Later" (condition
-  dropdown, fee estimate) are removed — their Shipped entries stand — and the
-  fee-env-var item now names all six override vars, not the original two.
-  (weekly review)
-
-## 2026-08-25 — Integration of PRs #52–#58 (PR #59)
-## [Unreleased] — branch `claude/gifted-bell-1r0u3u`
-
-### Docs only — design for committing `sheets_row` inside the mirror lock
-
-#### Added
-- Design addendum + implementation plan for the Sheets mirror lock protocol
-  (2026-08-29 addendum in
-  `docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
-  plan in `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`). PR #46
-  specified — and the lock's own comment still claims — that `_sheets_lock`
-  is held across re-read → Sheet write → `sheets_row` commit, but every
-  writer releases it on return and the commit runs in the caller. A save
-  racing a resync can therefore write one card's data over the row the
-  rewrite just gave another card and then commit the stale index back over
-  the fresh one, and a delete racing a resync can blank a row the rewrite
-  just assigned to a live card, because `_is_owned` reads committed state the
-  resync hasn't committed yet. All 14 mirror tests stub the callbacks and
-  pass with the reread moved *outside* the lock, so nothing pins the
-  protocol. The recommendation extends the shape `reread_row` already set:
-  callers pass commit callbacks the writers invoke before releasing, the
-  caller-less `resync_one` bypass is deleted, and the background tasks
-  `rollback()` before waiting on the lock — without which moving the commit
-  inside would deadlock a racing save against the resync's commit until
-  SQLite's busy timeout fails it. Docs only; no behaviour change until the
-  owner approves the three decisions listed in the plan.
-
-## 2026-08-25 — Integration: PRs #52–#58 (PR #59)
 
 ### PR #52 — Pricing sources run concurrently
 

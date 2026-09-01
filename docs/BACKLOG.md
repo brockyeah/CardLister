@@ -336,18 +336,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       to solve something the existing normalized columns already answer
       (quick win–medium; implement directly; inline — needs a test with >100
       corrections in one year pinning that the 101st still matches)
-- [ ] Orphaned uploads accumulate with nothing reporting them (2026-08-25
-      review): `/api/scan` writes the upload to the volume before extraction
-      and only records a `Scan` row when the extraction both succeeded and was
-      real (`not is_mock and not error`), so every failed or mock scan leaves a
-      file on the Railway volume referenced by nothing. Deleting it there is
-      wrong — the review form still previews that image — and the cleanup tool
-      shipped 2026-07-30 can sweep them, but nothing tells anyone there is
-      something to sweep, so it only runs when someone thinks to look. The
-      storage tiles on Analytics manage-data already report DB and uploads
-      size; add orphan count and bytes beside them so the existing tool gets
-      used before the volume fills (quick win; implement directly; inline —
-      reuses the cleanup endpoint's own preview query)
 - [ ] A failed row-number parse duplicates a card in the Sheets mirror
       (2026-08-24 review): `sync_card`'s append branch
       (`services/google_sheets.py:292-306`) writes the row, then parses
@@ -421,17 +409,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       compute inside the functional update) and bail if the item is no longer
       present and `ready` (quick win; implement directly; inline —
       Scanner.jsx only)
-- [ ] Scan requests have no client timeout, and a hung one wedges the batch
-      queue unrecoverably (2026-08-23 weekly review): `api.js` sets no axios
-      timeout, so a request that never settles leaves the item `scanning`
-      forever — the one status with no Retry — and `processingRef` stays
-      `true`, so every queued item waits forever and even Clear-queue + a new
-      batch stays stuck at "waiting…" because nothing resets the ref. Add a
-      generous timeout to `scanCard` (must exceed `SUBSCRIPTION_SCAN_TIMEOUT`
-      = 150s plus headroom, e.g. 180s, so a slow-but-legitimate paid scan is
-      never aborted client-side while the server still bills it) and reset
-      `processingRef` on the way out (quick win–medium; implement directly;
-      inline — api.js + Scanner.jsx)
 - [ ] `scan_card` runs sync SQLite work on the event loop (2026-08-23 weekly
       review): the poller fix moved `run_poll_cycle` to the threadpool, but
       async `scan_card` still calls `build_cheatsheet(db)`, `db.commit()`, and

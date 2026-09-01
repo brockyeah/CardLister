@@ -378,12 +378,29 @@ removal needs no test edits there.
 
 ## The lock-ordering hazard the fix introduces — and its resolution
 
-Moving `db.commit()` inside `_sheets_lock` creates an ABBA shape with
-SQLite's file lock that does not exist today, and the design is not sound
-without naming it. The DB runs in rollback-journal mode (the storage backlog
-item notes `-wal` sidecars would appear only "if journal mode is ever
-changed"), where a read transaction holds SHARED for its lifetime, and
-SQLAlchemy's autobegin opens one on the first query:
+> **Corrected 2026-08-31 (measured).** The premise below — that a SELECT-only
+> session holds a SQLite SHARED lock while it waits on `_sheets_lock` — is
+> **false with this repo's configuration**, so the ABBA deadlock it describes
+> cannot occur and this section is not load-bearing for soundness. Python's
+> `sqlite3` driver with the default `isolation_level=""` issues `BEGIN` only
+> before a write, never before a SELECT. Verified against the running engine:
+> after `db.query(Card).first()`, SQLAlchemy reports `in_transaction() ==
+> True` (its own logical transaction) while the DBAPI connection reports
+> `in_transaction == False` — no SQLite-level transaction, therefore no
+> SHARED lock between statements.
+>
+> The **resolution** below still stands as cheap defence-in-depth: waiting on
+> the lock while holding no DB transaction is correct regardless, and it stops
+> this from becoming a real hazard if the driver's isolation level or the
+> journal mode ever changes. Implement it as hygiene, not as a fix for an
+> active deadlock — and do not treat the "designed-in stall" claim as
+> something observable today.
+
+Moving `db.commit()` inside `_sheets_lock` would create an ABBA shape with
+SQLite's file lock *if* a read transaction were held across the wait. The DB
+runs in rollback-journal mode (the storage backlog item notes `-wal` sidecars
+would appear only "if journal mode is ever changed"), where a read transaction
+holds SHARED for its lifetime — the step that does not actually happen here:
 
 - T1 (resync) holds `_sheets_lock`; its under-lock commit needs EXCLUSIVE.
 - T2 (`_sync_card_to_sheets`) ran `db.query(Card)...first()` (`cards.py:38`)
