@@ -15,6 +15,63 @@ only in `[Unreleased]` on a branch is not in prod yet.
 PRs #52–#58 were reconciled on one integration branch and merged together, so
 they share a merge date and this one heading; the per-PR subheadings below keep
 each change attributable to the PR it came from.
+## [Unreleased] — branch `claude/sweet-rubin-jts11w`
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. That is deliberate here: PRs #60, #61 and #62 were
+each opened to date it, so a fourth edit of that one line would be a fourth
+conflicting change to the same heading. Whichever of those merges owns it.
+-->
+
+### Added
+- Production health is now watched from somewhere that can actually reach it.
+  Phase 1 of the daily routine pings `/api/health` itself, but that routine
+  runs in a scheduled cloud sandbox whose egress proxy answers 403 to CONNECT
+  for the Railway host — so the one step meant to notice a failed deploy or a
+  dead call-up poller could not run at all, and its failure mode was a
+  *missing sentence* in a report nobody diffs. A scheduled `health.yml`
+  workflow now probes the endpoint every 3 hours from a GitHub runner and
+  fails the run on a non-200, an unreachable or non-JSON response, `ok`/`db`
+  false, or a stale poller, writing the parsed fields to the run summary
+  either way. Deploy lag — a reported `revision` that does not match main
+  HEAD — warns instead of failing, because Railway is still building for
+  minutes after every merge and a check that flaps red is a check people learn
+  to ignore; persistent lag shows up as the same warning run after run. The
+  routine keeps its own attempt, since when it works it is free and immediate.
+
+### Fixed
+- The scan cheat-sheet no longer teaches the model both halves of a reversed
+  correction. `build_cheatsheet` deduped on the **whole rendered rule string**,
+  so correcting a field one way and later correcting it back produced two rules
+  that read as contradictory instructions, with nothing marking which one still
+  stood — and the contradiction rate rose with the correction count, so it got
+  worse the longer the app was used. Dedup is now on the set plus the field,
+  over newest-first rows, so the surviving rule for a field in a set is the
+  most recent correction. That also stops one much-corrected field from
+  consuming the 30-rule budget and crowding out every lesson from every other
+  set, which is the quieter half of the same bug. Collapsing to the newest is
+  right for what this digest is scoped to — naming and numbering *conventions*,
+  which have one current answer per set; per-card facts are the exact-match
+  overlay's job, not the cheat-sheet's, and dedup is per set, so two different
+  sets each keep their own rule.
+- The set half of that key is the **normalized `(year, brand, set_name)`
+  tuple**, not the rendered context line, because joining those three first is
+  ambiguous in a way this app produces: vision splits one physical set two ways
+  across scans, so brand `Bowman` + set `Chrome Prospects` and brand
+  `Bowman Chrome` + set `Prospects` both render `2024 Bowman Chrome Prospects`.
+  Keying on that string dropped one of two genuinely different sets' lessons.
+  Normalizing each part closes the mirror image at the same time — `Bowman` and
+  `bowman` with a trailing space *are* the same set, so they must share a key
+  rather than yield two competing rules, which is the same `_norm` identity
+  comparison the rest of the module already uses. The rendered line stays, for
+  display only.
+- `created_at` ties now break on `id` in both `build_cheatsheet` and
+  `find_exact_match`. Both queries mean "the latest correction wins", and both
+  left same-timestamp rows to resolve in whatever order SQLite happened to
+  return — the same reason the Sheets resync orders by `(created_at, id)`.
+
+## [Unreleased] — branch `integration/prs-52-58` (integrates PRs #52–#58)
 
 ### PR #52 — Pricing sources run concurrently
 
