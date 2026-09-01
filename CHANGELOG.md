@@ -314,6 +314,33 @@ heading. Whichever of those merges owns it.
   (weekly review)
 
 ## 2026-08-25 — Integration of PRs #52–#58 (PR #59)
+## [Unreleased] — branch `claude/gifted-bell-1r0u3u`
+
+### Docs only — design for committing `sheets_row` inside the mirror lock
+
+#### Added
+- Design addendum + implementation plan for the Sheets mirror lock protocol
+  (2026-08-29 addendum in
+  `docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+  plan in `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`). PR #46
+  specified — and the lock's own comment still claims — that `_sheets_lock`
+  is held across re-read → Sheet write → `sheets_row` commit, but every
+  writer releases it on return and the commit runs in the caller. A save
+  racing a resync can therefore write one card's data over the row the
+  rewrite just gave another card and then commit the stale index back over
+  the fresh one, and a delete racing a resync can blank a row the rewrite
+  just assigned to a live card, because `_is_owned` reads committed state the
+  resync hasn't committed yet. All 14 mirror tests stub the callbacks and
+  pass with the reread moved *outside* the lock, so nothing pins the
+  protocol. The recommendation extends the shape `reread_row` already set:
+  callers pass commit callbacks the writers invoke before releasing, the
+  caller-less `resync_one` bypass is deleted, and the background tasks
+  `rollback()` before waiting on the lock — without which moving the commit
+  inside would deadlock a racing save against the resync's commit until
+  SQLite's busy timeout fails it. Docs only; no behaviour change until the
+  owner approves the three decisions listed in the plan.
+
+## 2026-08-25 — Integration: PRs #52–#58 (PR #59)
 
 ### PR #52 — Pricing sources run concurrently
 
