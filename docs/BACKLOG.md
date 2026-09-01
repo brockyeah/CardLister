@@ -196,6 +196,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       session that `/storage` does not, which is the only reason they are
       separate — a decision worth revisiting rather than inheriting (quick win;
       implement directly; inline — `routers/analytics.py` plus the two tiles)
+- [ ] `GET /api/cards/{card_id}` has no caller anywhere (2026-08-30 weekly
+      review): `routers/cards.py:454-459` serves a single card, but `api.js`
+      never fetches one (the frontend works off the list endpoint and PATCHes
+      by id) and no test requests it — it is auth-guarded, correct, and dead.
+      Not deleted in the review because it is plausible deliberate REST
+      surface, and the "Card permalink deep link" item below is the natural
+      first caller — decide together: either that feature lands and uses it,
+      or it goes. If it goes, keep invariant #3's literal-before-`/{card_id}`
+      ordering note anchored on the PATCH/DELETE routes, which still carry the
+      same hazard (quick win; implement directly; inline — cards.py only,
+      or fold into the permalink item)
 - [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
       (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
       `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
@@ -277,8 +288,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       tile is included)
 - [ ] The eBay fee rate cannot actually be changed on the deployed app
       (2026-08-25 review, honest follow-up to the estimate that shipped the
-      same day): `lib/fees.js` reads `VITE_EBAY_FEE_RATE` /
-      `VITE_EBAY_FEE_FIXED`, but Vite inlines those at **build** time and the
+      same day): `lib/fees.js` reads six `VITE_EBAY_FEE_*` vars — `_RATE`,
+      `_RATE_ABOVE`, `_TIER`, `_FIXED`, `_FIXED_ABOVE`, `_FIXED_THRESHOLD`
+      (the tiered-schedule rework widened the original two; whoever implements
+      this must plumb all six or the tier half of the schedule stays frozen) —
+      but Vite inlines those at **build** time and the
       Dockerfile's frontend stage passes no build args, so Railway always gets
       the compiled-in defaults. eBay changes category rates, and a store
       subscription changes them per seller; when that happens the only lever

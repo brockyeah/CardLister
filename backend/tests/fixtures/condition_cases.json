@@ -130,6 +130,11 @@
       "expected": "NM-MT"
     },
     {
+      "name": "near mint mint, unhyphenated",
+      "input": "Near Mint Mint",
+      "expected": "NM-MT"
+    },
+    {
       "name": "gem mint spelled out",
       "input": "Gem Mint",
       "expected": "GEM-MT"

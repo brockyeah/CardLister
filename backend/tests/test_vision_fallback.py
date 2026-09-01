@@ -1,5 +1,4 @@
 """Subscription-billed scan fallback + credits-exhausted alerting."""
-import io
 import json
 import sys
 import types
