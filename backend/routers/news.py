@@ -30,6 +30,12 @@ def news(db: Session = Depends(get_db)):
 
 @router.post("/poll-now")
 def poll_now(db: Session = Depends(get_db)):
-    """Run one call-up poll cycle immediately. Returns {"new": int, "emailed": int}."""
+    """Run one call-up poll cycle immediately.
+
+    Returns {"new", "emailed", "pending", "abandoned"} — the last two say how
+    many alerts are waiting on a retry and how many left the retry window
+    unsent, so a manual poll reports a delivery problem rather than a bare
+    "emailed: 0" that reads the same as "nothing to send".
+    """
     from ..services.callups import run_poll_cycle
     return run_poll_cycle(db)

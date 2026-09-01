@@ -64,4 +64,6 @@ def test_poll_now_runs_a_cycle(db_session):
         with patch.object(callups, "fetch_callup_transactions", return_value=[]):
             r = client.post("/api/news/poll-now", headers=_auth(client))
     assert r.status_code == 200
-    assert r.json() == {"new": 0, "emailed": 0}
+    # The manual poll returns the cycle result verbatim, so it also reports how
+    # many alerts are waiting on a retry and how many were dropped unsent.
+    assert r.json() == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0}

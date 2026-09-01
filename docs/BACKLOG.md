@@ -85,6 +85,52 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       and it reuses what's already wired (quick win; implement directly;
       inline — `services/callups.py` plus a test that fails the mailer and
       advances the clock past the cutoff)
+- [ ] `/api/health` reports the call-up poller healthy while every alert it
+      produces goes undelivered (2026-08-27 review, direct follow-on to the
+      delivery alerting that shipped the same day): `_poller_state` tracks only
+      whether the *loop* is alive — `last_cycle_at` is stamped after a failed
+      cycle as deliberately as after a good one, because it proves liveness —
+      so `poller.stale` stays false through a mailer outage that is dropping
+      every alert. That is now a bigger gap than it was, because PR #63's
+      `health.yml` fails a scheduled run on `poller.stale` and would sail
+      straight past this. `run_poll_cycle` already returns `pending` and
+      `abandoned`; keep the last cycle's counts on `_poller_state`, report them
+      under `poller`, and have the workflow fail on a non-zero `abandoned`.
+      Decide as part of it whether a non-zero `pending` should fail or warn —
+      one held cycle is a transient the next cycle clears, so it is probably a
+      warning, while an abandoned alert is permanent and never recoverable
+      (quick win; implement directly; inline — `main.py` plus `health.yml` and
+      a test; the workflow half lands only once PR #63 merges)
+- [ ] `mark_sold` silently overwrites a sale that is already recorded
+      (2026-08-27 review): `unmark_sold` refuses to act on a card that is not
+      sold (409, "Card is not marked sold"), but `mark_sold` has no mirror
+      guard — it sets `status`, `sold_price` and `sold_at` unconditionally, so
+      marking an already-sold card sold again replaces the original sale price
+      and date with no warning and no way back to what was there. The paths in
+      are ordinary: a double-submit on the modal, a second browser tab holding
+      a stale Inventory list, or a re-import. `sold_at`/`sold_price` are what
+      the tax-year CSV export and the Sheets "Date Sold" column read, so a
+      clobbered sale is wrong in the one report that has to be right, and it is
+      wrong quietly — the row still looks like a normal sold card. Reject the
+      second mark with a 409 the way unmark-sold does and let the owner
+      unmark-then-remark if a correction is what they meant, which is the
+      existing, reversible path (quick win; implement directly; inline —
+      `routers/cards.py` plus a test asserting the first sale's figures survive)
+- [ ] The call-up digest has no size cap and is all-or-nothing (2026-08-27
+      review): `_compose_digest` renders every pending event into one email and
+      `run_poll_cycle` treats the send as atomic — one `send_email` for the
+      whole batch, and no row is stamped unless it returns true. That is fine
+      for the ordinary two or three transactions a day, and wrong on the one
+      date it matters most: MLB roster expansion on September 1 produces dozens
+      of `Selected` transactions inside a single two-day window. The owner's
+      actual sell signal — the handful of players he owns cards of — leads the
+      sort but is then buried in a wall of text, and a single failed send holds
+      *all* of them for retry together and can abandon them together. Cap the
+      rendered body at N events with a "+M more — see the Prospect Wire" tail
+      (matches already sort first, so the cap keeps the signal), and consider
+      sending in bounded chunks so one failure cannot lose the whole batch
+      (medium; implement directly; inline — `services/callups.py` plus a test
+      with a batch larger than the cap)
 - [ ] Price *to* a target net, now that the fee math exists (2026-08-25
       review): the Comps modal's "Set Price to $X" applies the comps median
       gross, and the seller who wants to clear $20 has to invert the fee
@@ -281,22 +327,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       it still has and the history browser can say "photo reclaimed" instead of
       rendering a hole (quick win; implement directly; inline —
       `routers/analytics.py:cleanup_uploads` plus a test)
-- [ ] Scanner treats the $9.99 pricing mock as a real suggested price
-      (2026-08-20 review): `fetchPricing` in `Scanner.jsx` writes
-      `pricing.suggested_price` into the form whenever it is truthy, with no
-      look at `pricing.source` — so when every comp source fails and the chain
-      falls through to its `MOCK_PRICE` last resort, the card is saved carrying
-      $9.99 as if a median of ten sales had produced it. The Inventory Comps
-      modal already refuses exactly this (`const suggested = result?.source
-      !== 'mock' ? result?.suggested_price : null`), so the two pricing surfaces
-      disagree about whether a mock counts, and the one that disagrees is the
-      one whose value gets *persisted*. On Railway this is the common case, not
-      the edge: CLAUDE.md notes the scrapers routinely 403 from a datacenter IP.
-      It also defeats the 2026-08-20 listing-text fix — a mocked $9.99 makes
-      `has_price` true, so the seller gets a confident wrong price where they
-      would otherwise be told the card has no price yet. Skip the write when
-      the source is mock and let the field stay empty, matching the modal
-      (quick win; implement directly; inline — Scanner.jsx only)
 - [ ] CI guards for the two invariants that break an already-deployed install
       (2026-08-20 review): invariants #1 and #4 are the two whose failure mode
       is silent *and* remote — they work on a fresh DB and a fresh sheet, and
@@ -861,6 +891,26 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       eating the 30-rule budget. `created_at` ties now break on `id` in both
       `build_cheatsheet` and `find_exact_match`, so "newest wins" is
       deterministic rather than left to SQLite's row order
+- [x] 2026-08-27 — A failing mailer no longer swallows call-up alerts in
+      silence: `run_poll_cycle` logs and fires an out-of-band owner alert the
+      moment a digest cannot be sent, and counts the alertable events that pass
+      the 48h retry window unsent. Both counts (`pending`, `abandoned`) come
+      back from the cycle and through `POST /api/news/poll-now`. The alert goes
+      via the ntfy push `billing_alerts` already had wired — the app's own
+      email is the thing that is broken — on its own throttle clock, and says
+      whether email is unconfigured or configured-and-failing, because those
+      look identical from outside and have different fixes. No schema change:
+      the abandoned figure is a rolling count over a bounded 48–96h band rather
+      than a per-row stamp
+- [x] 2026-08-27 — The Scanner stops saving the pricing chain's $9.99 mock as a
+      real suggested price: `fetchPricing` wrote any truthy `suggested_price`
+      into the review form without looking at `source`, so a card priced by a
+      fully failed lookup was saved, mirrored to the Sheet and pasted into eBay
+      at a number no sale supports — the common case on Railway, where the
+      scrapers 403 from a datacenter IP (reproduced against a running app).
+      Both pricing surfaces now share one tested helper
+      (`frontend/src/lib/pricing.js`); the Inventory modal had always refused a
+      mock, and the surface that disagreed was the one whose value persists
 - [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
       Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
       when the seller receives $8.37. `lib/fees.js` holds the schedule — both

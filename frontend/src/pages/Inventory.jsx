@@ -12,6 +12,7 @@ import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
 import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
+import { usableSuggestedPrice } from '../lib/pricing.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 // Shown when the listing text was built for a card that has no price yet.
@@ -171,7 +172,9 @@ function CompsModal({ card, onClose, onApplyPrice }) {
       .finally(() => setLoading(false))
   }, [card])
 
-  const suggested = result?.source !== 'mock' ? result?.suggested_price : null
+  // Shared with the Scanner's review form, which used to accept the $9.99 mock
+  // this modal has always refused — and the Scanner's is the value that gets saved.
+  const suggested = usableSuggestedPrice(result)
   const delta = suggested != null && card.listed_price != null ? suggested - card.listed_price : null
   // "Comps say" is a median; show the spread it came from so a contaminated
   // set is visible before "Set Price to $X" is pressed.
