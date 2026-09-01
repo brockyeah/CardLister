@@ -5,6 +5,75 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] The call-up fetch window is a fixed trailing 2 days, so an outage longer
+      than that loses call-ups permanently (2026-09-01 daily run): every cycle
+      of `run_poll_cycle` computes `start = today - 2 days` from *now*, never
+      from the last window it actually covered, and only transactions returned
+      by that request are ever written to `CallupEvent`. So any span the poller
+      does not run through — a Railway restart loop, a container asleep, a
+      three-day MLB Stats API outage (`fetch_callup_transactions` degrades to
+      `[]` on failure, which is indistinguishable from "no transactions") —
+      is skipped and never revisited. Nothing records the gap, and
+      `/api/health` makes it worse rather than better: `poller.stale` only
+      proves the loop is alive *now*, so a container that was down for a week
+      comes back reporting perfectly healthy while three days of call-ups were
+      never fetched. This is a different failure from the two already fixed —
+      those are about events that *were* recorded not being emailed; these
+      events never exist at all, so no digest, count or abandoned-alert push
+      can mention them. Fix needs no schema: derive `start` from the newest
+      `CallupEvent.date` already in the table (falling back to the current 2
+      days when it is empty), clamped to a ceiling — ~10 days — so a long
+      absence widens the request once instead of asking for a season. Decide
+      with it whether a widened window should be reported, since silently
+      backfilling a week of transactions and emailing them all as fresh
+      call-ups is its own surprise (medium; implement directly; inline —
+      `services/callups.py` plus a test that skips a cycle and asserts the
+      next one still sees the missed transaction)
+- [ ] An unpriced model bills silently at Opus rates (2026-09-01 daily run):
+      `analytics.py:_cost` looks the model up in `MODEL_PRICES` and falls back
+      to `_DEFAULT_PRICE` (Opus $5/$25) for anything missing. The fallback
+      itself is the right call — deliberately never undercount — but it is
+      completely silent, and the table is a hardcoded snapshot with no
+      staleness signal, the same shape as the eBay fee schedule in invariant
+      #15. Reaching it is ordinary rather than exotic: `resolve_preset` falls
+      back to env defaults, so a `VISION_MODEL` set on Railway to any id not in
+      the table (a newer model, a dated variant) prices every scan at Opus
+      rates from then on, in the ledger the two users split real API spend
+      with, with nothing anywhere saying the number is a guess. Log once per
+      unknown model id and mark those rows in the Analytics by-model table as
+      estimated-at-Opus, so a wrong figure is visibly a wrong figure (quick
+      win; implement directly; inline — `routers/analytics.py` plus the model
+      table in `Analytics.jsx`)
+- [ ] Nothing pins that an endpoint's rejection paths stay typed rather than
+      500ing (2026-09-01 daily run, the general form of a bug fixed that day):
+      the CSV importer's `csv.reader` call raised `_csv.Error` on a field past
+      its 128 KB limit and nothing caught it, so a bad file reached the client
+      as a blank 500 — and it was found only because a test written for an
+      unrelated cap happened to push a field past that limit. The class is not
+      fixed: this app parses other people's bytes at several seams (CSV import,
+      the eBay compliance webhook body, `_parse_date`/`_parse_money`,
+      `resolve_preset`, the multipart upload itself), each hand-guarded against
+      the failures whoever wrote it thought of. A small hostile-payload sweep
+      would cover the rest for one file's worth of effort: post a handful of
+      plausible-but-broken bodies (a NUL byte mid-CSV, a zero-byte file, a file
+      that is only a BOM, a multipart part with no filename, a CSV whose header
+      row is 200 columns wide) at the two upload endpoints and assert the
+      status is never 5xx. Cheap, and it fails loudly the next time a stdlib
+      limit is discovered in production instead of in a test (quick win;
+      implement directly; inline — one new test module, plus whatever typed
+      rejections it turns out to need)
+- [ ] The Analytics "By day" chart omits days with no scans (2026-09-01 daily
+      run): `analytics()` builds `by_day` from a `defaultdict` keyed on the
+      days that have events, so a day with no scanning is absent from the
+      response rather than present with a zero. Every row carries its own date
+      label, so nothing displayed is *wrong* — but five scattered scan days in
+      a 30-day range render as five adjacent bars, which reads as continuous
+      activity, and "how often do I actually sit down and scan" is a question
+      the panel currently cannot answer. Zero-fill the range server-side (it
+      already knows `since` and `until`) so the gaps are visible as gaps. Small
+      enough to fold into whichever analytics item lands next rather than
+      shipping alone (quick win; implement directly; inline; dataviz skill
+      first — `routers/analytics.py` plus the bar list in `Analytics.jsx`)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -140,21 +209,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the price empty, since the comps at scan time were never stored (medium;
       implement directly; inline — a read-only endpoint beside `/api/scan`
       plus a Scanner affordance)
-- [ ] `POST /api/cards/import.csv` reads an unbounded upload into memory before
-      any cap applies (2026-08-28 review): `import_csv` does `raw = await
-      file.read()`, then `.decode()`, then `list(csv.reader(...))` — three full
-      copies of the file resident at once — and only *then* checks
-      `MAX_IMPORT_ROWS`. The row cap therefore protects the database and
-      protects nothing else: a 500 MB file is fully read, decoded and parsed
-      before the 5000-row limit rejects it. This is the one endpoint that takes
-      an arbitrary-size upload with no byte ceiling; `/api/scan` has had
-      `MAX_UPLOAD_BYTES` with chunked reads since the magic-byte work, and the
-      same shape applies here. It matters more than it looks because there is
-      exactly one worker and one container: an OOM here is the whole app, not
-      one request, and it is reachable by either logged-in user with a
-      mis-selected file — a video, a database backup — not just by an attacker
-      (quick win; implement directly; inline — `routers/cards.py`, chunked read
-      against a byte cap plus a test with an oversized body)
 - [ ] Every request in `api.js` except the scan still has no client timeout
       (2026-08-28 review, the general form of the wedge fixed the same day):
       the axios instance is created with no `timeout`, and today's fix set one
@@ -241,21 +295,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       warning, while an abandoned alert is permanent and never recoverable
       (quick win; implement directly; inline — `main.py` plus `health.yml` and
       a test; the workflow half lands only once PR #63 merges)
-- [ ] `mark_sold` silently overwrites a sale that is already recorded
-      (2026-08-27 review): `unmark_sold` refuses to act on a card that is not
-      sold (409, "Card is not marked sold"), but `mark_sold` has no mirror
-      guard — it sets `status`, `sold_price` and `sold_at` unconditionally, so
-      marking an already-sold card sold again replaces the original sale price
-      and date with no warning and no way back to what was there. The paths in
-      are ordinary: a double-submit on the modal, a second browser tab holding
-      a stale Inventory list, or a re-import. `sold_at`/`sold_price` are what
-      the tax-year CSV export and the Sheets "Date Sold" column read, so a
-      clobbered sale is wrong in the one report that has to be right, and it is
-      wrong quietly — the row still looks like a normal sold card. Reject the
-      second mark with a 409 the way unmark-sold does and let the owner
-      unmark-then-remark if a correction is what they meant, which is the
-      existing, reversible path (quick win; implement directly; inline —
-      `routers/cards.py` plus a test asserting the first sale's figures survive)
 - [ ] The call-up digest has no size cap and is all-or-nothing (2026-08-27
       review): `_compose_digest` renders every pending event into one email and
       `run_poll_cycle` treats the send as atomic — one `send_email` for the
@@ -1032,6 +1071,29 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-01 — Mark-sold refuses to overwrite a sale that is already
+      recorded: `unmark_sold` had always guarded its side, `mark_sold` had no
+      mirror, so a double-submit, a stale second tab or a re-import replaced
+      the original `sold_price`/`sold_at` with no warning and no way back —
+      quietly, since the row still looked like a normal sold card, and in the
+      two columns the tax-year export and the Sheets "Date Sold" column read.
+      The second mark is a 409; correcting a sale still works through the
+      existing reversible unmark-then-remark path. No frontend change needed —
+      `MarkSoldModal` already surfaces a server rejection
+- [x] 2026-09-01 — The CSV importer is capped in bytes as well as rows:
+      `import_csv` read, decoded and parsed the whole file — three copies
+      resident — before `MAX_IMPORT_ROWS` could reject it, so the row cap
+      protected the database and nothing else. It now reads in 1 MB chunks
+      against a 10 MB cap and refuses with a 413, the shape `/api/scan` has
+      used since the magic-byte work. Honest about its limit: Starlette has
+      already spooled the body by the time the handler runs, so this bounds
+      our in-process copies rather than the transfer — the ASGI-level
+      early-reject item stays open in Later
+- [x] 2026-09-01 — A CSV field over the parser's 128 KB limit is a 422, not a
+      500: `csv.reader` raised and nothing caught it, so a bad file reached the
+      client as a blank 500 that reads as a broken app. Found while testing the
+      byte cap above, and reachable well under it. The general "nothing pins
+      that rejections stay typed" case is now its own item in Now/next
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
       and fails the run on a non-200, an unreachable or non-JSON response, an

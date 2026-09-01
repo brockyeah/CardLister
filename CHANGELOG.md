@@ -10,6 +10,50 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Fixed
+- Marking a card sold no longer overwrites a sale that is already recorded.
+  `unmark_sold` has always refused to act on a card that is not sold, but
+  `mark_sold` had no mirror guard: it set `status`, `sold_price` and `sold_at`
+  unconditionally, so marking an already-sold card sold again replaced the
+  original sale price and date with no warning and no way back to what was
+  there. The paths in are ordinary — a double-submit on the modal, a second
+  browser tab holding a stale Inventory list, a re-import — and those two
+  columns are exactly what the tax-year CSV export and the Sheets "Date Sold"
+  column read, so a clobbered sale was wrong in the one report that has to be
+  right, and wrong quietly: the row still looked like a normal sold card. The
+  second mark is now a 409. Correcting a sale stays possible through the
+  existing reversible path (unmark-sold, then mark it sold again), which is
+  also the one that leaves the intermediate state visible. No frontend change
+  was needed — `MarkSoldModal` already renders a server rejection through
+  `formatApiError`.
+- The CSV importer is capped in bytes, not only in rows. `import_csv` did
+  `await file.read()`, then `.decode()`, then `list(csv.reader(...))` — three
+  full copies of the file resident at once — and only *then* checked
+  `MAX_IMPORT_ROWS`. The row cap therefore protected the database and nothing
+  else: a 500 MB file was fully read, decoded and parsed before the 5000-row
+  limit rejected it. This was the one endpoint taking an arbitrary-size upload
+  with no byte ceiling, and it matters more than it looks because there is one
+  worker and one container — an OOM here is the whole app, not one request,
+  and it is reachable by either logged-in user with a mis-selected file (a
+  video, a database backup), not just by an attacker. The upload is now read in
+  1 MB chunks against a 10 MB cap and refused with a 413, the same shape
+  `/api/scan` has used since the magic-byte work. What that bounds is our own
+  in-process copies: Starlette has already spooled the multipart body by the
+  time the handler runs, so an oversized *transfer* still completes —
+  rejecting before receipt needs an ASGI-level body limit, which stays on the
+  backlog rather than being quietly claimed here. 10 MB is far above a
+  legitimate import (a full 5000-row export runs well under 3 MB), and a test
+  pins that headroom so a future tightening cannot silently refuse a real
+  inventory.
+- A CSV field longer than 128 KB is a 422 instead of a 500. Found while testing
+  the byte cap above: `csv.reader` raises `_csv.Error` on a field past its
+  process-global limit, nothing caught it, and the client got a blank 500 that
+  reads as a broken app rather than a bad file. Every other rejection on that
+  endpoint is a 422 naming what to fix, and this one now is too. It is
+  reachable well under the byte cap, so the new cap does not hide it.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so
