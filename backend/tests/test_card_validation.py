@@ -195,3 +195,143 @@ def test_a_future_sale_cannot_slip_through_on_a_utc_offset(db_session):
                            tzinfo=timezone(timedelta(hours=14))).isoformat())
         assert r.status_code == 200, r.text
         assert r.json()["sold_at"].startswith(aware.strftime("%Y-%m-%dT09:00"))
+
+
+def test_mark_sold_refuses_to_overwrite_a_recorded_sale(db_session):
+    """A second mark-sold must not silently replace the first sale's figures.
+
+    unmark_sold has always refused to act on a card that is not sold; mark_sold
+    had no mirror guard, so a double-submit on the modal, a stale second tab or
+    a re-import replaced sold_price/sold_at with no warning and no way back.
+    Those two columns are what the tax-year export and the Sheets "Date Sold"
+    column read, so the clobbered row is wrong in the one report that has to be
+    right — and it still looks like an ordinary sold card.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        first = _mark_sold(client, headers, created["id"],
+                           sold_price=25.0, sold_at="2026-02-14T00:00:00")
+        assert first.status_code == 200, first.text
+
+        second = _mark_sold(client, headers, created["id"],
+                            sold_price=999.0, sold_at="2026-03-01T00:00:00")
+        assert second.status_code == 409, second.text
+
+        # The original sale survives intact — the point of the guard.
+        card = client.get("/api/cards", headers=headers).json()[0]
+        assert card["sold_price"] == 25.0
+        assert card["sold_at"].startswith("2026-02-14")
+
+
+def test_a_sale_can_still_be_corrected_by_unmarking_first(db_session):
+    """The guard refuses the clobber, not the correction: the existing
+    reversible path (unmark, then re-mark) still records the new figures."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        assert _mark_sold(client, headers, created["id"],
+                          sold_price=25.0).status_code == 200
+        assert client.post(f"/api/cards/{created['id']}/unmark-sold",
+                           headers=headers).status_code == 200
+        again = _mark_sold(client, headers, created["id"], sold_price=30.0)
+        assert again.status_code == 200, again.text
+        assert again.json()["sold_price"] == 30.0
+
+
+def test_a_sale_committed_mid_request_is_not_overwritten(db_session):
+    """The endpoint itself must lose the race, not just the SQL underneath it.
+
+    The first version of this guard read the card, checked `status`, then
+    wrote — so two overlapping marks could both read it as unsold before
+    either committed, and the second commit overwrote the first sale exactly
+    as if there were no guard (Codex, PR #71). FastAPI runs this sync handler
+    in a threadpool with a session per request, so that interleaving is real.
+
+    Reproduced deterministically instead of with threads: the session handed
+    to the handler fires a *different* session's sale in between the handler's
+    own lookup and its write, which is precisely the window the old guard left
+    open. A check-then-write handler passes its stale check and clobbers the
+    sale; the conditional UPDATE matches no row and 409s.
+    """
+    from backend.database import SessionLocal
+    from backend.main import app as fastapi_app
+    from backend.database import get_db
+
+    with TestClient(app) as client:
+        headers = _auth(client)
+        card_id = client.post("/api/cards", json=_payload(), headers=headers).json()["id"]
+
+    def interloper():
+        """A competing request that wins the race, committed and closed."""
+        other = SessionLocal()
+        try:
+            other.query(Card).filter(Card.id == card_id).update(
+                {"status": "sold", "sold_price": 25.0,
+                 "sold_at": datetime(2026, 2, 14)},
+                synchronize_session=False,
+            )
+            other.commit()
+        finally:
+            other.close()
+
+    class RacingSession:
+        """Delegates to a real session, firing `interloper` once — after the
+        handler's 404 lookup has returned and before its write."""
+
+        def __init__(self, inner):
+            self._inner = inner
+            self._queries = 0
+
+        def query(self, *a, **kw):
+            self._queries += 1
+            if self._queries == 2:
+                interloper()
+            return self._inner.query(*a, **kw)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    def racing_db():
+        session = SessionLocal()
+        try:
+            yield RacingSession(session)
+        finally:
+            session.close()
+
+    fastapi_app.dependency_overrides[get_db] = racing_db
+    try:
+        with TestClient(app) as client:
+            headers = _auth(client)
+            r = _mark_sold(client, headers, card_id,
+                           sold_price=999.0, sold_at="2026-03-01T00:00:00")
+    finally:
+        fastapi_app.dependency_overrides.pop(get_db, None)
+
+    assert r.status_code == 409, r.text
+    db_session.expire_all()
+    card = db_session.query(Card).filter(Card.id == card_id).one()
+    assert card.sold_price == 25.0, "the sale committed mid-request was overwritten"
+    assert card.sold_at == datetime(2026, 2, 14)
+
+
+def test_mark_sold_still_sells_a_card_whose_status_is_null(db_session):
+    """The conditional UPDATE must not read a NULL status as 'sold'.
+
+    `status` is nullable with a Python-side default, so `status != 'sold'`
+    evaluates to NULL on such a row and matches nothing — which would 409 a
+    card that has never been sold. Legacy and hand-written rows are the way a
+    NULL gets in.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        card_id = client.post("/api/cards", json=_payload(), headers=headers).json()["id"]
+
+        db_session.query(Card).filter(Card.id == card_id).update(
+            {"status": None}, synchronize_session=False)
+        db_session.commit()
+
+        r = _mark_sold(client, headers, card_id, sold_price=25.0)
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "sold"
+        assert r.json()["sold_price"] == 25.0
