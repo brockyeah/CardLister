@@ -177,13 +177,21 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       owner's call. Either way the routine doc needs correcting to say what is
       actually reviewing (quick win; implement directly; inline —
       `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
-      only the owner can edit) — **escape hatch verified 2026-09-01 on PR #71**:
-      posting `@coderabbitai review` as a PR comment was accepted ("Review
-      triggered"), so the one-line prompt addition is the fix and the ten-stars
-      / paid-plan alternatives are not needed to keep two reviewers. Note its
-      own caveat — CodeRabbit reviews incrementally and will not re-review
-      commits it has already seen — so the trigger belongs on the PR *once it
-      has its final commits*, or after each push, rather than only at open time
+      only the owner can edit) — **escape hatch tested 2026-09-01 on PR #71,
+      with a caveat that decides how the prompt step must be worded**: posting
+      `@coderabbitai review` was accepted ("Review triggered"), so the command
+      still works on a sub-10-star repo and the ten-stars / paid-plan
+      alternatives are not needed. But that first run then **cancelled itself**
+      — "⚠️ Action not completed. Head commit changed." — because a further
+      commit landed three minutes later, and the comment reverted to the
+      no-automatic-reviews notice as if nothing had been asked. So the trigger
+      is not fire-and-forget: it is silently void if anything is pushed after
+      it, which on this routine's PRs is the *normal* case (review findings get
+      fixed, changelog entries get amended). The step therefore has to be
+      "post the trigger after the final push, and re-post it after any
+      subsequent push", not "post it when opening the PR" — and a run that
+      posts it once at open time will believe it has two reviewers while
+      having one
 - [ ] An implausible sale price is accepted as readily as a plausible one
       (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
       validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
