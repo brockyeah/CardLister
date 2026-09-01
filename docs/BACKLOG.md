@@ -67,6 +67,62 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       owner opens every time he scans a card (quick win; implement directly;
       inline — `NewsSection.jsx` only; no test infrastructure exists for
       components, so verify by build + eye)
+- [ ] The routines open duplicate housekeeping PRs, and the review queue has
+      stopped draining (2026-08-31 daily run, observed rather than predicted):
+      **PRs #60, #61 and #62 are three separate PRs that each date the same
+      `[Unreleased]` heading for PR #59** — one line, three conflicting
+      changes — and PR #67 dates it a fourth time as part of a larger diff.
+      PRs #63, #64 and #65 each had to carry an HTML comment in the changelog
+      explaining why they were *not* touching it. Nothing has merged since
+      2026-08-25, so eight PRs are open at once and every new branch now starts
+      from a `main` that is a week behind the work. Two fixes, and they are
+      independent: (a) step 11 of the daily routine must check the open PR list
+      for one already doing the housekeeping before doing it itself — the
+      CLAUDE.md two-agent section already says "changelog housekeeping is
+      idempotent — check before doing it", so this is the routine prompt
+      failing to encode a rule the repo already states; (b) the daily run
+      should report queue depth in its notification when PRs are piling up,
+      because "nothing merged in five days" is the single fact that changes
+      what the owner should do with the run. Owner decision needed on whether
+      a run should *stop shipping* past some depth (quick win; implement
+      directly; inline — `docs/notes/daily-routine-prompt.md`, and the live
+      routine prompt in the cloud must be edited to match or the doc is
+      fiction)
+- [ ] CodeRabbit has stopped reviewing, and the process still assumes it does
+      (2026-08-31 daily run, verified on two PRs): CodeRabbit's only comment on
+      PR #65 and PR #68 is the same notice — *"This repository does not receive
+      automatic reviews because it has fewer than 10 stars"* — with a "Trigger
+      review" checkbox. It reads `.coderabbit.yaml` (the run configuration is
+      quoted in the notice) and then reviews nothing. Older PRs really were
+      reviewed — #53 and #64 both carry CodeRabbit findings that were fixed —
+      so this is a policy change on their side, not a misconfiguration here.
+      Two things follow. First, **the repo currently has one automated reviewer,
+      not two**, while `docs/notes/daily-routine-prompt.md` tells every run that
+      "three reviewers cover it" and uses that as the reason not to self-review;
+      a premise that is no longer true is worse than no premise. Second,
+      `.coderabbit.yaml` is being actively maintained for a reviewer that is not
+      running — PR #67 updated its download-helper instruction this week. Cheapest
+      fix is to have whoever opens the PR post `@coderabbitai review` on it (the
+      notice's own escape hatch), which is a one-line addition to the routine
+      prompt; the alternatives are ten stars or a paid plan, and both are the
+      owner's call. Either way the routine doc needs correcting to say what is
+      actually reviewing (quick win; implement directly; inline —
+      `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
+      only the owner can edit)
+- [ ] An implausible sale price is accepted as readily as a plausible one
+      (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
+      validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
+      for a `$25.00` card is stored, mirrored to the Sheets price column,
+      counted in the Inventory Revenue tile and filed in the tax export. A hard
+      upper bound is the wrong tool — cards genuinely sell for five figures, so
+      any cap refuses a real sale — but the modal already knows the card's
+      listed price and can ask: confirm once when the entered price is more
+      than ~20× or under ~1/20th of the listed price (skipping the check when
+      there is no listed price to compare against). Same shape as the
+      duplicate-detection confirm and the bulk-orphan warning: a question at
+      the moment of the mistake, not a refusal (quick win; implement directly;
+      inline — `Inventory.jsx` plus a tested pure helper, no schema change)
+
 - [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
       (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
       `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
@@ -305,16 +361,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       folding it into `db_bytes`, so a growing "other" is legible rather than
       looking like database growth (quick win; implement directly; inline —
       `routers/analytics.py` plus the Analytics tile)
-- [ ] `suggested_price` has no `ge=0` floor, but `listed_price` does
-      (2026-08-21 review): `CardBase`/`CardUpdate` validate
-      `listed_price: Optional[float] = Field(default=None, ge=0)` and leave
-      `suggested_price` a bare `Optional[float]`, so a negative comp median —
-      or a hand-crafted PATCH — is stored and mirrored to the Sheet's price
-      column. The listing-text endpoint now treats a non-positive price as
-      unset, which contains the worst of it, but the two fields are the same
-      kind of value read by the same consumers and only one is guarded. Add the
-      floor to both models and a validation test alongside
-      `test_card_validation.py` (quick win; implement directly; inline)
 - [ ] Orphan cleanup leaves `Scan.image_path` pointing at a file it deleted
       (2026-08-21 review): `_orphaned_uploads` deliberately lets scan rows go
       unprotected — an unsaved scan's photo is exactly the disk growth the tool
@@ -357,6 +403,46 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       one — backdating a sale is legitimate, post-dating one is not (quick win;
       implement directly; inline — Inventory.jsx plus a schema validator and
       its test)
+- [ ] Production health monitoring does not depend on the routine's network
+      policy (2026-08-20 review, hit during that run): Phase 1 of the daily
+      routine pings
+      `https://cardlister-production.up.railway.app/api/health`, and from the
+      scheduled cloud sandbox that request is refused by the egress proxy
+      (403 to CONNECT), so the health check silently cannot run — the one step
+      of the routine meant to notice a failed deploy or a stale call-up poller.
+      Nothing is wrong with the app; the check just has no route to it. Move
+      the ping into a scheduled GitHub Actions workflow that fails the run when
+      `ok`/`db` is false or the poller is stale, so health is watched from
+      somewhere that can reach it and a failure shows up as a red run rather
+      than a missing sentence in a report. Keep the routine's own attempt —
+      when it works it is free — but have it report the block explicitly rather
+      than the result (quick win; implement directly; inline — new workflow
+      plus a note in `docs/notes/daily-routine-prompt.md`)
+- [ ] `Date Listed` is the one date the CSV importer still takes on faith
+      (2026-08-31, direct follow-on to the sale-date bound that shipped the
+      same day): `_parse_date` feeds both columns, and `sold_at` is now bounded
+      while `created_at` is not — so a mistyped `2062` in **Date Listed** is
+      still accepted in full. It is quieter than the sold-date version and not
+      harmless: `created_at` is the Sheets "Date Listed" column, it is the
+      primary sort key of the resync (`created_at, id` — the ordering
+      invariant #1 depends on), and the planned days-to-sell analytics measures
+      created→sold, which a future listing date makes negative. Apply the same
+      `reject_future_sold_at` bound (rename it for both callers) with the same
+      drop-and-warn treatment, and decide with it whether `created_at` should
+      fall back to now the way a missing `sold_at` does (quick win; implement
+      directly; inline — `routers/cards.py` plus a test)
+- [ ] Test fixtures that are ahead of the calendar fail on a date, not on a
+      change (2026-08-31, hit while adding the sale-date bound): the sold-export
+      ordering test marked a card sold on `2026-12-20`, so the new bound turned
+      it red — correctly, but the fixture had been describing a *future* sale
+      for most of the year it names, and nothing said so. That one is fixed;
+      the class is not. Sweep the suites for hardcoded dates that are or will
+      be ahead of the runner's clock (`backend/tests/test_export_sold_csv.py`
+      still seeds several 2026 dates, all currently past) and prefer either a
+      fully elapsed year or an offset from `utcnow()`. Worth pairing with a
+      note in the testing section of CLAUDE.md, since the frontend suite has
+      the same exposure through its pinned `America/New_York` zone (quick win;
+      implement directly; inline)
 - [ ] Save-flow clipboard + eBay tab run after `await`, so both can be
       silently blocked (2026-08-18 review): `doSave` in `Scanner.jsx` awaits
       `createCard`, then `getEbayListingText`, and only then calls
@@ -911,6 +997,32 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       Both pricing surfaces now share one tested helper
       (`frontend/src/lib/pricing.js`); the Inventory modal had always refused a
       mock, and the surface that disagreed was the one whose value persists
+- [x] 2026-08-31 — A sale can no longer be dated in the future: nothing bounded
+      `sold_at` at all, so a mistyped year was accepted in silence and became
+      permanent furniture — it joins the sold-years picker forever, sorts to
+      the end of every tax export, and the only way out is unmark-sold and
+      redo. The picker is capped at the local date it already defaults to, the
+      server rejects anything more than a day ahead of its own clock (slack for
+      the two clocks disagreeing, not for post-dating), and the CSV importer
+      applies the same bound to `Date Sold`, dropping a future value with a
+      per-row warning. The check runs on the value as it will be *stored*:
+      SQLite drops tzinfo without converting, so an aware `+14:00` instant
+      validated as the moment it really is would then be stored as its wall
+      clock, a day past the bound that admitted it. Backdating stays unbounded.
+      The mark-sold modal also renders a rejected confirm instead of dropping
+      it — the failed promise used to leave the dialog open and unchanged, as
+      though the click had not happened. Verified against a running app: 2062
+      refused, the modal's real payload stored as noon UTC on the picked day, a
+      400-day-old sale still accepted
+- [x] 2026-08-31 — `suggested_price` has the `ge=0` floor `listed_price` always
+      had: the two are the same kind of value read by the same consumers (the
+      Sheets price column, the eBay listing text, the inventory value tile) and
+      only one was guarded. Both floors are stated on the input models only —
+      FastAPI validates responses too, so inheriting them onto `CardOut` would
+      turn one legacy row saved before the floor existed into a 500 on
+      `GET /api/cards`, the whole inventory unreadable because one price is
+      wrong. A test pins that split and fails (with the 500) if the floors are
+      inherited
 - [x] 2026-08-25 — eBay fee + net-proceeds estimate in the Comps modal and the
       Mark as Sold dialog: both showed gross only, so a $10 comp read as $10
       when the seller receives $8.37. `lib/fees.js` holds the schedule — both
