@@ -28,6 +28,21 @@ only in `[Unreleased]` on a branch is not in prod yet.
   also the one that leaves the intermediate state visible. No frontend change
   was needed — `MarkSoldModal` already renders a server rejection through
   `formatApiError`.
+- The guard is a compare-and-set, not a check-then-write, because the obvious
+  version of it does not close the race it is named for. Reading the card,
+  testing `status`, then writing leaves a window: FastAPI runs this sync
+  handler in a threadpool and each request gets its own session, so two
+  overlapping marks can both read the card as unsold before either commits —
+  after which the second commit overwrites the first sale exactly as it did
+  before the guard existed, and a double-submit is the very case the guard was
+  written for. The UPDATE is now itself conditioned on the row still being
+  unsold, so the check and the write are one operation and 0 rows affected is
+  the 409. The condition matches a NULL `status` explicitly: the column is
+  nullable with a Python-side default, and a bare `status != 'sold'` evaluates
+  to NULL on such a row, which would have refused to sell a card that had
+  never been sold. Pinned by a test that commits a competing sale from a second
+  session in between the handler's own lookup and its write — it fails against
+  the check-then-write version and passes against this one.
 - The CSV importer is capped in bytes, not only in rows. `import_csv` did
   `await file.read()`, then `.decode()`, then `list(csv.reader(...))` — three
   full copies of the file resident at once — and only *then* checked

@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db, SessionLocal
@@ -591,26 +591,53 @@ def mark_sold(card_id: int, payload: MarkSoldRequest, background_tasks: Backgrou
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    if card.status == "sold":
-        # Mirror of unmark_sold's guard below. Without it, marking an
-        # already-sold card sold again overwrote the recorded sale price and
-        # date with no warning and no way back to what was there. The paths in
-        # are ordinary — a double-submit on the modal, a second tab holding a
-        # stale Inventory list, a re-import — and sold_at/sold_price are what
-        # the tax-year CSV export and the Sheets "Date Sold" column read, so a
-        # clobbered sale is wrong in the one report that has to be right, and
-        # wrong quietly: the row still looks like a normal sold card.
-        # Correcting a sale is still possible through the existing reversible
-        # path — unmark-sold, then mark it sold again — which is also the one
-        # that leaves the intermediate state visible.
+    # Mirror of unmark_sold's guard below. Without one, marking an already-sold
+    # card sold again overwrote the recorded sale price and date with no
+    # warning and no way back to what was there. The paths in are ordinary — a
+    # double-submit on the modal, a second tab holding a stale Inventory list,
+    # a re-import — and sold_at/sold_price are what the tax-year CSV export and
+    # the Sheets "Date Sold" column read, so a clobbered sale is wrong in the
+    # one report that has to be right, and wrong quietly: the row still looks
+    # like a normal sold card. Correcting a sale is still possible through the
+    # existing reversible path — unmark-sold, then mark it sold again — which
+    # is also the one that leaves the intermediate state visible.
+    #
+    # Compare-and-set rather than check-then-write, because the check-then-
+    # write version does not actually close the race it is named for: FastAPI
+    # runs this sync handler in a threadpool, each request gets its own
+    # session, and two overlapping marks can both read the card as unsold
+    # before either commits — after which the second commit overwrites the
+    # first sale exactly as before (Codex, PR #71). Conditioning the UPDATE
+    # itself on the row still being unsold makes the read and the write one
+    # operation; 0 rows affected means the card was already sold or another
+    # request won the race, which is the same 409 to the caller either way.
+    #
+    # `status` is nullable with a Python-side default, so a bare
+    # `status != "sold"` would evaluate to NULL on a NULL row and match
+    # nothing — refusing to sell a card that is not sold. Match it explicitly.
+    updated = (
+        db.query(Card)
+        .filter(
+            Card.id == card_id,
+            or_(Card.status.is_(None), Card.status != "sold"),
+        )
+        .update(
+            {
+                "status": "sold",
+                "sold_price": payload.sold_price,
+                "sold_at": payload.sold_at or datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if not updated:
         raise HTTPException(
             status_code=409,
             detail="Card is already marked sold — unmark it first to change the sale price or date",
         )
-    card.status = "sold"
-    card.sold_price = payload.sold_price
-    card.sold_at = payload.sold_at or datetime.utcnow()
-    db.commit()
+    # synchronize_session=False leaves the instance loaded above untouched, so
+    # the response would carry pre-sale values without this.
     db.refresh(card)
     background_tasks.add_task(_sync_card_to_sheets, card.id)
     return card
