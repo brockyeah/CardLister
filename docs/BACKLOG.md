@@ -177,7 +177,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       owner's call. Either way the routine doc needs correcting to say what is
       actually reviewing (quick win; implement directly; inline —
       `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
-      only the owner can edit)
+      only the owner can edit) — **escape hatch verified 2026-09-01 on PR #71**:
+      posting `@coderabbitai review` as a PR comment was accepted ("Review
+      triggered"), so the one-line prompt addition is the fix and the ten-stars
+      / paid-plan alternatives are not needed to keep two reviewers. Note its
+      own caveat — CodeRabbit reviews incrementally and will not re-review
+      commits it has already seen — so the trigger belongs on the PR *once it
+      has its final commits*, or after each push, rather than only at open time
 - [ ] An implausible sale price is accepted as readily as a plausible one
       (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
       validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
