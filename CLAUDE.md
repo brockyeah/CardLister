@@ -155,7 +155,11 @@ to push" does not work across the two.
   owner explicitly saying the routine is stopped.
 - **Changelog housekeeping happens on its own branch, once.** Dating a merged
   PR's `[Unreleased]` entries belongs on a `chore/changelog-<date>` branch, and
-  only when no such PR is already open. A feature PR must not bundle it: CI's
+  only when no such PR is already open. **A scheduled routine is authorized to
+  create and push that branch** — it is the one sanctioned exception to working
+  solely on its assigned `claude/*` branch, and without it the guard below would
+  permanently disable the routine's own step 11 (which is exactly what happened
+  when the guard first shipped). A feature PR must not bundle it: CI's
   `changelog-guard` job fails any PR that adds or removes a dated (`## YYYY-MM-DD`)
   heading unless the branch is named `chore/changelog-*`. This exists because
   four separate PRs once raced to date the same PR #59 section — each routine run

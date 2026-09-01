@@ -10,16 +10,13 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
-## [Unreleased] — branch `integration/prs-63-68` (integrates PRs #63–#68)
+## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
+
+PRs #63–#68 were reconciled on one integration branch and merged together, so
+they share a merge date and this one heading; the per-PR subheadings below keep
+each change attributable to the PR it came from.
 
 ### PR #63 — Production health probe + cheat-sheet dedup
-
-<!--
-The #52–#58 integration section below is still headed `[Unreleased]` even
-though PR #59 has merged. That is deliberate here: PRs #60, #61 and #62 were
-each opened to date it, so a fourth edit of that one line would be a fourth
-conflicting change to the same heading. Whichever of those merges owns it.
--->
 
 #### Added
 - Production health is now watched from somewhere that can actually reach it.
@@ -69,14 +66,6 @@ conflicting change to the same heading. Whichever of those merges owns it.
   return — the same reason the Sheets resync orders by `(created_at, id)`.
 
 ### PR #64 — Dropped call-up alerts; mock price guard
-
-<!--
-The #52–#58 integration section below is still headed `[Unreleased]` even
-though PR #59 has merged. Left alone deliberately, for the same reason PR #63
-left it alone: PRs #60, #61 and #62 were each opened to date that one line, and
-a fourth edit of it would be a fourth conflicting change to the same heading.
-Whichever of those merges owns it.
--->
 
 #### Fixed
 - A failing mailer no longer swallows call-up alerts in silence. Being told a
@@ -154,14 +143,6 @@ Whichever of those merges owns it.
   that reports a bare `"emailed": 0` reads exactly like "nothing to send".
 
 ### PR #65 — Hung-scan timeout + reclaimable-photo readout
-
-<!--
-The #52–#58 integration section below is still headed `[Unreleased]` even
-though PR #59 has merged. Left alone deliberately, for the same reason PRs #63
-and #64 left it alone: PRs #60, #61 and #62 were each opened to date that one
-line, and a fifth edit of it would be a fifth conflicting change to the same
-heading. Whichever of those merges owns it.
--->
 
 #### Fixed
 - A hung scan no longer wedges the batch queue with no way out. `scanCard` was
@@ -283,14 +264,6 @@ heading. Whichever of those merges owns it.
   (weekly review)
 
 ### PR #68 — Future-dated sale + negative price validation
-
-<!--
-The #52–#58 integration section below is still headed `[Unreleased]` even
-though PR #59 has merged. Left alone deliberately, for the same reason PRs #63,
-#64 and #65 left it alone: PRs #60, #61 and #62 were each opened to date that
-one line, PR #67 dates it too, and a sixth edit of the same heading would be a
-sixth conflicting change. Whichever of those merges owns it.
--->
 
 #### Fixed
 - A sale can no longer be dated in the future. Nothing bounded `sold_at` at
