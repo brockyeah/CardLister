@@ -1,6 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.database import SessionLocal
+from backend.models import Card
 
 
 def _auth(client):
@@ -85,3 +89,109 @@ def test_patch_quantity_rejects_zero_and_negative(db_session):
         r = client.patch(f"/api/cards/{created['id']}", json={"quantity": 4}, headers=headers)
         assert r.status_code == 200, r.text
         assert r.json()["quantity"] == 4
+
+
+def test_suggested_price_rejects_negative(db_session):
+    """The same floor `listed_price` has had. Both are read by the Sheets price
+    column, the listing text and the inventory value tile; only one was
+    guarded, so a negative comp median (or a hand-crafted request) was stored
+    and mirrored."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        r = client.post("/api/cards", json=_payload(suggested_price=-10), headers=headers)
+        assert r.status_code == 422, r.text
+
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        r = client.patch(f"/api/cards/{created['id']}",
+                         json={"suggested_price": -0.01}, headers=headers)
+        assert r.status_code == 422, r.text
+        # Zero is not negative and stays acceptable — the listing text already
+        # treats a non-positive price as unset, which is the right place for
+        # that judgment.
+        r = client.patch(f"/api/cards/{created['id']}",
+                         json={"suggested_price": 0}, headers=headers)
+        assert r.status_code == 200, r.text
+
+
+def test_a_legacy_negative_price_still_reads_back(db_session):
+    """Reads report what is stored. FastAPI validates responses against
+    `CardOut` too, so inheriting the input floors would turn one row saved
+    before the floor existed into a 500 on the whole inventory list."""
+    db = SessionLocal()
+    try:
+        db.add(Card(player_name="Legacy Row", suggested_price=-5, listed_price=-5))
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        headers = _auth(client)
+        r = client.get("/api/cards", headers=headers)
+        assert r.status_code == 200, r.text
+        row = next(c for c in r.json() if c["player_name"] == "Legacy Row")
+        assert row["suggested_price"] == -5
+        assert row["listed_price"] == -5
+
+
+def _mark_sold(client, headers, card_id, **kw):
+    return client.post(f"/api/cards/{card_id}/mark-sold", json=kw, headers=headers)
+
+
+def test_mark_sold_rejects_a_future_sale_date(db_session):
+    """A mistyped year is permanent furniture: it joins the sold-years picker
+    forever, sorts to the end of every tax export, and the only way back is
+    unmark-sold and redo."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        far = datetime.utcnow().replace(year=datetime.utcnow().year + 36)
+        r = _mark_sold(client, headers, created["id"],
+                       sold_price=25, sold_at=far.isoformat())
+        assert r.status_code == 422, r.text
+        # A day ahead is inside the skew allowance — the client builds the
+        # instant from its own clock, and the two need not agree.
+        soon = datetime.utcnow() + timedelta(hours=12)
+        r = _mark_sold(client, headers, created["id"],
+                       sold_price=25, sold_at=soon.isoformat())
+        assert r.status_code == 200, r.text
+
+
+def test_mark_sold_still_accepts_a_backdated_sale(db_session):
+    """Backdating is deliberately unbounded — recording a sale weeks after the
+    fact is ordinary, and a floor would reject it."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        old = datetime.utcnow() - timedelta(days=400)
+        r = _mark_sold(client, headers, created["id"],
+                       sold_price=25, sold_at=old.isoformat())
+        assert r.status_code == 200, r.text
+        assert r.json()["sold_at"].startswith(old.strftime("%Y-%m-%d"))
+
+
+def test_a_future_sale_cannot_slip_through_on_a_utc_offset(db_session):
+    """The bound is checked on the value as it will be *stored*.
+
+    SQLAlchemy's SQLite dialect drops tzinfo without converting, so an aware
+    instant validated as the moment it really is would then be stored as its
+    wall-clock parts — landing a day past the bound that just admitted it.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        # Just under two days ahead in wall-clock terms, but a real instant
+        # only ~1.4 days ahead thanks to the +14:00 offset. Both readings are
+        # past the one-day allowance, so this must be refused either way.
+        wall = datetime.utcnow() + timedelta(days=2)
+        r = _mark_sold(client, headers, created["id"], sold_price=25,
+                       sold_at=wall.replace(tzinfo=timezone(timedelta(hours=14))).isoformat())
+        assert r.status_code == 422, r.text
+
+        # And an accepted aware value is stored as UTC, not as its wall clock:
+        # 23:00 at +14:00 is 09:00 UTC the same day.
+        aware = datetime.utcnow().replace(hour=9, minute=0, second=0, microsecond=0)
+        r = _mark_sold(client, headers, created["id"], sold_price=25,
+                       sold_at=(aware + timedelta(hours=14)).replace(
+                           tzinfo=timezone(timedelta(hours=14))).isoformat())
+        assert r.status_code == 200, r.text
+        assert r.json()["sold_at"].startswith(aware.strftime("%Y-%m-%dT09:00"))

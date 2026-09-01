@@ -10,11 +10,340 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased] — branch `integration/prs-63-68` (integrates PRs #63–#68)
+
+### PR #63 — Production health probe + cheat-sheet dedup
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. That is deliberate here: PRs #60, #61 and #62 were
+each opened to date it, so a fourth edit of that one line would be a fourth
+conflicting change to the same heading. Whichever of those merges owns it.
+-->
+
+#### Added
+- Production health is now watched from somewhere that can actually reach it.
+  Phase 1 of the daily routine pings `/api/health` itself, but that routine
+  runs in a scheduled cloud sandbox whose egress proxy answers 403 to CONNECT
+  for the Railway host — so the one step meant to notice a failed deploy or a
+  dead call-up poller could not run at all, and its failure mode was a
+  *missing sentence* in a report nobody diffs. A scheduled `health.yml`
+  workflow now probes the endpoint every 3 hours from a GitHub runner and
+  fails the run on a non-200, an unreachable or non-JSON response, `ok`/`db`
+  false, or a stale poller, writing the parsed fields to the run summary
+  either way. Deploy lag — a reported `revision` that does not match main
+  HEAD — warns instead of failing, because Railway is still building for
+  minutes after every merge and a check that flaps red is a check people learn
+  to ignore; persistent lag shows up as the same warning run after run. The
+  routine keeps its own attempt, since when it works it is free and immediate.
+
+#### Fixed
+- The scan cheat-sheet no longer teaches the model both halves of a reversed
+  correction. `build_cheatsheet` deduped on the **whole rendered rule string**,
+  so correcting a field one way and later correcting it back produced two rules
+  that read as contradictory instructions, with nothing marking which one still
+  stood — and the contradiction rate rose with the correction count, so it got
+  worse the longer the app was used. Dedup is now on the set plus the field,
+  over newest-first rows, so the surviving rule for a field in a set is the
+  most recent correction. That also stops one much-corrected field from
+  consuming the 30-rule budget and crowding out every lesson from every other
+  set, which is the quieter half of the same bug. Collapsing to the newest is
+  right for what this digest is scoped to — naming and numbering *conventions*,
+  which have one current answer per set; per-card facts are the exact-match
+  overlay's job, not the cheat-sheet's, and dedup is per set, so two different
+  sets each keep their own rule.
+- The set half of that key is the **normalized `(year, brand, set_name)`
+  tuple**, not the rendered context line, because joining those three first is
+  ambiguous in a way this app produces: vision splits one physical set two ways
+  across scans, so brand `Bowman` + set `Chrome Prospects` and brand
+  `Bowman Chrome` + set `Prospects` both render `2024 Bowman Chrome Prospects`.
+  Keying on that string dropped one of two genuinely different sets' lessons.
+  Normalizing each part closes the mirror image at the same time — `Bowman` and
+  `bowman` with a trailing space *are* the same set, so they must share a key
+  rather than yield two competing rules, which is the same `_norm` identity
+  comparison the rest of the module already uses. The rendered line stays, for
+  display only.
+- `created_at` ties now break on `id` in both `build_cheatsheet` and
+  `find_exact_match`. Both queries mean "the latest correction wins", and both
+  left same-timestamp rows to resolve in whatever order SQLite happened to
+  return — the same reason the Sheets resync orders by `(created_at, id)`.
+
+### PR #64 — Dropped call-up alerts; mock price guard
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PR #63
+left it alone: PRs #60, #61 and #62 were each opened to date that one line, and
+a fourth edit of it would be a fourth conflicting change to the same heading.
+Whichever of those merges owns it.
+-->
+
+#### Fixed
+- A failing mailer no longer swallows call-up alerts in silence. Being told a
+  prospect got called up while you hold his 1st Bowman is the feature this app
+  was built around, and it had exactly one failure mode where it stayed quiet
+  and looked healthy: `run_poll_cycle` only stamps `emailed_at` when
+  `mailer.send_email` returns true, so a broken mailer — wrong SendGrid
+  credentials after a Railway env edit, a provider outage, a rate limit —
+  retried the same events every cycle until they crossed the 48-hour window,
+  at which point they left it **permanently, unemailed, with nothing anywhere
+  recording that an alert had been dropped**. `/api/health` reported the poller
+  perfectly fresh throughout, because the heartbeat is stamped after a failed
+  cycle too. The window itself is right — it bounds retries so one broken send
+  cannot keep the poller emailing week-old news — so what was added is the
+  record, at both ends of the problem: a failed send now logs an error and
+  fires an out-of-band owner alert immediately, and events that pass the cutoff
+  unsent are counted and reported. The alert goes out through the ntfy push
+  that `billing_alerts` already had wired, which is the point — the app's own
+  email is the thing that is broken. It says which failure this is, too:
+  "no email delivery is configured" and "configured but the send failed" look
+  identical from the outside and have completely different fixes.
+- The abandoned count is a rolling figure over a bounded band (events aged
+  48–96 hours), not a per-event notification. There is no column marking a row
+  as abandoned, and adding one would be a schema change for a number that is
+  only ever reported; without the lower bound the count would instead grow
+  forever and re-alert next season about call-ups from this one. The alert
+  therefore says "in the last two days" rather than "just now", and the
+  6-hourly throttle keeps an ongoing outage to four pushes a day. It has its
+  own throttle clock rather than sharing the credits-exhausted one: the two
+  report unrelated outages that can be live at the same time, and one clock
+  would let whichever fired first suppress the other.
+- The Scanner stops saving the pricing chain's $9.99 mock as if it were a real
+  comp. `fetchPricing` wrote any truthy `suggested_price` into the review form
+  without looking at `source`, so when every comp source failed and the chain
+  fell through to its fixed `MOCK_PRICE`, the card was saved carrying $9.99 as
+  though a median of ten sales had produced it — mirrored to the Sheet, and
+  pasted into eBay's sell form from the clipboard. On Railway that is the
+  common case rather than the edge: the scrapers routinely 403 from a
+  datacenter IP, which was reproduced against a running app while making this
+  change (all three sources failed; the endpoint returned `source: "mock"`,
+  `suggested_price: 9.99`). It also defeated the no-price listing-text fix — a
+  mocked $9.99 makes `has_price` true, so the seller got a confident wrong
+  price instead of being told the card has no price yet. The Inventory comps
+  modal had always refused a mock, so the two pricing surfaces disagreed, and
+  the one that disagreed was the one whose value gets *persisted*.
+- Both surfaces now ask the same tested helper (`frontend/src/lib/pricing.js`)
+  rather than each carrying its own guard, so they cannot drift apart again.
+  It refuses a non-positive price for the same reason the listing-text endpoint
+  treats one as unset — a zero reads as a filled-in field rather than an empty
+  one — and guards the *type* as well as the value, since `suggested_price` is
+  `Optional[float]` on the wire and a string would survive a `> 0` comparison
+  and then throw on `.toFixed()` at the call site. Only `mock` is
+  disqualifying: an unlabelled response is a real lookup whose source field
+  went missing, and refusing it would silently discard a good comp. The scan
+  page still renders the failure note it always did, so an empty price field
+  arrives with the explanation beside it.
+
+- The reported `pending` count is what is *still* waiting on a retry, not the
+  number of candidates the cycle started with. A successful send stamps every
+  candidate, so the pre-send count said alerts were awaiting delivery when none
+  were — a healthy cycle read as `{"emailed": 3, "pending": 3}`, and the count
+  contradicted the contract its own endpoint docstring stated (CodeRabbit,
+  PR #64).
+- The undelivered-alerts notice stops diagnosing a live provider failure when
+  nothing failed on the cycle that sent it. With only abandoned events to
+  report — sends that may have failed days ago and may since have cleared — the
+  message still read "the send failed, check the provider credentials", so the
+  alert could be **delivered by email** while its body told the owner email was
+  down. A missing mail configuration is still reported either way, because that
+  is a standing condition rather than an event (CodeRabbit, PR #64).
+
+#### Changed
+- `run_poll_cycle` returns `pending` and `abandoned` alongside `new` and
+  `emailed`, and `POST /api/news/poll-now` passes them through — a manual poll
+  that reports a bare `"emailed": 0` reads exactly like "nothing to send".
+
+### PR #65 — Hung-scan timeout + reclaimable-photo readout
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PRs #63
+and #64 left it alone: PRs #60, #61 and #62 were each opened to date that one
+line, and a fifth edit of it would be a fifth conflicting change to the same
+heading. Whichever of those merges owns it.
+-->
+
+#### Fixed
+- A hung scan no longer wedges the batch queue with no way out. `scanCard` was
+  the only request in the app with no ceiling of any kind — the axios instance
+  sets no timeout — so a request that never settled left its queue item in
+  `scanning`, which is precisely the one status that renders no Retry button,
+  behind a single-flight guard that is only ever released by the request
+  settling. Every later item in the batch waited on it, and the escape hatch
+  did not work either: **Clear queue** emptied the list without touching the
+  guard, so staging a fresh batch produced a queue that sat at "waiting…"
+  forever and the only real fix was reloading the page. Both halves are closed.
+  The scan carries a five-minute client timeout, chosen to sit above the
+  server's own worst case rather than picked for feel — the subscription path
+  is hard-capped at `SUBSCRIPTION_SCAN_TIMEOUT` (150s) and the API path answers
+  in 15–30s — so it can only ever fire on a scan that was never coming back.
+  Clearing the queue now aborts the request in flight, which releases the guard
+  through the same path a normal scan takes; the guard is only released by the
+  scan that still owns it, so a late-settling abandoned request cannot hand the
+  queue to a scan that has already started. Verified end to end against a
+  running app with `/api/scan` held open: before the change a cleared queue left
+  the next batch at "waiting…" indefinitely, after it the next batch scans.
+- A request abandoned on a timeout says so, instead of reporting "Scan failed."
+  Aborting here does not stop the server, which has already spent the tokens
+  and may well have finished the extraction and recorded it — so the one thing
+  the message must not do is imply nothing happened, because a blind retry pays
+  Opus for the same photo twice. `formatApiError` now recognizes the shape
+  axios produces for a timeout (no response, `code: 'ECONNABORTED'`) and says
+  the server may have finished the work anyway; a server that did answer still
+  wins, since its `detail` is preferred over the guess. A *cancelled* request —
+  the user clearing the queue — is suppressed rather than rendered, because
+  reporting someone's own action back to them as an error is not an error
+  report.
+
+#### Added
+- Reclaimable photos are reported beside the storage figures on the Analytics
+  manage-data panel. `/api/scan` writes the upload to the Railway volume before
+  extraction and only records a `Scan` row when the extraction both succeeded
+  and was real, so every failed or mock scan leaves a file referenced by
+  nothing. The tool that sweeps them has existed since 2026-07-30, but the only
+  way to find out whether there was anything to sweep was to press the button
+  that offers to delete — so it ran when someone thought to look, which on a
+  volume that fills silently is not a plan. A fourth tile now shows the count
+  and the space it would free, from the endpoint the cleanup flow already used.
+- The "this is most of the photos on the server" guard moved onto that tile.
+  It exists for one specific case — inventory restored from CSV, which carries
+  no photo columns, so every restored card loses its `image_path` and the
+  entire photo library reads as orphaned — and it was previously only shown
+  inside the confirmation dialog, which is read by someone who has already
+  decided to clean up. That is the worst moment to learn that cleaning up is
+  the wrong thing to do. The heuristic is now a tested pure helper
+  (`frontend/src/lib/orphans.js`) shared by the tile and the dialog, so the two
+  cannot disagree about what counts as a bulk sweep, and it distinguishes a
+  lookup that returned zero from one that failed — rendering a failed check as
+  "0 reclaimable" would report a tidy volume on exactly the request that could
+  not check.
+
+### PR #66 — Design + plan: sheets_row commit inside the mirror lock
+
+#### Docs only — design for committing `sheets_row` inside the mirror lock
+
+#### Added
+- Design addendum + implementation plan for the Sheets mirror lock protocol
+  (2026-08-29 addendum in
+  `docs/superpowers/specs/2026-08-17-sheets-mirror-integrity-design.md`,
+  plan in `docs/superpowers/plans/2026-08-29-sheets-lock-commit.md`). PR #46
+  specified — and the lock's own comment still claims — that `_sheets_lock`
+  is held across re-read → Sheet write → `sheets_row` commit, but every
+  writer releases it on return and the commit runs in the caller. A save
+  racing a resync can therefore write one card's data over the row the
+  rewrite just gave another card and then commit the stale index back over
+  the fresh one, and a delete racing a resync can blank a row the rewrite
+  just assigned to a live card, because `_is_owned` reads committed state the
+  resync hasn't committed yet. All 14 mirror tests stub the callbacks and
+  pass with the reread moved *outside* the lock, so nothing pins the
+  protocol. The recommendation extends the shape `reread_row` already set:
+  callers pass commit callbacks the writers invoke before releasing, the
+  caller-less `resync_one` bypass is deleted, and the background tasks
+  `rollback()` before waiting on the lock — without which moving the commit
+  inside would deadlock a racing save against the resync's commit until
+  SQLite's busy timeout fails it. Docs only; no behaviour change until the
+  owner approves the three decisions listed in the plan.
+
+### PR #67 — Weekly deep review: SPA escape, condition parity, doc drift
+
+#### Fixed
+- Percent-encoded dot segments no longer let an API-shaped URL render the SPA
+  shell. `StaticFiles` normalizes the request path before `SpaStaticFiles`'
+  fallback sees it, so `GET /api/%2e%2e/whatever` arrived as `whatever`,
+  missed the `NON_SPA_ROOTS` check, and returned 200 + HTML — the exact
+  misreport the roots list exists to prevent (a link checker or API client
+  sees success for a path that does not exist). No security impact: file
+  lookup was always confined and no auth was exposed. `_is_page_load` now
+  checks the raw request path's first segment too, and the encoded spellings
+  are pinned in `test_spa_fallback.py`. (weekly review)
+- The `"NEAR MINT MINT"` condition spelling was in both variant tables but had
+  no case in the shared parity fixture — the only one of 31 keys unguarded, so
+  either side could drop or retarget it with both suites green, splitting the
+  CSV-import fold from the review-form fold. Added the fixture case plus a
+  backend meta-test asserting every `_VARIANTS` key has a case, so the next
+  added spelling cannot skip the fixture either. (weekly review)
+- The fees tier-boundary test asserted the same value on both sides of the
+  $7,500 tier ("one cent more crosses" — it doesn't: the marginal formula is
+  continuous there, so any tier-comparison mutant passed). Corrected the
+  comment and added an assertion at $7,510, where the tiered fee ($994.39) is
+  visibly cheaper than a flat-rate one ($995.48). (weekly review)
+
+#### Changed
+- Doc/config drift swept: removed CLAUDE.md's stale pre-`lib/download.js`
+  download paragraph (its current twin survives), updated `.coderabbit.yaml`'s
+  "two blob download helpers in api.js" line to the three that now share
+  `lib/download.js`, documented `BACKUP_SNAPSHOT_TTL_SECONDS` in
+  `.env.example`, dropped two unused test imports, and added invariants #14
+  (condition spellings are a three-file change, JS-only drift still silent)
+  and #15 (the eBay fee schedule is a dated snapshot whose `VITE_EBAY_FEE_*`
+  overrides are build-time-only and inert on Railway) to CLAUDE.md. Backlog:
+  the two already-shipped features still listed as open in "Later" (condition
+  dropdown, fee estimate) are removed — their Shipped entries stand — and the
+  fee-env-var item now names all six override vars, not the original two.
+  (weekly review)
+
+### PR #68 — Future-dated sale + negative price validation
+
+<!--
+The #52–#58 integration section below is still headed `[Unreleased]` even
+though PR #59 has merged. Left alone deliberately, for the same reason PRs #63,
+#64 and #65 left it alone: PRs #60, #61 and #62 were each opened to date that
+one line, PR #67 dates it too, and a sixth edit of the same heading would be a
+sixth conflicting change. Whichever of those merges owns it.
+-->
+
+#### Fixed
+- A sale can no longer be dated in the future. Nothing bounded `sold_at` at
+  all — `MarkSoldRequest` validated only that `sold_price > 0`, and the picker
+  carried no `max` — so a mistyped year was accepted in silence and then
+  became permanent furniture: it joins the sold-years picker forever, sorts to
+  the end of every tax export, and the only way back is unmark-sold and redo.
+  The picker is now capped at the local date it already defaults to, the
+  server rejects anything more than a day ahead of its own clock, and the
+  modal renders the rejection instead of dropping it — a failed confirm used
+  to reject its promise into nothing, leaving the dialog open and unchanged as
+  though the click had not happened. A day of slack is deliberate: the client
+  submits an instant built from *its* clock and the two need not agree.
+  Backdating stays unbounded, because recording a sale weeks after the fact is
+  ordinary and a floor would refuse it.
+- The bound is checked on the value as it will be **stored**, not as it was
+  sent. SQLAlchemy's SQLite dialect drops tzinfo without converting (a
+  runtime-proven fact recorded in the local-timezone design doc), so an aware
+  `2026-09-01T12:00+14:00` validated as the instant it really is would then be
+  stored as the wall-clock `2026-09-01 12:00` — a day past the bound that had
+  just admitted it. Submitted values are normalized to naive UTC first, which
+  is what the rest of the app already assumes (`mark_sold`'s own fallback is
+  `datetime.utcnow()`) and what the modal already sends. When
+  `backend/timeutils.py` lands from the local-timezone plan, that normalization
+  becomes a call to its `utc_naive()`.
+- The CSV importer applies the same bound to a `Date Sold` column, because that
+  is the other route a sale date takes into the database and the one where the
+  value came out of a file someone else edited. A future date is dropped with a
+  per-row warning rather than failing the row — the rest of it is fine, and the
+  row falls back to the same default a sold row carrying no date at all already
+  gets.
+- `suggested_price` has the `ge=0` floor `listed_price` has always had. The two
+  are the same kind of value read by the same consumers — the Sheets price
+  column, the eBay listing text, the inventory value tile — and only one was
+  guarded, so a negative comp median or a hand-crafted PATCH was stored and
+  mirrored. The floors are stated on the **input** models only:
+  FastAPI validates responses too, so inheriting them onto `CardOut` would turn
+  a single legacy row saved before the floor existed into a 500 on
+  `GET /api/cards` — the entire inventory unreadable because one price is
+  wrong. Reads report what is stored; only writes are bounded, and a test pins
+  that distinction (it fails, with a 500, if the floors are inherited).
+- A test fixture that had been quietly ahead of the calendar. The sold-export
+  ordering test marked a card sold on `2026-12-20`, which is a *future* sale
+  for most of the year it names — harmless while nothing bounded a sale date,
+  and a date-dependent failure the moment one existed. Its sales now sit in a
+  year that has fully elapsed, which is stable in both directions.
+
 ## 2026-08-26 — Pricing fan-out, volume backups, deep-review fixes, condition dropdown, eBay fees (PR #59)
 
 PRs #52–#58 were reconciled on one integration branch and merged together, so
 they share a merge date and this one heading; the per-PR subheadings below keep
 each change attributable to the PR it came from.
+
 
 ### PR #52 — Pricing sources run concurrently
 

@@ -37,6 +37,23 @@ def test_canonical_list_matches_shared_table():
     assert CONDITION_VALUES == TABLE["canonical"]
 
 
+def test_every_variant_spelling_has_a_fixture_case():
+    """The fixture is the only parity guard between this module and the JS
+    mirror — a spelling recognized here but absent from the table would let the
+    two tables drift apart with both suites green. Every `_VARIANTS` key must
+    therefore be exercised by at least one case (compared after the same
+    case-fold/whitespace-collapse the lookup key uses)."""
+    from backend.services import card_fields
+
+    pinned = {
+        " ".join(case["input"].upper().split())
+        for case in CASES
+        if isinstance(case["input"], str)
+    }
+    missing = set(card_fields._VARIANTS) - pinned
+    assert not missing, f"variant spellings with no fixture case: {sorted(missing)}"
+
+
 def test_every_canonical_value_is_a_fixed_point():
     """The form folds on every render, so a second pass must change nothing."""
     for value in CONDITION_VALUES:

@@ -245,6 +245,13 @@ class SpaStaticFiles(StaticFiles):
         # anything shaped like an API path should never render HTML.
         if path.lower().split("/", 1)[0] in self.NON_SPA_ROOTS:
             return False
+        # `path` has already been through StaticFiles' normpath, which collapses
+        # dot segments — so /api/%2e%2e/whatever reaches here as "whatever" and
+        # would render the shell for an API-shaped URL. Check the raw request
+        # path's first segment too, so both spellings keep their 404.
+        raw_first = scope.get("path", "").lstrip("/").lower().split("/", 1)[0]
+        if raw_first in self.NON_SPA_ROOTS:
+            return False
         # Only GET/HEAD can be a page load; a POST to a bad path stays a 404.
         return scope.get("method") in ("GET", "HEAD")
 

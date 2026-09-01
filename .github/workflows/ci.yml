@@ -71,6 +71,42 @@ jobs:
           echo "::warning::Dependency audit found new advisories — see the audit job logs."
           echo "⚠️ Dependency audit found new advisories — see the audit job logs." >> "$GITHUB_STEP_SUMMARY"
 
+  # Changelog housekeeping — dating a merged PR's [Unreleased] entries — is a
+  # dedicated task, not something a feature PR bundles. Four separate PRs once
+  # attempted the same dating for PR #59 because each routine run noticed the
+  # undated heading independently; CLAUDE.md already asked them to check first,
+  # and prose did not stop it. This makes the duplicate unmergeable instead.
+  #
+  # Only a chore/changelog-* branch may touch a dated heading, so the second and
+  # third attempt go red rather than landing a conflicting date.
+  changelog-guard:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Only chore/changelog-* branches may edit dated headings
+        env:
+          BRANCH: ${{ github.head_ref }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          case "$BRANCH" in
+            chore/changelog-*) echo "Housekeeping branch — dated-heading edits allowed."; exit 0 ;;
+          esac
+          # Lines this PR adds or removes that are dated headings (## YYYY-MM-DD ...).
+          touched=$(git diff "origin/$BASE...HEAD" -- CHANGELOG.md \
+            | grep -E '^[-+]## 20[0-9]{2}-[0-9]{2}-[0-9]{2}' || true)
+          if [ -n "$touched" ]; then
+            echo "::error::This PR adds or removes a dated CHANGELOG heading:"
+            echo "$touched"
+            echo "Dating a merged PR's entries belongs on its own chore/changelog-<date>"
+            echo "branch, and only when no such PR is already open. A feature PR that"
+            echo "bundles it races every other PR doing the same thing."
+            exit 1
+          fi
+          echo "No dated-heading edits. OK."
+
   build:
     runs-on: ubuntu-latest
     steps:

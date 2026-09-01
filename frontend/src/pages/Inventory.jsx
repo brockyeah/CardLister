@@ -12,6 +12,7 @@ import { formatApiError } from '../lib/apiError.js'
 import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from '../lib/compStats.js'
 import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
 import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
+import { usableSuggestedPrice } from '../lib/pricing.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 // Shown when the listing text was built for a card that has no price yet.
@@ -31,10 +32,12 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
   const [price, setPrice] = useState(card.listed_price ?? '')
   const [date, setDate] = useState(todayLocalDate())
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
 
   const submit = async (e) => {
     e.preventDefault()
     setSaving(true)
+    setError(null)
     try {
       await onConfirm({
         sold_price: Number(price),
@@ -43,6 +46,13 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
         sold_at: soldAtFromDateInput(date),
       })
       onClose()
+    } catch (err) {
+      // The server bounds the sale date as well as the price, and a rejection
+      // used to reject the promise into nothing: the modal stayed open,
+      // unchanged, with no indication that the confirm had failed. The input's
+      // own `max` catches the ordinary case first, so what reaches here is a
+      // client that did not enforce it.
+      setError(formatApiError(err, 'Could not mark this card sold.'))
     } finally {
       setSaving(false)
     }
@@ -76,14 +86,23 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
         </div>
         <div className="mb-5">
           <label className="label">Sold On</label>
+          {/* Capped at today: a sale is something that has already happened,
+              and a mistyped year is permanent furniture once accepted — it
+              joins the sold-years picker forever and sorts to the end of every
+              tax export. The cap is local, matching the default, so it does not
+              refuse the day the user is actually having. Backdating stays
+              open; recording a sale late is ordinary. The server rejects a
+              future date too — this only makes the picker say so first. */}
           <input
             type="date"
             value={date}
+            max={todayLocalDate()}
             onChange={(e) => setDate(e.target.value)}
             className="input"
             required
           />
         </div>
+        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
         <div className="flex gap-2">
           <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
           <button type="submit" disabled={saving} className="btn-primary flex-1">
@@ -171,7 +190,9 @@ function CompsModal({ card, onClose, onApplyPrice }) {
       .finally(() => setLoading(false))
   }, [card])
 
-  const suggested = result?.source !== 'mock' ? result?.suggested_price : null
+  // Shared with the Scanner's review form, which used to accept the $9.99 mock
+  // this modal has always refused — and the Scanner's is the value that gets saved.
+  const suggested = usableSuggestedPrice(result)
   const delta = suggested != null && card.listed_price != null ? suggested - card.listed_price : null
   // "Comps say" is a median; show the spread it came from so a contaminated
   // set is visible before "Set Price to $X" is pressed.

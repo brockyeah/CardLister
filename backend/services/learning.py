@@ -69,18 +69,57 @@ def record_correction(db: Session, scan: Scan, saved: dict, card_id, username) -
 
 
 def build_cheatsheet(db: Session) -> str:
-    """Bounded plain-text digest of recent corrections for prompt injection."""
-    rows = db.query(Correction).order_by(Correction.created_at.desc()).limit(200).all()
+    """Bounded plain-text digest of recent corrections for prompt injection.
+
+    One rule per (context, field): rows arrive newest-first, so the first rule
+    seen for a field in a set is the most recent correction and the only one
+    taught. Deduping on the *rendered rule* instead — which is what this did —
+    kept both halves of a reversed correction, because they render differently:
+    fix "Chrome" → "Chrome Prospects" today and reverse it next week and every
+    later scan carried a contradictory pair with nothing marking which one
+    still stood. It also let one much-corrected field eat the 30-rule budget
+    and crowd out every other lesson, and both effects got worse the longer the
+    app was used.
+
+    Collapsing a field to its newest correction is right for what this digest
+    is *for*: the module docstring scopes it to naming and numbering
+    conventions, which have one current answer per set. Per-card facts are the
+    exact-match overlay's job (`find_exact_match`), not the cheat-sheet's.
+
+    The key is the normalized (year, brand, set_name) *tuple*, not the rendered
+    context line. Joining first is ambiguous, and ambiguous in a way this app
+    produces: vision splits one physical set two ways across scans, so brand
+    "Bowman" + set "Chrome Prospects" and brand "Bowman Chrome" + set
+    "Prospects" both render "2024 Bowman Chrome Prospects" — and keying on that
+    string would drop one of two genuinely different sets' lessons. Normalizing
+    each part closes the mirror-image gap: "Bowman" and "bowman " *are* the same
+    set, so they must share a key rather than yield two competing rules
+    (CodeRabbit, PR #63).
+    """
+    rows = (
+        db.query(Correction)
+        # id breaks created_at ties so "newest wins" is deterministic rather
+        # than left to SQLite's row order — same reason the Sheets resync
+        # orders by (created_at, id).
+        .order_by(Correction.created_at.desc(), Correction.id.desc())
+        .limit(200)
+        .all()
+    )
     lines, seen = [], set()
     for row in rows:
         diff = json.loads(row.diff_json or "{}")
         context = " ".join(str(p) for p in (row.year, row.brand, row.set_name) if p) or "unknown set"
+        # Rendered for display; deduped on the fields themselves (see docstring).
+        context_key = (_norm(row.year), _norm(row.brand), _norm(row.set_name))
         for field, change in diff.items():
-            rule = f"- {context}: you said {field}={change.get('from')!r}; the user corrected it to {change.get('to')!r}."
-            if rule in seen:
+            key = (context_key, field)
+            if key in seen:
                 continue
-            seen.add(rule)
-            lines.append(rule)
+            seen.add(key)
+            lines.append(
+                f"- {context}: you said {field}={change.get('from')!r}; "
+                f"the user corrected it to {change.get('to')!r}."
+            )
             if len(lines) >= CHEATSHEET_MAX_RULES:
                 break
         if len(lines) >= CHEATSHEET_MAX_RULES:
@@ -99,7 +138,10 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     rows = (
         db.query(Correction)
         .filter(Correction.year == year)
-        .order_by(Correction.created_at.desc())
+        # id tiebreaker for the same reason as build_cheatsheet: this returns
+        # the *latest* correction for the card, and two rows sharing a
+        # created_at would otherwise resolve in whatever order SQLite chose.
+        .order_by(Correction.created_at.desc(), Correction.id.desc())
         .limit(100)
         .all()
     )

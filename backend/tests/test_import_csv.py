@@ -1,5 +1,6 @@
 """Bulk CSV import: header-name mapping, per-row skips, round-trip with export."""
 import io
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -250,6 +251,28 @@ def test_import_sold_row_requires_positive_sale_price(db_session):
         assert {s["row"] for s in body["skipped"]} == {2, 3}
         assert all("Sale Price" in s["reason"] for s in body["skipped"])
         assert db_session.query(Card).one().player_name == "Fine"
+
+
+def test_import_drops_a_future_sold_date(db_session):
+    """The other way a sale date reaches the database, and the one where the
+    value came out of a file someone else edited. The row is kept — the rest of
+    it is fine — and falls back to the same default a row with no Date Sold at
+    all gets, rather than filing the sale under a year that has not happened."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        future_year = datetime.utcnow().year + 36
+        r = _post_csv(
+            client, headers,
+            "Player,Status,Date Sold,Sale Price\n"
+            f"Typo Guy,SOLD,{future_year}-02-01,40\n",
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["created"] == 1
+        assert any("in the future" in w for w in body["warnings"])
+        card = db_session.query(Card).one()
+        assert card.sold_at is not None
+        assert card.sold_at.year != future_year
 
 
 def test_import_sold_row_defaults_missing_sold_date(db_session):

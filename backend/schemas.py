@@ -1,7 +1,53 @@
 """Pydantic schemas for request/response validation."""
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+# How far ahead of our own clock a sale may be dated. A sale is an event that
+# has already happened, so the only reason to accept anything ahead of "now" at
+# all is clock skew: the client submits an instant built from *its* clock, and
+# the two need not agree. A day of slack covers that with room to spare while
+# still rejecting the mistyped year (2062) this bound exists for. Backdating is
+# deliberately unbounded — recording a sale weeks later is ordinary, and a floor
+# would reject it.
+SOLD_AT_MAX_SKEW = timedelta(days=1)
+
+
+def normalize_sold_at(value: datetime) -> datetime:
+    """A submitted sale instant as naive UTC — the representation everything
+    downstream assumes (`mark_sold`'s own fallback is `datetime.utcnow()`).
+
+    Normalizing is what makes the future-date bound sound rather than
+    decorative: SQLAlchemy's SQLite dialect drops tzinfo *without converting*
+    (recorded as a runtime-proven fact in the local-timezone design doc), so an
+    aware `2026-09-01T12:00+14:00` validated as the instant it really is would
+    then be stored as the wall-clock `2026-09-01 12:00` — a day past the bound
+    that just admitted it. Converting first means the value checked and the
+    value stored are the same one.
+
+    The app's own client already submits UTC (`soldAtFromDateInput` anchors the
+    picked day at noon Z), so this changes nothing for it. When
+    `backend/timeutils.py` lands from
+    `docs/superpowers/plans/2026-08-22-local-timezone.md`, this becomes a call
+    to its `utc_naive()`.
+    """
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def reject_future_sold_at(value: datetime) -> datetime:
+    """Normalized `value`, or raise `ValueError` if it is dated ahead of now.
+
+    Shared with the CSV importer, which reaches `sold_at` by a different route
+    (a parsed `Date Sold` column) and would otherwise let through exactly what
+    the picker no longer can.
+    """
+    value = normalize_sold_at(value)
+    if value > datetime.utcnow() + SOLD_AT_MAX_SKEW:
+        raise ValueError("sold_at cannot be in the future")
+    return value
 
 
 # --- Auth ---
@@ -33,7 +79,10 @@ class CardBase(BaseModel):
     serial_number: Optional[str] = None
     condition: str = "NM"
     quantity: int = Field(default=1, ge=1)
-    suggested_price: Optional[float] = None
+    # Same floor as `listed_price`: the two are the same kind of value, read by
+    # the same consumers (the Sheets price column, the listing text, the
+    # inventory value tile), and only one of them used to be guarded.
+    suggested_price: Optional[float] = Field(default=None, ge=0)
     listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: str = ""
     back_image_path: Optional[str] = None
@@ -62,7 +111,7 @@ class CardUpdate(BaseModel):
     serial_number: Optional[str] = None
     condition: Optional[str] = None
     quantity: Optional[int] = Field(default=None, ge=1)
-    suggested_price: Optional[float] = None
+    suggested_price: Optional[float] = Field(default=None, ge=0)
     listed_price: Optional[float] = Field(default=None, ge=0)
     image_path: Optional[str] = None
     back_image_path: Optional[str] = None
@@ -71,6 +120,13 @@ class CardUpdate(BaseModel):
 
 class CardOut(CardBase):
     model_config = ConfigDict(from_attributes=True)
+    # Reads report what is stored; only writes are bounded. FastAPI validates
+    # responses too, so inheriting the `ge=0` floors would turn a single legacy
+    # row saved before the floor existed into a 500 on `GET /api/cards` — the
+    # whole inventory unreadable because one price is wrong. Widening the input
+    # bound is the wrong lever there, so the two are stated separately.
+    suggested_price: Optional[float] = None
+    listed_price: Optional[float] = None
     id: int
     status: str
     ebay_listing_id: Optional[str] = None
@@ -149,6 +205,18 @@ class EbayListingUpdate(BaseModel):
 class MarkSoldRequest(BaseModel):
     sold_price: float = Field(gt=0)
     sold_at: Optional[datetime] = None
+
+    @field_validator("sold_at")
+    @classmethod
+    def _not_in_the_future(cls, v: Optional[datetime]) -> Optional[datetime]:
+        # A mistyped year is accepted silently today and is permanent furniture
+        # once accepted: it appears in the sold-years picker forever, sorts to
+        # the end of every tax export, and the only way back is unmark-sold and
+        # redo. Nothing else bounds this field — `sold_price > 0` was the only
+        # validation on the request.
+        if v is None:
+            return None
+        return reject_future_sold_at(v)
 
 
 # --- Analytics / cost split ---

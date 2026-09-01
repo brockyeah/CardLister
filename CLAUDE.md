@@ -96,7 +96,6 @@ SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTE
 
 **React 19 + react-router v8** — import from `'react-router'`; `react-router-dom` is not installed. Tailwind v3. Plain declarative `<Routes>`, no data-router APIs.
 
-JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. The download endpoints (DB backup and both CSV exports) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links.
 JWT in `localStorage`; an axios response interceptor on 401 clears it and hard-navigates to `/login`. Three download endpoints (backup, inventory CSV, sold CSV) fetch as blobs and synthesize `<a download>` specifically because a plain href can't carry the Bearer header — don't "simplify" them into links. They share `lib/download.js`, which exists because hand-rolling that anchor gets two things wrong: revoking the object URL in the same tick as `click()` races the browser's own fetch of it (revoke on a later task), and with `responseType: 'blob'` axios hands back the *error* body as a Blob too, so an API `detail` is unreadable until it is re-parsed.
 
 `Scanner.jsx` is the center of gravity: a batch queue (`queued → scanning → ready → saved`) processed one item at a time behind a ref guard, front images only. Pricing lookups carry a monotonic `pricingSeq` and every write path bails if a newer lookup has started — this is a shipped race fix, so **any new async state write in Scanner needs the same guard**.
@@ -120,6 +119,8 @@ These have no compile-time or test-time guard unless noted — they fail in prod
 11. `app.mount("/", SpaStaticFiles(html=True))` is last in `main.py` and catches everything — routes registered after it are shadowed. It also serves the SPA shell for unmatched **page loads** (GET/HEAD), so a new API prefix whose first path segment isn't in `SpaStaticFiles.NON_SPA_ROOTS` (`api`, `uploads`, `assets`) returns 200 + HTML instead of 404 on a typo'd path. The match is on the whole first segment (case-folded), so both the bare root (`/api`) and every descendant (`/api/nope`) are excluded.
 12. **Pricing resolution must stay preference-ordered, and its note strings are a contract.** `routers/pricing.py` fans the sources out concurrently; resolving by whoever finishes first would return a weaker comp with the wrong note and look entirely healthy. Do not introduce `concurrent.futures.wait()` before the cascade — it defaults to `ALL_COMPLETED`, which makes every lookup as slow as the slowest source. Keep the executor per-request so pools don't accumulate — but note it does not make shutdown instant: `cancel_futures` can't stop running work and the workers are non-daemon, so an abandoned source is still joined at exit. Shutdown is bounded by each source's network timeout, so those must stay bounded. A test that fakes a hanging source must release it (an `Event`, not `sleep`), or it adds that delay to every suite run — invisibly, since pytest's timer excludes the exit join. `test_pricing_chain.py` pins the order and every note string.
 13. **The year-long `immutable` cache on `/uploads` and `/assets` depends on names never being reused.** Uploads are minted as `uuid.uuid4().hex` in `routers/scan.py` and Vite content-hashes bundle names — any future change that derives a filename from user input, reuses a name, or rewrites a file in place (e.g. a server-side thumbnail/re-encode pass) will serve year-stale bytes with no error anywhere. `index.html` is the deliberate exception: `SpaStaticFiles` stamps it `no-cache` so a cached shell can't outlive its bundles across a deploy.
+14. **A new condition spelling is a three-file change**: `_VARIANTS` in `services/card_fields.py`, the `VARIANTS` mirror in `frontend/src/lib/condition.js`, and a case in `backend/tests/fixtures/condition_cases.json`. A backend meta-test asserts every `_VARIANTS` key has a fixture case, so a backend-only addition fails CI — but a spelling added to the **JS table alone** still passes both suites, and from then on the CSV importer and the review form disagree on the fold, silently re-fragmenting the column this feature exists to unify.
+15. **The eBay fee schedule in `frontend/src/lib/fees.js` is a dated snapshot with build-time-only overrides.** The six `VITE_EBAY_FEE_*` vars are inlined by Vite at build time and the Dockerfile passes no build args, so setting them on Railway does nothing — no error, the compiled-in defaults quietly apply. When eBay changes a rate, the only lever is editing the constant and redeploying, and nothing in the repo notices staleness; `feeDisclaimer()` rendering the live numbers in prose is the only place it is visible.
 
 ## Testing notes
 
@@ -152,6 +153,15 @@ to push" does not work across the two.
 - **To fix something on a routine's PR, branch off `main` instead** and open a
   separate PR, or hand the finding to the owner to relay. The exception is the
   owner explicitly saying the routine is stopped.
+- **Changelog housekeeping happens on its own branch, once.** Dating a merged
+  PR's `[Unreleased]` entries belongs on a `chore/changelog-<date>` branch, and
+  only when no such PR is already open. A feature PR must not bundle it: CI's
+  `changelog-guard` job fails any PR that adds or removes a dated (`## YYYY-MM-DD`)
+  heading unless the branch is named `chore/changelog-*`. This exists because
+  four separate PRs once raced to date the same PR #59 section — each routine run
+  noticed the undated heading independently, and the "check first" rule below was
+  not enough on its own, since all four checked at moments when the answer was
+  honestly "not done yet".
 - **Changelog housekeeping is idempotent — check before doing it.** Dating a
   merged PR's `[Unreleased]` entries is the routine's step 11, but a conflict
   resolution may need it too. Before adding a dated heading, check whether it

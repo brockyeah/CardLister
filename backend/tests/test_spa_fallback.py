@@ -90,6 +90,12 @@ def test_shell_revalidates_but_hashed_assets_cache_forever(client):
         "/api",
         "/uploads",
         "/assets",
+        # Encoded dot segments: StaticFiles normalizes the path before the
+        # fallback sees it, so /api/%2e%2e/whatever used to arrive as
+        # "whatever" and render the shell — the raw path must be checked too.
+        "/api/%2e%2e/whatever",
+        "/uploads/%2e%2e/whatever",
+        "/assets/%2e%2e/x.js",
     ],
 )
 def test_api_upload_and_asset_paths_keep_their_404(client, path):
