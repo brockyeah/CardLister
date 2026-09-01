@@ -195,3 +195,45 @@ def test_a_future_sale_cannot_slip_through_on_a_utc_offset(db_session):
                            tzinfo=timezone(timedelta(hours=14))).isoformat())
         assert r.status_code == 200, r.text
         assert r.json()["sold_at"].startswith(aware.strftime("%Y-%m-%dT09:00"))
+
+
+def test_mark_sold_refuses_to_overwrite_a_recorded_sale(db_session):
+    """A second mark-sold must not silently replace the first sale's figures.
+
+    unmark_sold has always refused to act on a card that is not sold; mark_sold
+    had no mirror guard, so a double-submit on the modal, a stale second tab or
+    a re-import replaced sold_price/sold_at with no warning and no way back.
+    Those two columns are what the tax-year export and the Sheets "Date Sold"
+    column read, so the clobbered row is wrong in the one report that has to be
+    right — and it still looks like an ordinary sold card.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        first = _mark_sold(client, headers, created["id"],
+                           sold_price=25.0, sold_at="2026-02-14T00:00:00")
+        assert first.status_code == 200, first.text
+
+        second = _mark_sold(client, headers, created["id"],
+                            sold_price=999.0, sold_at="2026-03-01T00:00:00")
+        assert second.status_code == 409, second.text
+
+        # The original sale survives intact — the point of the guard.
+        card = client.get("/api/cards", headers=headers).json()[0]
+        assert card["sold_price"] == 25.0
+        assert card["sold_at"].startswith("2026-02-14")
+
+
+def test_a_sale_can_still_be_corrected_by_unmarking_first(db_session):
+    """The guard refuses the clobber, not the correction: the existing
+    reversible path (unmark, then re-mark) still records the new figures."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        assert _mark_sold(client, headers, created["id"],
+                          sold_price=25.0).status_code == 200
+        assert client.post(f"/api/cards/{created['id']}/unmark-sold",
+                           headers=headers).status_code == 200
+        again = _mark_sold(client, headers, created["id"], sold_price=30.0)
+        assert again.status_code == 200, again.text
+        assert again.json()["sold_price"] == 30.0

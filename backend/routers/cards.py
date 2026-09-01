@@ -243,6 +243,26 @@ def export_sold_csv(
 
 
 MAX_IMPORT_ROWS = 5000
+
+# Byte ceiling on the upload itself. MAX_IMPORT_ROWS protects the database, and
+# it is the *only* thing this endpoint used to check — but it can only be
+# applied once the file has been read, decoded and parsed, so a 500 MB file was
+# fully materialised three times over (bytes, str, list-of-lists) before the
+# 5000-row limit rejected it. There is one worker and one container, so an OOM
+# here is the whole app rather than one request, and it is reachable by either
+# logged-in user with a mis-selected file — a video, a database backup — not
+# just by an attacker. Same shape as /api/scan's MAX_UPLOAD_BYTES.
+#
+# What this bounds is our own in-process copies: Starlette has already spooled
+# the multipart body (to disk past 1 MB) by the time the handler runs, so an
+# oversized *transfer* still completes. Rejecting before receipt needs an
+# ASGI-level body limit, tracked separately in docs/BACKLOG.md.
+#
+# 10 MB is deliberately far above a legitimate import: a full 5000-row export
+# with notes on every row is comfortably under 3 MB.
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
+_IMPORT_READ_CHUNK = 1024 * 1024
+
 _TRUTHY = {"y", "yes", "true", "1"}
 _VALID_STATUSES = {"unlisted", "active", "sold"}
 
@@ -291,6 +311,29 @@ def _parse_money(raw: str) -> float:
     return value
 
 
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read an upload into memory, refusing anything over MAX_IMPORT_BYTES.
+
+    Chunked rather than one `.read()` so the cap is applied while reading
+    instead of after it — the whole point is to never hold the oversized file.
+    """
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await file.read(_IMPORT_READ_CHUNK)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > MAX_IMPORT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File larger than the {MAX_IMPORT_BYTES // (1024 * 1024)} MB limit — "
+                       f"is this a CSV export?",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("/import.csv")
 async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Bulk-create cards from a CSV in the export/Sheets column layout.
@@ -302,12 +345,22 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
     through the per-card sync would hammer the Sheets API; imported cards
     sync individually on their next edit.
     """
-    raw = await file.read()
+    raw = await _read_capped(file)
     try:
         text = raw.decode("utf-8-sig")  # -sig: tolerate Excel's BOM
     except UnicodeDecodeError:
         raise HTTPException(status_code=422, detail="File is not UTF-8 text — export a plain CSV and retry")
-    rows = list(csv.reader(io.StringIO(text)))
+    try:
+        rows = list(csv.reader(io.StringIO(text)))
+    except csv.Error as e:
+        # csv.reader refuses a single field longer than its 128 KB limit (and
+        # a few other malformed shapes) by raising, which reached the client as
+        # a blank 500 — indistinguishable from the app being broken. A file
+        # that trips this is a bad file, so say so: every other rejection on
+        # this endpoint is a 422 that tells the user what to fix. The limit is
+        # process-global (csv.field_size_limit), so it is not raised here for
+        # one caller.
+        raise HTTPException(status_code=422, detail=f"File is not valid CSV: {e}")
     if not rows:
         raise HTTPException(status_code=422, detail="Empty file")
     idx = {name.strip().lower(): i for i, name in enumerate(rows[0])}
@@ -538,6 +591,22 @@ def mark_sold(card_id: int, payload: MarkSoldRequest, background_tasks: Backgrou
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+    if card.status == "sold":
+        # Mirror of unmark_sold's guard below. Without it, marking an
+        # already-sold card sold again overwrote the recorded sale price and
+        # date with no warning and no way back to what was there. The paths in
+        # are ordinary — a double-submit on the modal, a second tab holding a
+        # stale Inventory list, a re-import — and sold_at/sold_price are what
+        # the tax-year CSV export and the Sheets "Date Sold" column read, so a
+        # clobbered sale is wrong in the one report that has to be right, and
+        # wrong quietly: the row still looks like a normal sold card.
+        # Correcting a sale is still possible through the existing reversible
+        # path — unmark-sold, then mark it sold again — which is also the one
+        # that leaves the intermediate state visible.
+        raise HTTPException(
+            status_code=409,
+            detail="Card is already marked sold — unmark it first to change the sale price or date",
+        )
     card.status = "sold"
     card.sold_price = payload.sold_price
     card.sold_at = payload.sold_at or datetime.utcnow()
