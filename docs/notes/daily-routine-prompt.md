@@ -121,6 +121,14 @@ PHASE 3 — Build (standing authorization):
     ABOVE the entries — never overwrite the [Unreleased] line itself, or the
     entries end up filed under the wrong PR while another stays stranded.
     Verify afterward that every heading's (PR #N) tag matches its entries'.
+    **Do this on a `chore/changelog-<date>` branch off main, NOT on your working
+    branch — you are explicitly authorized to create and push that one branch,
+    as an exception to working only on your assigned branch.** CI's
+    `changelog-guard` job fails any PR that adds or removes a dated heading from
+    any other branch, so bundling this into a feature PR turns it red by
+    construction. First check whether a `chore/changelog-*` PR is already open:
+    if one is, do nothing — it owns the task. That check plus the dedicated
+    branch is what stops the race where four PRs each dated the same section.
 
 PHASE 4 — Report (always):
 12. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
