@@ -5,6 +5,79 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] An alert that fails to send starts its own six-hour silence (2026-09-02
+      daily run): both `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` stamp their throttle clock
+      (`_last_alert_at = now`) **before** attempting delivery, and then return
+      `emailed or pushed`. So when both channels fail — SendGrid down, ntfy
+      unreachable, `NTFY_TOPIC` unset, `ALERT_EMAILS` empty — the outage is
+      recorded as alerted and every call for the next six hours returns early
+      without trying again. The two alerts this affects are the two the app has
+      *because* something is already broken, and one of them is specifically
+      about email not working: "call-up alerts are not being delivered" is most
+      likely to fire exactly when the mailer is the thing that is down, which is
+      also when its own send fails and buys six hours of silence. The throttle
+      is right in shape (a burst of failing scans must not produce one alert
+      each) and wrong in placement. Stamp it on a *delivered* alert, and give a
+      failed attempt its own much shorter back-off — a few minutes — so a hard
+      outage retries without hammering the provider on every scan. Note the
+      poll cycle calls the call-up one at most every `CALLUP_POLL_MINUTES`
+      anyway, so the failure back-off only really bounds the credits alert
+      (quick win; implement directly; inline — `services/billing_alerts.py`
+      plus tests that fail both channels and assert the next call retries, and
+      that a successful one still suppresses)
+- [ ] A failed news refresh blanks the Prospect Wire, and the feed walk has no
+      total budget (2026-09-02 daily run, direct follow-on to the empty-result
+      caching that shipped the same day): `fetch_articles` walks `_feeds()`
+      serially and each `_fetch_feed` carries its own 10s timeout, so the wall
+      clock is N × 10s with nothing capping the total — and `NEWS_FEEDS` is an
+      env var, so N is an operator decision, not a constant. There is one
+      worker. Worse than the latency: when a refresh fails, the empty result
+      *replaces* whatever was cached, so a panel that had perfectly good
+      headlines two minutes ago goes blank because two feeds timed out once.
+      Today's fix bounds how *often* that costs (the empty result is now held
+      for 2 minutes instead of re-fetched every request); it does not change
+      what it costs or what the user sees. Two changes, both small: keep the
+      last good payload and serve it stale-on-error up to some max staleness
+      (an hour reads as "yesterday's wire", a day does not), and give the whole
+      refresh one wall-clock budget the way `PRICING_DEADLINE_SECONDS` does for
+      the comps chain — a scalar httpx timeout is per-connect/read, never a
+      request budget (quick win; implement directly; inline —
+      `services/prospect_news.py` plus a test that fails the feeds after a good
+      fetch and asserts the good articles are still served)
+- [ ] Every mock or failed scan leaves its photo on the volume with nothing
+      referencing it (2026-09-02 daily run): `scan_card` saves the upload
+      first and only writes a `Scan` row `if not is_mock and not error`, so
+      the two paths that produce no row still produce a file. Mock mode is not
+      an edge case — it is what runs whenever `ANTHROPIC_API_KEY` is unset or
+      out of credits, which is precisely when the user retries — and each retry
+      writes another uuid-named file that nothing will ever reference. They are
+      reclaimable (the orphan sweep on Analytics finds them by definition), but
+      only by someone who thinks to click it, and `storage_usage` counts them
+      as legitimate usage in the meantime. Cheapest fix is to unlink the saved
+      files on the mock/error return, the same way the endpoint already unlinks
+      the front image when the back save fails — the file is useless without a
+      row to point at it. Decide with it whether an *error* scan should keep
+      its photo for the retry to reuse, which is the one argument for leaving
+      it (quick win; implement directly; inline — `routers/scan.py` plus a test
+      asserting the uploads dir is empty after a mock scan)
+- [ ] Nothing in the repo can start the app the way production runs it
+      (2026-09-02 daily run, hit while verifying a UI change): the backend
+      serves the SPA from `backend/static`, which only the Dockerfile ever
+      creates (`COPY --from=frontend /app/dist ./backend/static`), and
+      `backend/static/` is gitignored. So the documented dev flow is two
+      processes and a Vite proxy, and there is no way to exercise the app as
+      deployed — the mode where the SPA fallback, the cache headers and the
+      `/uploads` mount actually apply — without hand-assembling a venv, a JWT
+      secret, a `CARDLISTER_USERS` pair, a `DB_PATH`, and a manual
+      `cp -r frontend/dist backend/static`. That matters beyond convenience:
+      step 9 of the daily routine requires actually exercising anything
+      user-visible, and a ten-minute reconstruction is the step a run under
+      pressure quietly skips. A `scripts/dev.sh` that builds the frontend,
+      stages it into `backend/static`, and boots uvicorn with safe local
+      defaults makes it one command, and gives the Playwright E2E item further
+      down something to point at (quick win; implement directly; inline — one
+      script plus a README line)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -29,23 +102,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       but the ticker is still lying (medium; implement directly; inline —
       `services/callups.py` plus a test that adds a matching card between two
       poll cycles and asserts the second one alerts)
-- [ ] The prospect-news cache never caches an empty result, so an empty digest
-      re-fetches every RSS feed on every page load (2026-08-26 review):
-      `fetch_articles` guards with `if _cache["articles"] and now -
-      _cache["at"] < _CACHE_TTL`, keying freshness on the *truthiness of the
-      payload* rather than on the timestamp it stores right beside it. An
-      empty result therefore never satisfies the guard, and empty is not the
-      rare case — it happens when both feeds fail (each a 10s timeout, so ~20s
-      of blocked worker thread per request) and it happens all winter, when no
-      MLB headline scores above the `score_article(a) > 0` floor. `NewsSection`
-      fires `GET /api/news` on every Scanner mount, so the app re-fetches both
-      feeds on every page load precisely when fetching is most expensive and
-      least likely to work. Key the guard on `_cache["at"]` instead, so a
-      result — including an empty one — is honoured for its TTL; consider a
-      shorter negative TTL so a transient feed outage recovers sooner than a
-      genuine offseason lull (quick win; implement directly; inline —
-      `services/prospect_news.py` plus a test that a second call inside the TTL
-      does not re-fetch after an empty first call)
 - [ ] Nothing checks the workflow files, and a broken one fails *open*
       (2026-08-26 review, prompted by adding `health.yml`): the repo now runs
       four workflows, two of which carry non-trivial embedded shell — the new
@@ -58,15 +114,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       `shellcheck` over every `run:` block. One fast job, no new services
       (quick win; implement directly; inline — a job in `ci.yml`; expect to fix
       a handful of existing quoting warnings on the first run)
-- [ ] Every Prospect Wire headline prints its source twice (2026-08-26
-      review): `NewsSection.jsx` renders `{a.source}` as the emerald uppercase
-      kicker above the headline (line ~112) and again in the gray byline below
-      the summary (line ~132), so every article reads "MLB.com … MLB.com ·
-      2d ago". The byline almost certainly meant to carry the age alone — the
-      kicker already owns the attribution. Cosmetic, but it is on the page the
-      owner opens every time he scans a card (quick win; implement directly;
-      inline — `NewsSection.jsx` only; no test infrastructure exists for
-      components, so verify by build + eye)
 - [ ] The routines open duplicate housekeeping PRs, and the review queue has
       stopped draining (2026-08-31 daily run, observed rather than predicted):
       **PRs #60, #61 and #62 are three separate PRs that each date the same
@@ -1032,6 +1079,26 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-02 — An empty prospect-news result is cached like any other:
+      `fetch_articles` keyed freshness on the truthiness of the payload rather
+      than the timestamp beside it, so an empty result never satisfied the
+      guard and both feeds were re-fetched on every request — 20s of blocked
+      worker thread on a total outage, on a page that fires `GET /api/news`
+      on every Scanner mount, and there is one worker. The guard now reads
+      the timestamp, with its own shorter TTL for an empty result (2 min
+      against 15) so a transient feed failure recovers on the next page load
+      instead of blanking the panel for a quarter hour. `limit` joined the
+      cache key in the same pass — it shapes the payload, so a cached top-8
+      served to a caller asking for three would have been silently wrong
+- [x] 2026-09-02 — Prospect Wire headlines print their source once: the
+      emerald kicker above the headline and the gray byline below the summary
+      both rendered `{a.source}`, so every item read "MLB.com … MLB.com · 2d
+      ago". The byline now carries the age alone, via a pure helper
+      (`lib/articleAge.js`) that returns an empty string for an article with
+      no publish date so the byline is dropped rather than rendering a bare
+      separator — and reads a feed stamped ahead of the server's clock as
+      "today" instead of "-1d ago". Verified in the built app, not just by
+      unit test
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
       and fails the run on a non-200, an unreachable or non-JSON response, an

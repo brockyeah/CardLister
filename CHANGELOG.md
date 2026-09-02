@@ -10,6 +10,40 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Fixed
+- An empty prospect-news result is cached like any other. `fetch_articles`
+  guarded with `if _cache["articles"] and now - _cache["at"] < _CACHE_TTL`,
+  keying freshness on the *truthiness of the payload* rather than on the
+  timestamp stored right beside it — so an empty result never satisfied the
+  guard and the feeds were re-fetched on every request. Empty is not the rare
+  case: it is what both feeds failing produces (a 10s timeout each, so ~20s of
+  blocked worker thread, and there is one worker), and it is what most of the
+  winter produces, when no MLB headline clears the `score_article(a) > 0`
+  floor. `NewsSection` fires `GET /api/news` on every Scanner mount, so the app
+  re-fetched both feeds on every page load precisely when fetching was most
+  expensive and least likely to work. The guard now reads the timestamp, so an
+  empty result is honoured for a TTL like any other. That TTL is its own,
+  shorter number (2 minutes against 15): holding a failure for the full quarter
+  hour would keep the panel blank long after the feeds recovered, while two
+  minutes still collapses a burst of page loads. `limit` joined the cache key
+  in the same pass — it shapes the payload, so a cached top-8 handed to a
+  caller asking for three would have been silently wrong. Only the router calls
+  this today, always with the default, which is what made the hole invisible
+  rather than harmless.
+- Prospect Wire headlines no longer print their source twice. `NewsSection`
+  rendered `{a.source}` as the emerald uppercase kicker above the headline and
+  again in the gray byline below the summary, so every item read "MLB.com …
+  MLB.com · 2d ago". The kicker already owns the attribution; the byline now
+  carries the age alone. Because the age can legitimately be absent — a feed
+  entry with no parseable publish date — it is computed by a new pure helper
+  (`lib/articleAge.js`) that returns an empty string in that case, and the
+  byline is dropped entirely rather than rendering a bare separator. The helper
+  also fixes a smaller display bug it inherited: a feed stamping an entry
+  slightly ahead of the server's UTC clock yields a negative age, which used to
+  render as "-1d ago" and now reads "today".
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so
