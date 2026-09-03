@@ -109,6 +109,22 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       actually reviewing (quick win; implement directly; inline —
       `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
       only the owner can edit)
+- [ ] `downloadBackup` and `resyncSheet` inherit the 30s client timeout but
+      are unbounded server-side (2026-09-03, flagged twice by the auto-review
+      on PR #73): the axios default ceiling added there is right for
+      pricing/cards/CSV, but `downloadBackup()` (a `VACUUM INTO` copy of the
+      whole SQLite file) and `resyncSheet()` (a clear-then-rewrite of the
+      entire Inventory tab through the Sheets API) now inherit it too, and
+      neither is bounded on the backend the way pricing is by
+      `PRICING_DEADLINE_SECONDS`. Both are comfortably under 30s at the
+      two-user / small-DB scale today, so this is a coupling to watch rather
+      than a live bug — but as the DB or the sheet grows, a backup or resync
+      that crosses 30s surfaces as a generic `ECONNABORTED` toast instead of
+      the specific 507 handling `analytics.py` already has for a full disk.
+      Fix when it bites: give each a longer explicit per-request `timeout`
+      override the way `scanCard` does, sized to its own worst case (quick
+      win; implement directly; inline — `api.js`, plus deciding whether the
+      backup/resync endpoints should also carry their own server-side budget)
 - [ ] `Card.notes` has no upper length bound anywhere in the pipeline
       (2026-09-03 review): `notes` is `Text nullable=True` on the model and
       `Optional[str]` on `CardBase` / `CardUpdate` with no `max_length`, and
