@@ -22,7 +22,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   still passes its own `SCAN_TIMEOUT_MS` per request — axios uses the
   request-level `timeout` when both are provided, so the override cleanly
   beats the default. `formatApiError`'s existing timeout wording covers the
-  toast the user sees.
+  toast the user sees. The Inventory load path is paired with the ceiling:
+  `reload()` now catches a rejected `listCards()`, renders a visible error
+  with a Retry button, and preserves the cards already on screen rather than
+  blanking them — without that the 30s reject still rendered an empty table
+  indistinguishable from an empty inventory, which is the very failure the
+  timeout exists to make legible.
 
 - Marking a card sold at an implausible price now asks once before it lands.
   `MarkSoldRequest` validates only `sold_price > 0`, so a mistyped `2500` for

@@ -326,6 +326,7 @@ function CompsModal({ card, onClose, onApplyPrice }) {
 export default function Inventory() {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' })
@@ -335,15 +336,28 @@ export default function Inventory() {
 
   const reload = async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const data = await listCards()
       setCards(data)
+    } catch (err) {
+      // Without this, a rejected listCards() (now that the axios instance
+      // enforces a 30s ceiling, a slow/hung load actually rejects instead of
+      // hanging forever) fell through to `finally`, cleared `loading`, and
+      // rendered an empty table indistinguishable from an empty inventory —
+      // the exact silent failure the timeout was added to make visible.
+      // setCards is deliberately not called on failure, so a refresh that
+      // times out keeps the cards already on screen rather than blanking them.
+      setLoadError(formatApiError(err, 'Could not load your inventory.'))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
+    // Void the promise so the effect callback stays sync (reload owns its own
+    // error handling); an unhandled rejection here would otherwise surface as
+    // a console error with no user-facing effect.
     reload()
   }, [])
 
@@ -514,6 +528,16 @@ export default function Inventory() {
           Export CSV
         </button>
       </div>
+
+      {loadError && !loading && (
+        <div className="card-panel border border-red-500/40 bg-red-500/5 text-sm text-red-300 mb-4 flex items-center justify-between gap-3">
+          <span>
+            {loadError}
+            {cards.length > 0 && ' Showing the last loaded inventory.'}
+          </span>
+          <button onClick={reload} className="btn-secondary whitespace-nowrap">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="card-panel text-center text-gray-400 py-12">Loading…</div>
