@@ -13,6 +13,7 @@ import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from 
 import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
 import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
 import { usableSuggestedPrice } from '../lib/pricing.js'
+import { flagImplausibleSalePrice, salePriceConfirmMessage } from '../lib/salePriceSanity.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 // Shown when the listing text was built for a card that has no price yet.
@@ -33,9 +34,27 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
   const [date, setDate] = useState(todayLocalDate())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  // Latched to the price the user has *confirmed* is intentional, so editing
+  // the field after a confirm re-arms the sanity check for the new value —
+  // otherwise the confirm becomes a one-time bypass and a subsequent typo
+  // sails through.
+  const [confirmedPrice, setConfirmedPrice] = useState(null)
+
+  // Nothing else bounds a mistyped sale price server-side (`sold_price > 0`
+  // is the only validation), and a bad sale is permanent furniture — it
+  // mirrors to the Sheets price column, counts in Revenue, and is filed in
+  // the tax export. A hard cap would refuse a real five-figure sale, so the
+  // question is the tool: confirm once when the entered price is ~20× or
+  // ~1/20 what this card was listed at.
+  const sanityWarning = flagImplausibleSalePrice(price, card.listed_price)
 
   const submit = async (e) => {
     e.preventDefault()
+    if (sanityWarning && Number(price) !== confirmedPrice) {
+      const ok = window.confirm(salePriceConfirmMessage(sanityWarning, card.listed_price))
+      if (!ok) return
+      setConfirmedPrice(Number(price))
+    }
     setSaving(true)
     setError(null)
     try {
