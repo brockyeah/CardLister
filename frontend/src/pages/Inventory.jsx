@@ -355,10 +355,10 @@ export default function Inventory() {
   }
 
   useEffect(() => {
-    // Void the promise so the effect callback stays sync (reload owns its own
-    // error handling); an unhandled rejection here would otherwise surface as
-    // a console error with no user-facing effect.
-    reload()
+    // `void` marks the floating promise as deliberately unawaited: reload owns
+    // its own error handling (the try/catch above), so there is nothing to
+    // await here and nothing that can reject unhandled.
+    void reload()
   }, [])
 
   const filtered = useMemo(
