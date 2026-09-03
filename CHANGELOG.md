@@ -10,6 +10,39 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Fixed
+- Every request in `api.js` except the scan now has a 30-second client-side
+  ceiling. The axios instance was created with no `timeout`, so a hung
+  `/api/pricing` left the Comps modal spinning with no error and
+  `pricingLoading` stuck true, a hung save left the Save button disabled with
+  the card unsaved, and a hung `listCards` showed an empty inventory that
+  looked like an empty inventory. `scanCard` legitimately runs longer and
+  still passes its own `SCAN_TIMEOUT_MS` per request — axios uses the
+  request-level `timeout` when both are provided, so the override cleanly
+  beats the default. `formatApiError`'s existing timeout wording covers the
+  toast the user sees. The Inventory load path is paired with the ceiling:
+  `reload()` now catches a rejected `listCards()`, renders a visible error
+  with a Retry button, and preserves the cards already on screen rather than
+  blanking them — without that the 30s reject still rendered an empty table
+  indistinguishable from an empty inventory, which is the very failure the
+  timeout exists to make legible.
+
+- Marking a card sold at an implausible price now asks once before it lands.
+  `MarkSoldRequest` validates only `sold_price > 0`, so a mistyped `2500` for
+  a `$25` card is stored as ordinary and mirrored to the Sheets price column,
+  counted in the Inventory Revenue tile, and filed in the tax export — and
+  the only way back is unmark-sold and redo. A hard cap would refuse a real
+  five-figure sale, so the modal asks instead: when the entered price is
+  ~20× or ~1/20 the card's listed price, a confirm names the ratio and the
+  baseline. The confirm is latched to the price the user actually confirmed,
+  so editing the field afterwards re-arms the check for the new value. A
+  card with no listed price has nothing to compare against and skips the
+  check entirely. Same shape as the duplicate-detection confirm and the
+  bulk-orphan warning: a question at the moment of the mistake, not a
+  refusal. `salePriceSanity.js` is a pure helper with a dedicated test.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so

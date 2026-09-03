@@ -13,8 +13,23 @@ export const clearToken = () => {
   localStorage.removeItem(USERNAME_KEY)
 }
 
+// A hung request with no ceiling leaves its consumer stuck in whichever spinner
+// launched it — a hung `/api/pricing` leaves the Comps modal spinning with no
+// error, a hung save leaves the Save button disabled with the card unsaved, a
+// hung listCards shows an empty inventory that looks like an empty inventory.
+// Axios' own default is no timeout at all, which is why every one of those
+// modes is silent. 30s is generous for everything routed here: `/api/pricing`
+// is capped server-side by `PRICING_DEADLINE_SECONDS` (~20s), an ordinary
+// `/api/cards` write is milliseconds, and the CSV export/import run against a
+// bounded row limit. `scanCard` legitimately runs longer and sets its own
+// timeout per-request, which overrides this default rather than being capped
+// by it — axios uses the request-level value when both are provided. The
+// existing `formatApiError` covers the toast text for the ECONNABORTED that
+// this produces.
+const REQUEST_TIMEOUT_MS = 30_000
+
 // Same-origin in production; Vite dev proxy handles /api and /uploads in dev.
-const api = axios.create({ baseURL: '/' })
+const api = axios.create({ baseURL: '/', timeout: REQUEST_TIMEOUT_MS })
 
 api.interceptors.request.use((config) => {
   const token = getToken()
@@ -87,12 +102,12 @@ export const resyncSheet = () =>
 export const getNews = () => api.get('/api/news').then((r) => r.data)
 
 // --- Scan ---
-// A scan legitimately takes 15-30s, so it needs a far longer ceiling than any
-// other call here — but it needs *a* ceiling. With none (the axios default is
-// no timeout at all), a request that never settles leaves its queue item in
-// `scanning` forever: the one status that renders no Retry, behind a
-// single-flight guard that never releases, so every later item in the batch
-// waits on it too.
+// A scan legitimately takes 15-30s, so it needs a far longer ceiling than the
+// axios instance's own default (see above). Passed per-request rather than
+// hoisted to a second client: axios uses the request-level `timeout` when
+// both are provided, so this override cleanly beats the 30s default without
+// leaving other scan-adjacent calls (upload preflight, error rendering) on a
+// path with no ceiling.
 //
 // The number is chosen to sit above the server's own worst case rather than
 // picked for feel: the subscription path is hard-capped at

@@ -109,20 +109,66 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       actually reviewing (quick win; implement directly; inline —
       `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
       only the owner can edit)
-- [ ] An implausible sale price is accepted as readily as a plausible one
-      (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
-      validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
-      for a `$25.00` card is stored, mirrored to the Sheets price column,
-      counted in the Inventory Revenue tile and filed in the tax export. A hard
-      upper bound is the wrong tool — cards genuinely sell for five figures, so
-      any cap refuses a real sale — but the modal already knows the card's
-      listed price and can ask: confirm once when the entered price is more
-      than ~20× or under ~1/20th of the listed price (skipping the check when
-      there is no listed price to compare against). Same shape as the
-      duplicate-detection confirm and the bulk-orphan warning: a question at
-      the moment of the mistake, not a refusal (quick win; implement directly;
-      inline — `Inventory.jsx` plus a tested pure helper, no schema change)
-
+- [ ] `downloadBackup` and `resyncSheet` inherit the 30s client timeout but
+      are unbounded server-side (2026-09-03, flagged twice by the auto-review
+      on PR #73): the axios default ceiling added there is right for
+      pricing/cards/CSV, but `downloadBackup()` (a `VACUUM INTO` copy of the
+      whole SQLite file) and `resyncSheet()` (a clear-then-rewrite of the
+      entire Inventory tab through the Sheets API) now inherit it too, and
+      neither is bounded on the backend the way pricing is by
+      `PRICING_DEADLINE_SECONDS`. Both are comfortably under 30s at the
+      two-user / small-DB scale today, so this is a coupling to watch rather
+      than a live bug — but as the DB or the sheet grows, a backup or resync
+      that crosses 30s surfaces as a generic `ECONNABORTED` toast instead of
+      the specific 507 handling `analytics.py` already has for a full disk.
+      Fix when it bites: give each a longer explicit per-request `timeout`
+      override the way `scanCard` does, sized to its own worst case (quick
+      win; implement directly; inline — `api.js`, plus deciding whether the
+      backup/resync endpoints should also carry their own server-side budget)
+- [ ] `Card.notes` has no upper length bound anywhere in the pipeline
+      (2026-09-03 review): `notes` is `Text nullable=True` on the model and
+      `Optional[str]` on `CardBase` / `CardUpdate` with no `max_length`, and
+      it reaches the DB from three seams — the review form, vision extraction
+      (`confidence_notes` is separate but the model can and does put text into
+      `notes` too), and CSV import. A runaway extraction, a mis-selected
+      textarea paste, or a mangled `Notes` column in an imported CSV can
+      therefore land arbitrary bytes into the row, then into the Sheets
+      `Notes` column (which stops rendering usefully past a few thousand
+      characters) and into the pasted eBay description (which is capped at
+      500,000 but reads as wrong text long before that). A `Field(max_length=4000)`
+      on both schema classes rejects the runaway with a 422 rather than storing
+      something unmanageable; 4000 is comfortably above every legitimate note
+      today (the longest in production is ~180 chars) and below what makes the
+      three consumers behave badly (quick win; implement directly; inline —
+      `backend/schemas.py` plus a test)
+- [ ] `POST /api/analytics/alerts/test` fires two real channels with no
+      cooldown (2026-09-03 review): the endpoint deliberately bypasses the
+      throttle so the owner can verify the ntfy topic + email recipients are
+      wired up, but nothing bounds repeat calls either. A stuck button, a
+      rapid double-click, or a hostile logged-in user (both configured users
+      pass `require_auth`, and the analytics owner gate is still in design
+      per the 2026-08-17 spec) can hammer SendGrid credits and the ntfy
+      topic. Add a small module-level cooldown separate from the outage
+      throttle — 30-60s — so a repeat call inside the window returns
+      `{"skipped": true, "seconds_until_next": N}` without touching either
+      channel. Testing works exactly the way it does today on the first
+      press; a debounced re-press says why nothing was sent (quick win;
+      implement directly; inline — `services/billing_alerts.py` plus a test
+      that patches `time.time` and asserts the second call skips)
+- [ ] `build_description` renders empty always-emitted lines as blank rows in
+      the pasted eBay description (2026-09-03 review): the seven "always"
+      lines (Player, Year, Brand, Set, Card Number, Team, Condition) are
+      emitted with `card.field or ''`, so an autograph patch with no card
+      number pastes into eBay's sell form as `Player: …\nYear: …\nBrand:
+      …\nSet: …\nCard Number: \nTeam: \nCondition: NM`, which reads as an
+      unfinished description rather than an intentionally-sparse one. Drop
+      lines whose value is empty or whitespace-only, parallel to how the flag
+      lines already do (`if card.is_rookie:`). Keep Player as a hint the field
+      is missing — a listing with no player at all is unusual enough to leave
+      the placeholder in as a red flag. Quick win, but *is* the eBay listing
+      text: verify by regenerating an existing card's clipboard text and eyeballing
+      it, since a change here affects every seller-visible listing (quick
+      win; implement directly; inline — `routers/ebay.py` plus a test)
 - [ ] A scan the client gave up on is billed, stored, and unreachable
       (2026-08-28 review, direct follow-on to the scan timeout that shipped the
       same day): `/api/scan` writes its `UsageEvent` and its `Scan` row —
@@ -155,20 +201,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       mis-selected file — a video, a database backup — not just by an attacker
       (quick win; implement directly; inline — `routers/cards.py`, chunked read
       against a byte cap plus a test with an oversized body)
-- [ ] Every request in `api.js` except the scan still has no client timeout
-      (2026-08-28 review, the general form of the wedge fixed the same day):
-      the axios instance is created with no `timeout`, and today's fix set one
-      on `scanCard` alone because that was where the damage was worst. The
-      others fail the same way, more quietly: a hung `/api/pricing` leaves the
-      Comps modal spinning with no error and `pricingLoading` stuck true, a
-      hung save leaves the Save button disabled with the card unsaved, and an
-      Inventory load that never settles shows an empty table that looks like an
-      empty inventory. Set a default on the instance — 30s is generous for
-      everything here, since the one call that legitimately runs longer already
-      names its own — and let `scanCard`'s own value override it, which it does
-      today by passing `timeout` per request. The `formatApiError` timeout
-      wording added today already covers what the user sees (quick win;
-      implement directly; inline — `api.js` only)
 - [ ] Nothing shows the user what the scanner has *learned*, or lets them
       unteach it (2026-08-28 review): every save that differs from its scan
       writes a `Correction` row, `build_cheatsheet` renders the 200 most recent
@@ -1032,6 +1064,31 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-03 — Every non-scan request in `api.js` now carries a 30-second
+      client-side ceiling. The axios instance had no `timeout` and today's
+      earlier fix set one on `scanCard` alone; the others were failing the
+      same way, more quietly — a hung `/api/pricing` left the Comps modal
+      spinning with `pricingLoading` stuck true, a hung save left the Save
+      button disabled with the card unsaved, and a hung `listCards` showed
+      an empty inventory that looked like an empty inventory. `scanCard`'s
+      longer per-request timeout still overrides the default (axios uses the
+      request-level value when both are given), so the one call that
+      legitimately runs longer is not capped. `formatApiError`'s existing
+      timeout wording covers what the user sees on an ECONNABORTED
+- [x] 2026-09-03 — Marking a card sold at an implausible price asks once
+      before it lands. `MarkSoldRequest` validated only `sold_price > 0`, so
+      a fat-fingered `2500` for a `$25` card was stored, mirrored to the
+      Sheets price column, counted in the Inventory Revenue tile, and filed
+      in the tax export — and the only way back was unmark-sold and redo. A
+      hard cap would refuse a real five-figure sale, so the modal asks
+      instead: when the entered price is ~20× or ~1/20 the card's listed
+      price, a confirm names the ratio and the baseline. The confirm is
+      latched to the price the user actually confirmed, so editing the
+      field afterwards re-arms the check for the new value; a card with no
+      listed price has nothing to compare against and skips the check
+      entirely. Same shape as the duplicate-detection confirm and the
+      bulk-orphan warning — a question at the moment of the mistake, not a
+      refusal. `salePriceSanity.js` is a pure helper with a dedicated test
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
       and fails the run on a non-200, an unreachable or non-JSON response, an

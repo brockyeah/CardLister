@@ -13,6 +13,7 @@ import { formatCompPrice, formatCompRange, spreadWarning, summarizeComps } from 
 import { estimateFees, feeDisclaimer, formatNet } from '../lib/fees.js'
 import { soldAtFromDateInput, todayLocalDate } from '../lib/soldDate.js'
 import { usableSuggestedPrice } from '../lib/pricing.js'
+import { flagImplausibleSalePrice, salePriceConfirmMessage } from '../lib/salePriceSanity.js'
 import { listCards, markSold, unmarkSold, attachEbayListing, deleteCard, getEbayListingText, getPricing, updateCard, downloadInventoryCsv } from '../api'
 
 // Shown when the listing text was built for a card that has no price yet.
@@ -33,9 +34,27 @@ function MarkSoldModal({ card, onClose, onConfirm }) {
   const [date, setDate] = useState(todayLocalDate())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  // Latched to the price the user has *confirmed* is intentional, so editing
+  // the field after a confirm re-arms the sanity check for the new value —
+  // otherwise the confirm becomes a one-time bypass and a subsequent typo
+  // sails through.
+  const [confirmedPrice, setConfirmedPrice] = useState(null)
+
+  // Nothing else bounds a mistyped sale price server-side (`sold_price > 0`
+  // is the only validation), and a bad sale is permanent furniture — it
+  // mirrors to the Sheets price column, counts in Revenue, and is filed in
+  // the tax export. A hard cap would refuse a real five-figure sale, so the
+  // question is the tool: confirm once when the entered price is ~20× or
+  // ~1/20 what this card was listed at.
+  const sanityWarning = flagImplausibleSalePrice(price, card.listed_price)
 
   const submit = async (e) => {
     e.preventDefault()
+    if (sanityWarning && Number(price) !== confirmedPrice) {
+      const ok = window.confirm(salePriceConfirmMessage(sanityWarning, card.listed_price))
+      if (!ok) return
+      setConfirmedPrice(Number(price))
+    }
     setSaving(true)
     setError(null)
     try {
@@ -307,6 +326,7 @@ function CompsModal({ card, onClose, onApplyPrice }) {
 export default function Inventory() {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' })
@@ -316,16 +336,29 @@ export default function Inventory() {
 
   const reload = async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const data = await listCards()
       setCards(data)
+    } catch (err) {
+      // Without this, a rejected listCards() (now that the axios instance
+      // enforces a 30s ceiling, a slow/hung load actually rejects instead of
+      // hanging forever) fell through to `finally`, cleared `loading`, and
+      // rendered an empty table indistinguishable from an empty inventory —
+      // the exact silent failure the timeout was added to make visible.
+      // setCards is deliberately not called on failure, so a refresh that
+      // times out keeps the cards already on screen rather than blanking them.
+      setLoadError(formatApiError(err, 'Could not load your inventory.'))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    reload()
+    // `void` marks the floating promise as deliberately unawaited: reload owns
+    // its own error handling (the try/catch above), so there is nothing to
+    // await here and nothing that can reject unhandled.
+    void reload()
   }, [])
 
   const filtered = useMemo(
@@ -495,6 +528,16 @@ export default function Inventory() {
           Export CSV
         </button>
       </div>
+
+      {loadError && !loading && (
+        <div className="card-panel border border-red-500/40 bg-red-500/5 text-sm text-red-300 mb-4 flex items-center justify-between gap-3">
+          <span>
+            {loadError}
+            {cards.length > 0 && ' Showing the last loaded inventory.'}
+          </span>
+          <button onClick={reload} className="btn-secondary whitespace-nowrap">Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="card-panel text-center text-gray-400 py-12">Loading…</div>
