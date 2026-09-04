@@ -107,6 +107,30 @@ jobs:
           fi
           echo "No dated-heading edits. OK."
 
+  # Nothing else checks the workflow files, and a broken one fails *open*. Four
+  # workflows run here, two of them carrying non-trivial embedded shell —
+  # health.yml is ~60 lines of bash parsing JSON with jq, and the
+  # changelog-guard step below is another. A YAML typo or an unquoted expansion
+  # in one of them surfaces only when that workflow next fires, and for a
+  # *watchdog* workflow (health.yml) the failure mode is the worst available:
+  # it silently stops reporting, which is indistinguishable from production
+  # being healthy.
+  #
+  # actionlint covers both halves in one pass — it validates workflow schema
+  # and ${{ }} expression syntax, and it runs shellcheck over every `run:`
+  # block. The official image is used rather than a curl-to-bash installer so
+  # the version is pinned to something auditable; it bundles the shellcheck
+  # binary, without which the shell half of the check would silently no-op and
+  # this job would pass while checking half of what it claims.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint (workflow schema + shellcheck over every run block)
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
   build:
     runs-on: ubuntu-latest
     steps:
