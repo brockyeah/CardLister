@@ -65,5 +65,8 @@ def test_poll_now_runs_a_cycle(db_session):
             r = client.post("/api/news/poll-now", headers=_auth(client))
     assert r.status_code == 200
     # The manual poll returns the cycle result verbatim, so it also reports how
-    # many alerts are waiting on a retry and how many were dropped unsent.
-    assert r.json() == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0}
+    # many alerts are waiting on a retry, how many were dropped unsent, and
+    # whether the upstream MLB fetch actually succeeded — the last one because
+    # a swallowed fetch failure and a quiet day both produce zero new events.
+    assert r.json() == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0,
+                        "fetch_ok": True}

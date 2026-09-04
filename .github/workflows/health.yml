@@ -211,10 +211,23 @@ jobs:
             echo "⚠️ \`$pending\` call-up alert(s) held for retry — the mailer is failing." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+          # Covers both ways a cycle fails to do its whole job: it raised, or
+          # the MLB Stats API fetch failed. The second is the quiet one — the
+          # fetch degrades to an empty list, which is byte-for-byte what a day
+          # with no call-ups returns — so a total upstream outage completes
+          # every cycle without error while seeing nothing at all.
+          #
+          # A warning rather than a failure because one timed-out fetch is a
+          # transient the next cycle clears, and the window is a trailing two
+          # days, so a short outage loses nothing. An outage *longer* than that
+          # window does lose call-ups permanently — but the fix for that is
+          # deriving the fetch window from the last one actually covered
+          # (tracked in docs/BACKLOG.md), not failing this probe on a blip.
+          # Persistent lag shows as the same warning run after run.
           if [ "$cycle_ok" = "false" ]; then
-            echo "::warning::The last call-up poll cycle raised an exception (the loop is still running). The alert counts beside it are from an earlier cycle. See the Railway logs."
+            echo "::warning::The last call-up poll cycle did not complete cleanly — it raised, or the MLB Stats API fetch failed (the loop itself is still running). No call-up can be seen while this persists, and the alert counts beside it are from an earlier cycle. See the Railway logs."
             echo >> "$GITHUB_STEP_SUMMARY"
-            echo "⚠️ The last poll cycle errored — alert counts shown are from an earlier cycle." >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ The last poll cycle did not complete cleanly (raised, or the MLB fetch failed) — alert counts shown are from an earlier cycle." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # Deploy lag is a *warning*, not a failure. The revision only tracks

@@ -55,9 +55,14 @@ app.add_middleware(
 #                          itself once the band moves past — a red probe here
 #                          resolves on its own within ~2 days rather than
 #                          sticking red forever.
-#   * `last_cycle_ok`    — False when the cycle raised. None until the first
-#                          cycle completes, which is also what a process that
-#                          has never polled reports.
+#   * `last_cycle_ok`    — False when the last cycle did not do its whole job:
+#                          it raised, or its upstream fetch failed. The second
+#                          case is the quiet one — the fetch swallows a network
+#                          error and returns [], which is byte-for-byte what a
+#                          day with no call-ups returns — so without it a total
+#                          MLB Stats API outage reports a clean cycle. None
+#                          until the first cycle completes, which is also what
+#                          a process that has never polled reports.
 # All three are per-process and start empty on a restart, like the heartbeat
 # itself — no column marks a row as abandoned, and adding one would be a schema
 # change for a number that is only ever reported. Nothing is lost by that:
@@ -94,7 +99,13 @@ async def _callup_poller():
                     logger.info("Call-up poll: %s", result)
                 _poller_state["alerts_pending"] = result["pending"]
                 _poller_state["alerts_abandoned"] = result["abandoned"]
-                _poller_state["last_cycle_ok"] = True
+                # Not an unconditional True: `fetch_callup_transactions`
+                # swallows a network failure and returns [], which is exactly
+                # what a quiet day returns, so a cycle can complete without
+                # exception having seen nothing at all. Reporting that as a
+                # good cycle would keep the health probe green through a total
+                # MLB Stats API outage (Codex, PR #74).
+                _poller_state["last_cycle_ok"] = result["fetch_ok"]
             finally:
                 db.close()
         except Exception:

@@ -58,6 +58,27 @@ only in `[Unreleased]` on a branch is not in prod yet.
   un-abandon anything, so reporting 0 would clear a real signal on the strength
   of a *second* failure. Both halves are pinned by tests that fail against the
   previous behaviour.
+- Neither does a cycle whose MLB fetch failed. `fetch_callup_transactions`
+  swallows a network error and returns an empty list, which is byte-for-byte
+  what a day with no call-ups returns — so a cycle through a total MLB Stats
+  API outage completes without raising, having seen nothing at all, and would
+  have stamped a successful cycle and kept the probe green (found by Codex on
+  this PR). The poller now asks to be told: the fetch takes a `strict` flag
+  that surfaces the failure as `CallupFetchError`, `run_poll_cycle` catches it,
+  reports `fetch_ok: false` and still runs the rest of the cycle on the empty
+  list — alerts recorded earlier must keep being retried while MLB is down —
+  and `last_cycle_ok` is that flag rather than an unconditional `true`. The
+  default remains the module's stated guarantee that a network call degrades to
+  `[]` and never crashes its caller, so nothing else changes; a test pins both
+  modes, and another pins that a genuinely quiet day is still a *successful*
+  cycle, so the fix does not simply move the false report to the opposite case.
+  A fetch failure warns rather than fails the probe: one timed-out fetch is a
+  transient the next cycle clears, and the window is a trailing two days, so a
+  short outage loses nothing. An outage longer than that window does lose
+  call-ups permanently — the fix for which is deriving the window from the last
+  one actually covered, which is its own backlog item, not a reason to fail
+  this probe on a blip. `POST /api/news/poll-now` returns the cycle result
+  verbatim, so the manual poll now reports `fetch_ok` too.
 - The three new fields are deliberately kept out of the workflow's hard shape
   check. Production runs whatever Railway last deployed, so between this
   merging and the deploy finishing a body without them is expected and correct;

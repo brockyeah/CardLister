@@ -131,7 +131,8 @@ def test_health_reports_alerts_the_poller_could_not_deliver(db_session):
                     {"enabled": True, "last_cycle_at": None, "last_cycle_ok": None,
                      "alerts_pending": 0, "alerts_abandoned": 0}):
         with patch.object(callups, "run_poll_cycle",
-                          return_value={"new": 0, "emailed": 0, "pending": 3, "abandoned": 2}):
+                          return_value={"new": 0, "emailed": 0, "pending": 3,
+                                        "abandoned": 2, "fetch_ok": True}):
             assert _run_one_poll_cycle(), "the poll cycle never completed"
 
         with TestClient(app) as client:
@@ -168,4 +169,28 @@ def test_a_cycle_that_raises_is_reported_without_clearing_the_counts(db_session)
     assert poller["alerts_abandoned"] == 4, "an errored cycle wiped a real abandoned count"
     assert poller["alerts_pending"] == 1
     # The loop is still alive — which is exactly why `stale` cannot carry this.
+    assert poller["stale"] is False
+
+
+def test_a_swallowed_mlb_fetch_failure_reaches_health(db_session):
+    """The end-to-end form of the Codex finding on PR #74.
+
+    `fetch_callup_transactions` degrades to [] on a network error, which is
+    identical to what a quiet day returns, so the cycle completes without
+    raising. Reported as a good cycle it would keep both /api/health and the
+    scheduled probe green through a total MLB Stats API outage — the poller
+    running perfectly while seeing no call-up at all.
+    """
+    with patch.dict(main._poller_state,
+                    {"enabled": True, "last_cycle_at": None, "last_cycle_ok": None,
+                     "alerts_pending": 0, "alerts_abandoned": 0}):
+        with patch.object(callups, "_get_json", side_effect=RuntimeError("upstream down")):
+            assert _run_one_poll_cycle(), "the poll cycle never completed"
+
+        with TestClient(app) as client:
+            poller = client.get("/api/health").json()["poller"]
+
+    assert poller["last_cycle_ok"] is False
+    # Nothing raised and the loop is fine — which is exactly why neither
+    # `stale` nor an exception handler can carry this signal.
     assert poller["stale"] is False
