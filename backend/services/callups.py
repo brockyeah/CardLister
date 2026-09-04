@@ -42,12 +42,29 @@ def _get_json(url: str, params: dict) -> dict:
         return resp.json()
 
 
-def fetch_callup_transactions(start_date: str, end_date: str) -> list[dict]:
-    """Return normalized call-up transactions in [start_date, end_date]."""
+class CallupFetchError(Exception):
+    """The MLB transactions fetch failed. Raised only when a caller asks to be
+    told (`strict=True`); the default still degrades to []."""
+
+
+def fetch_callup_transactions(start_date: str, end_date: str, *, strict: bool = False) -> list[dict]:
+    """Return normalized call-up transactions in [start_date, end_date].
+
+    `strict` decides what a *network* failure looks like to the caller, and the
+    distinction matters because an empty list is otherwise ambiguous in the one
+    direction that hurts: "MLB reported no call-ups today" and "we never
+    reached MLB" are the same value, and the second is indistinguishable from
+    a perfectly healthy quiet day. The poller passes `strict=True` so it can
+    report a degraded cycle rather than a successful one; everything else keeps
+    the module's stated guarantee that a network call degrades to [] and never
+    crashes its caller.
+    """
     try:
         data = _get_json(STATS_API, {"startDate": start_date, "endDate": end_date})
     except Exception as e:
         logger.warning("MLB transactions fetch failed: %s", e)
+        if strict:
+            raise CallupFetchError(str(e)) from e
         return []
 
     rows = []
@@ -174,7 +191,20 @@ def run_poll_cycle(db: Session) -> dict:
     start = (today - timedelta(days=2)).isoformat()
     end = today.isoformat()
 
-    txs = fetch_callup_transactions(start, end)
+    # strict=True so a swallowed upstream failure cannot be reported as a
+    # healthy cycle. `fetch_callup_transactions` returns [] on a network error,
+    # which is byte-for-byte what a quiet day returns, so without this the
+    # poller stamps a successful cycle through a total MLB Stats API outage and
+    # `/api/health` stays green while no call-up is being seen at all (Codex,
+    # PR #74). The rest of the cycle still runs on the empty list — pending
+    # alerts from earlier cycles must keep being retried while MLB is down —
+    # so the only thing that changes is that we say so.
+    fetch_ok = True
+    try:
+        txs = fetch_callup_transactions(start, end, strict=True)
+    except CallupFetchError:
+        fetch_ok = False
+        txs = []
     existing = {tx for (tx,) in db.query(CallupEvent.tx_id).all()}
     new_count = 0
     for tx in txs:
@@ -244,4 +274,8 @@ def run_poll_cycle(db: Session) -> dict:
         "emailed": emailed,
         "pending": still_pending,
         "abandoned": len(abandoned),
+        # False when the upstream fetch failed and this cycle therefore saw no
+        # transactions it could trust. The poller reports it as the cycle not
+        # having done its whole job.
+        "fetch_ok": fetch_ok,
     }

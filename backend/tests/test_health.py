@@ -1,4 +1,5 @@
 """Deep /api/health endpoint: DB reachability, revision, poller heartbeat."""
+import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend import main
 from backend.main import app
+from backend.services import callups
 
 
 def test_health_ok_reports_db_and_poller(db_session):
@@ -22,6 +24,11 @@ def test_health_ok_reports_db_and_poller(db_session):
         assert body["poller"]["stale"] is False
         assert body["poller"]["last_cycle_at"] is None
         assert body["poller"]["interval_minutes"] == main.POLL_MINUTES
+        # Alert delivery, which `stale` cannot speak to: a process that has
+        # never completed a cycle reports null rather than claiming a good one.
+        assert body["poller"]["last_cycle_ok"] is None
+        assert body["poller"]["alerts_pending"] == 0
+        assert body["poller"]["alerts_abandoned"] == 0
         # No Railway env in tests — revision is null, not "".
         assert body["revision"] is None
 
@@ -81,3 +88,109 @@ def test_health_marks_enabled_poller_stale_after_three_intervals(db_session):
         with patch.dict(main._poller_state, {"enabled": True, "last_cycle_at": datetime.utcnow()}):
             body = client.get("/api/health").json()
         assert body["poller"]["stale"] is False
+
+
+def _run_one_poll_cycle():
+    """Drive `_callup_poller` through exactly one iteration.
+
+    The loop is `while True: cycle; stamp heartbeat; sleep`, so cancelling it
+    once the heartbeat lands gives one complete cycle without patching
+    `asyncio.sleep` — which is module-global and shared with the threadpool
+    machinery `run_poll_cycle` is dispatched through.
+    """
+
+    async def drive():
+        task = asyncio.create_task(main._callup_poller())
+        try:
+            for _ in range(400):
+                await asyncio.sleep(0.005)
+                if main._poller_state["last_cycle_at"] is not None:
+                    return True
+            return False
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    return asyncio.run(drive())
+
+
+def test_health_reports_alerts_the_poller_could_not_deliver(db_session):
+    """`stale` proves the loop is alive; it says nothing about delivery.
+
+    A mailer outage drops every call-up alert while the poller keeps cycling
+    happily, so `last_cycle_at` is stamped, `stale` stays false, and
+    health.yml — which fails a scheduled run on `stale` — sails straight past
+    the one failure this app exists to avoid being quiet about. The counts
+    `run_poll_cycle` already computes have to reach the response for the probe
+    to see them.
+    """
+    with patch.dict(main._poller_state,
+                    {"enabled": True, "last_cycle_at": None, "last_cycle_ok": None,
+                     "alerts_pending": 0, "alerts_abandoned": 0}):
+        with patch.object(callups, "run_poll_cycle",
+                          return_value={"new": 0, "emailed": 0, "pending": 3,
+                                        "abandoned": 2, "fetch_ok": True}):
+            assert _run_one_poll_cycle(), "the poll cycle never completed"
+
+        with TestClient(app) as client:
+            body = client.get("/api/health").json()
+
+    poller = body["poller"]
+    assert poller["last_cycle_ok"] is True
+    assert poller["alerts_pending"] == 3
+    assert poller["alerts_abandoned"] == 2
+    # The point of the test: a poller dropping every alert still looks fresh.
+    assert poller["stale"] is False
+
+
+def test_a_cycle_that_raises_is_reported_without_clearing_the_counts(db_session):
+    """An erroring cycle must not read as a clean one — nor as a recovery.
+
+    The heartbeat is stamped after a failure as deliberately as after a
+    success (it proves liveness), so without `last_cycle_ok` an exception
+    every cycle reports perfectly healthy. And the counts are left alone
+    rather than zeroed: a cycle that raised did not un-abandon anything, so
+    reporting 0 would clear a real signal on the strength of a *second*
+    failure.
+    """
+    with patch.dict(main._poller_state,
+                    {"enabled": True, "last_cycle_at": None, "last_cycle_ok": True,
+                     "alerts_pending": 1, "alerts_abandoned": 4}):
+        with patch.object(callups, "run_poll_cycle", side_effect=RuntimeError("boom")):
+            assert _run_one_poll_cycle(), "the poll cycle never completed"
+
+        with TestClient(app) as client:
+            poller = client.get("/api/health").json()["poller"]
+
+    assert poller["last_cycle_ok"] is False
+    assert poller["alerts_abandoned"] == 4, "an errored cycle wiped a real abandoned count"
+    assert poller["alerts_pending"] == 1
+    # The loop is still alive — which is exactly why `stale` cannot carry this.
+    assert poller["stale"] is False
+
+
+def test_a_swallowed_mlb_fetch_failure_reaches_health(db_session):
+    """The end-to-end form of the Codex finding on PR #74.
+
+    `fetch_callup_transactions` degrades to [] on a network error, which is
+    identical to what a quiet day returns, so the cycle completes without
+    raising. Reported as a good cycle it would keep both /api/health and the
+    scheduled probe green through a total MLB Stats API outage — the poller
+    running perfectly while seeing no call-up at all.
+    """
+    with patch.dict(main._poller_state,
+                    {"enabled": True, "last_cycle_at": None, "last_cycle_ok": None,
+                     "alerts_pending": 0, "alerts_abandoned": 0}):
+        with patch.object(callups, "_get_json", side_effect=RuntimeError("upstream down")):
+            assert _run_one_poll_cycle(), "the poll cycle never completed"
+
+        with TestClient(app) as client:
+            poller = client.get("/api/health").json()["poller"]
+
+    assert poller["last_cycle_ok"] is False
+    # Nothing raised and the loop is fine — which is exactly why neither
+    # `stale` nor an exception handler can carry this signal.
+    assert poller["stale"] is False
