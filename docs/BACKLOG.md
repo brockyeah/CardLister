@@ -5,6 +5,24 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Actions and container images are pinned by tag, not by digest
+      (2026-09-04, raised by CodeRabbit on PR #74 and noted independently by
+      the Claude auto-review): every workflow step here references a mutable
+      identifier — `actions/checkout@v4`, `actions/setup-python@v5`,
+      `actions/setup-node@v4`, and now `docker://rhysd/actionlint:1.7.12`. A
+      tag can be repointed by whoever owns it, so a compromised upstream reaches
+      CI without anything in this repo changing. Both reviewers called it
+      non-blocking and consistent with how the repo already works, which is
+      exactly why it belongs here rather than in whichever PR happens to add
+      the next step: pinning one job's checkout to a SHA while five others stay
+      on `@v4` buys almost nothing and leaves the file looking like nobody
+      decided. Worth doing as one sweep, with a note on how the pins get
+      updated afterwards — a digest-pinned repo with no refresh habit is how
+      you end up running a two-year-old checkout with known bugs, which is a
+      different failure, not a smaller one (quick win; implement directly;
+      inline — all four workflow files at once, plus a line in CLAUDE.md or a
+      Dependabot `github-actions` entry to keep them moving)
+
 - [ ] Nothing exercises the shell inside the workflows, only its syntax
       (2026-09-04 daily run, found while adding actionlint): the new
       `workflows` job catches a YAML typo or an unquoted expansion, and that

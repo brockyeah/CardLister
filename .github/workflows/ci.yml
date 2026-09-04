@@ -125,7 +125,16 @@ jobs:
   workflows:
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false because the next step is a third-party
+      # container with the workspace mounted, and checkout otherwise leaves the
+      # job's token in .git/config where that container could read it. This job
+      # only ever reads YAML — it needs no authenticated git access at all.
+      # (The other checkouts here are followed only by first-party actions;
+      # changelog-guard additionally needs real git history, which is why it
+      # carries fetch-depth: 0.)
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: actionlint (workflow schema + shellcheck over every run block)
         uses: docker://rhysd/actionlint:1.7.12
         with:

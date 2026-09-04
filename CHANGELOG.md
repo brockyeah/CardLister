@@ -83,10 +83,26 @@ only in `[Unreleased]` on a branch is not in prod yet.
   check. Production runs whatever Railway last deployed, so between this
   merging and the deploy finishing a body without them is expected and correct;
   they read as `unknown` in the run summary rather than failing. A field that is
-  *present but not a number* (or a `last_cycle_ok` that is not a boolean) does
+  *present but not a JSON number* (or a `last_cycle_ok` that is not a JSON
+  boolean) does
   fail, which is the file's existing rule that a shape it cannot judge is never
   a pass. All seven probe outcomes were exercised against fabricated bodies
   before this shipped, not just reasoned about.
+- That type check now happens in `jq`, where the JSON type is actually known,
+  because doing it on the extracted shell string could not work: `jq -r`
+  renders the JSON string `"unknown"` and a genuinely missing field as the same
+  six characters, so a body carrying `alerts_abandoned: "unknown"` was read as
+  the absent sentinel and **skipped the abandoned-alert failure check
+  entirely** — the exact fail-open this workflow exists to escape, reintroduced
+  by the validation meant to close it (CodeRabbit, found on this PR). A value
+  that is present but of the wrong type now collapses to a sentinel no
+  downstream check accepts, and the four bypass shapes (`"unknown"`, `"true"`,
+  `"0"`, and a negative count) are exercised alongside the healthy ones.
+- The `workflows` job checks out with `persist-credentials: false`. Checkout
+  otherwise leaves the job's token in `.git/config`, and the next step is a
+  third-party container with the workspace mounted — it only ever reads YAML
+  and needs no authenticated git access at all (CodeRabbit/zizmor, found on
+  this PR). The other checkouts here are followed only by first-party actions.
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
