@@ -10,6 +10,63 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Added
+- The workflow files are checked by CI. Four workflows run in this repo and two
+  of them carry non-trivial embedded shell — `health.yml` is ~60 lines of bash
+  parsing JSON with `jq`, and CI's own `changelog-guard` is another — but
+  nothing validated any of it, so a YAML typo or an unquoted expansion surfaced
+  only when that workflow next fired. For a *watchdog* workflow that is the
+  worst failure mode available: it silently stops reporting, which is
+  indistinguishable from production being healthy. An `actionlint` job now
+  validates workflow schema and `${{ }}` expression syntax and runs shellcheck
+  over every `run:` block, using the project's own pinned image (which bundles
+  the shellcheck binary — without it the shell half would no-op silently and
+  the job would pass while checking half of what it claims). All four existing
+  workflows were already clean; the first thing the job caught was the new
+  step's own name, which contained a colon and broke the YAML parse.
+
+### Fixed
+- `/api/health` no longer reports the call-up poller healthy while every alert
+  it produces goes undelivered. `stale` tracks only whether the *loop* is
+  alive — `last_cycle_at` is stamped after a failed cycle as deliberately as
+  after a good one, because that is what proves liveness — so it stays false
+  right through a mailer outage that is dropping every alert. That gap mattered
+  more than it looks, because `health.yml` fails a scheduled run on
+  `poller.stale` and so would sail straight past the one failure this app
+  cannot afford to be quiet about: being told a prospect got called up while
+  you hold his 1st Bowman is the feature the app was built around.
+  `run_poll_cycle` already computed the numbers; the poller now keeps them, and
+  the endpoint reports `alerts_pending`, `alerts_abandoned` and `last_cycle_ok`
+  under `poller`.
+- The probe acts on them by severity rather than treating them alike. An
+  **abandoned** alert left the 48h retry window unsent and is never recovered,
+  so a non-zero count fails the run; it is a rolling count over a ~2-day band,
+  so a red run here clears itself once the band moves past rather than sticking
+  red until someone resets something. **Held** alerts and an **errored cycle**
+  only warn, because both are states the next cycle legitimately clears (a
+  transient SMTP refusal, one MLB Stats API timeout) and a check that flaps red
+  on a self-healing transient is one people learn to ignore — the same
+  reasoning the existing deploy-lag warning uses. Note the consequence worth
+  knowing: an install with no mailer configured at all produces abandoned
+  alerts by construction, and the probe will say so, which is correct — those
+  alerts really are reaching nobody.
+- A cycle that raises no longer reads as a clean one. It is reported through
+  `last_cycle_ok: false`, and the counts beside it are deliberately left at
+  their last known values rather than zeroed — a cycle that errored did not
+  un-abandon anything, so reporting 0 would clear a real signal on the strength
+  of a *second* failure. Both halves are pinned by tests that fail against the
+  previous behaviour.
+- The three new fields are deliberately kept out of the workflow's hard shape
+  check. Production runs whatever Railway last deployed, so between this
+  merging and the deploy finishing a body without them is expected and correct;
+  they read as `unknown` in the run summary rather than failing. A field that is
+  *present but not a number* (or a `last_cycle_ok` that is not a boolean) does
+  fail, which is the file's existing rule that a shape it cannot judge is never
+  a pass. All seven probe outcomes were exercised against fabricated bodies
+  before this shipped, not just reasoned about.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so

@@ -5,6 +5,83 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] Nothing exercises the shell inside the workflows, only its syntax
+      (2026-09-04 daily run, found while adding actionlint): the new
+      `workflows` job catches a YAML typo or an unquoted expansion, and that
+      is a real gain — it caught its own step name on the first run — but it
+      cannot tell whether `health.yml`'s probe *decides correctly*. That probe
+      is now ~130 lines of bash making eight pass/fail/warn judgements, and
+      `changelog-guard` is another block of real logic; between them they are
+      the two things standing between a broken production and nobody noticing,
+      and both are verified today only by whoever last edited them running the
+      script by hand (which this run did, against seven fabricated bodies, in
+      a throwaway harness that was then deleted). Make that harness a checked-in
+      one: extract a named step's `run:` block from the workflow YAML, run it
+      with a stubbed `curl` on PATH and a fixture body, and assert the exit
+      code and the annotations. Cheap, and it means the next edit to the probe
+      cannot quietly invert a condition — the failure mode this whole workflow
+      exists to escape (medium; implement directly; inline — one test module
+      plus a fixtures directory; note it needs `bash` and `jq` on the runner,
+      both present on ubuntu-latest, and pytest would have to skip on a host
+      without them)
+- [ ] A restart blanks the poller's alert counts for up to one poll interval
+      (2026-09-04 daily run, honest follow-on to the health fields shipped the
+      same day): `alerts_pending` / `alerts_abandoned` / `last_cycle_ok` live
+      on `_poller_state`, which starts empty in a fresh process, so between a
+      Railway restart and the first completed cycle — up to
+      `CALLUP_POLL_MINUTES`, 15 minutes by default — `/api/health` reports
+      `abandoned: 0` and `last_cycle_ok: null` while alerts really are
+      abandoned, and the 3-hourly probe passes clean if it lands in that
+      window. Nothing is lost permanently: `_recently_abandoned` recomputes
+      the count from the database on the next cycle, so the signal returns.
+      Two candidate fixes and they differ in more than effort — compute the
+      abandoned count on demand inside `/api/health` (exact, but adds a DB
+      query with the alertable filter to an unauthenticated endpoint that is
+      polled by monitors), or report the pre-first-cycle state as `unknown`
+      rather than `0` so the probe can say "not yet known" instead of "fine".
+      The second is smaller and honest; the first is the one that actually
+      closes the window (quick win; implement directly; inline — `main.py`
+      plus `health.yml`'s unknown handling, which already exists for the
+      deploy-window case)
+- [ ] Changing a user's password does not invalidate their existing sessions
+      (2026-09-04 daily run): `require_auth` re-reads `CARDLISTER_USERS` on
+      every request and rejects a token whose `sub` is no longer in it — which
+      is why removing a user takes effect immediately, as CLAUDE.md says. But
+      the token carries nothing about the *password*, so editing a user's
+      password on Railway leaves every token minted under the old one valid
+      for the rest of its 30-day TTL. That is exactly backwards from what
+      changing a password is for: the one action taken when a credential is
+      believed compromised is the one that does not end the compromised
+      session, and the only lever that does is rotating `JWT_SECRET`, which
+      signs everyone out and is nowhere written down as the actual remedy.
+      Fix shape without a schema change: put a short fingerprint of the
+      password (an HMAC under `JWT_SECRET`, truncated) in the token and
+      compare it against the current password in `require_auth` — a changed
+      password then fails the comparison and the session ends, while the
+      existing "unknown user" check keeps working unchanged. Decide as part of
+      it what the 30-day TTL should be if sessions can now be ended
+      deliberately (medium; **design first** — auth; per CLAUDE.md's
+      design-doc rule, and because getting the fingerprint wrong locks both
+      users out of a single-container app with no admin path back in)
+- [ ] Nothing records *which preset* produced a scan, so the cost/accuracy
+      trade cannot be measured (2026-09-04 daily run): the three presets exist
+      precisely to trade money against accuracy — `cost` is sonnet-4-6 at
+      1100px, `accuracy` is opus-4-7 at 2000px with high thinking effort — and
+      the app already stores both halves of the evidence needed to judge them.
+      `UsageEvent` has the tokens and the model, and every `Correction` row is
+      a measured miss on a specific scan. What is missing is the join: `Scan`
+      records `model` only, so a `balance` scan and an `accuracy` scan are
+      indistinguishable in the data (both are opus-4-7), and the question the
+      owner actually has — "is accuracy mode worth roughly double the money?"
+      — is unanswerable from the database. Recording the preset on the `Scan`
+      row makes it a one-query answer: corrections per scan, grouped by
+      preset. Worth doing before the fee/cost work further down, since it is
+      the input that decides whether the default preset is the right default
+      (medium; **design first** — schema: a new column on an existing table,
+      so it needs a `_COLUMN_MIGRATIONS` entry per invariant #4, and the
+      design should settle whether the effort/px cap are worth storing beside
+      it or whether the preset key is enough to derive them)
+
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -46,18 +123,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       genuine offseason lull (quick win; implement directly; inline —
       `services/prospect_news.py` plus a test that a second call inside the TTL
       does not re-fetch after an empty first call)
-- [ ] Nothing checks the workflow files, and a broken one fails *open*
-      (2026-08-26 review, prompted by adding `health.yml`): the repo now runs
-      four workflows, two of which carry non-trivial embedded shell — the new
-      health probe is ~60 lines of bash with `jq` parsing. A YAML typo or an
-      unquoted expansion in one of them surfaces only when the schedule fires,
-      and for a *watchdog* workflow the failure mode is the worst one
-      available: it silently stops reporting, which is indistinguishable from
-      production being healthy. `actionlint` catches both halves in one pass —
-      it validates workflow schema and expression syntax, and it runs
-      `shellcheck` over every `run:` block. One fast job, no new services
-      (quick win; implement directly; inline — a job in `ci.yml`; expect to fix
-      a handful of existing quoting warnings on the first run)
 - [ ] Every Prospect Wire headline prints its source twice (2026-08-26
       review): `NewsSection.jsx` renders `{a.source}` as the emerald uppercase
       kicker above the headline (line ~112) and again in the gray byline below
@@ -225,22 +290,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       and it reuses what's already wired (quick win; implement directly;
       inline — `services/callups.py` plus a test that fails the mailer and
       advances the clock past the cutoff)
-- [ ] `/api/health` reports the call-up poller healthy while every alert it
-      produces goes undelivered (2026-08-27 review, direct follow-on to the
-      delivery alerting that shipped the same day): `_poller_state` tracks only
-      whether the *loop* is alive — `last_cycle_at` is stamped after a failed
-      cycle as deliberately as after a good one, because it proves liveness —
-      so `poller.stale` stays false through a mailer outage that is dropping
-      every alert. That is now a bigger gap than it was, because PR #63's
-      `health.yml` fails a scheduled run on `poller.stale` and would sail
-      straight past this. `run_poll_cycle` already returns `pending` and
-      `abandoned`; keep the last cycle's counts on `_poller_state`, report them
-      under `poller`, and have the workflow fail on a non-zero `abandoned`.
-      Decide as part of it whether a non-zero `pending` should fail or warn —
-      one held cycle is a transient the next cycle clears, so it is probably a
-      warning, while an abandoned alert is permanent and never recoverable
-      (quick win; implement directly; inline — `main.py` plus `health.yml` and
-      a test; the workflow half lands only once PR #63 merges)
 - [ ] `mark_sold` silently overwrites a sale that is already recorded
       (2026-08-27 review): `unmark_sold` refuses to act on a card that is not
       sold (409, "Card is not marked sold"), but `mark_sold` has no mirror
@@ -1031,6 +1080,36 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-09-04 — The workflow files are checked by CI. Four workflows run
+      here and two carry non-trivial embedded shell (`health.yml`'s probe,
+      CI's own `changelog-guard`), but nothing validated any of it — a YAML
+      typo or an unquoted expansion surfaced only when that workflow next
+      fired, and for a watchdog workflow that means it silently stops
+      reporting, which is indistinguishable from production being healthy. An
+      `actionlint` job now checks workflow schema and expression syntax and
+      runs shellcheck over every run block, via the project's own pinned image
+      (which bundles shellcheck — without it the shell half no-ops silently).
+      All four existing workflows were already clean, contrary to this item's
+      own prediction; the first thing the job caught was the new step's name,
+      which contained a colon and broke the YAML parse
+- [x] 2026-09-04 — `/api/health` stops reporting the call-up poller healthy
+      while every alert it produces goes undelivered. `stale` tracks only
+      whether the loop is alive — the heartbeat is stamped after a failed
+      cycle as deliberately as after a good one — so it stayed false through a
+      mailer outage dropping every alert, and `health.yml` fails its run on
+      `stale`, so the probe sailed straight past the one failure this app
+      cannot afford to be quiet about. The poller now keeps the counts
+      `run_poll_cycle` already computed and the endpoint reports
+      `alerts_pending`, `alerts_abandoned` and `last_cycle_ok` under `poller`.
+      The probe acts on them by severity: an abandoned alert (past the 48h
+      window, never recovered) fails the run and self-clears when the ~2-day
+      band moves past it, while held alerts and an errored cycle warn, since
+      the next cycle legitimately clears both. A cycle that raises reports
+      `last_cycle_ok: false` with its counts left at their last known values
+      rather than zeroed — an errored cycle did not un-abandon anything. All
+      seven probe outcomes were exercised against fabricated bodies, not just
+      reasoned about
 
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours

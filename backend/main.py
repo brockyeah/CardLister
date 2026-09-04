@@ -36,8 +36,44 @@ app.add_middleware(
 # Heartbeat state for /api/health: whether the call-up poller is running in this
 # process and when its loop last completed a cycle (success or error — either
 # proves the loop is alive).
+#
+# `last_cycle_at` alone proves only that the *loop* is alive, which is why the
+# three fields below exist. It is stamped after a failed cycle as deliberately
+# as after a good one, so `stale` stays false right through a mailer outage
+# that is dropping every alert — and health.yml fails a scheduled run on
+# `stale`, so it sailed straight past the one failure this app cannot afford to
+# be quiet about. `run_poll_cycle` already computes both numbers; keeping them
+# here is what makes them visible from outside the container.
+#
+# Semantics, because the distinction matters to what health.yml does with them:
+#   * `alerts_pending`   — alerts held for a later retry. Transient by nature:
+#                          the next cycle clears them if the mailer recovers.
+#   * `alerts_abandoned` — alerts that left the 48h retry window unsent. This
+#                          is permanent and unrecoverable, so it is the one
+#                          that fails the probe. It is a rolling count over a
+#                          band (see `_recently_abandoned`), so it clears
+#                          itself once the band moves past — a red probe here
+#                          resolves on its own within ~2 days rather than
+#                          sticking red forever.
+#   * `last_cycle_ok`    — False when the cycle raised. None until the first
+#                          cycle completes, which is also what a process that
+#                          has never polled reports.
+# All three are per-process and start empty on a restart, like the heartbeat
+# itself — no column marks a row as abandoned, and adding one would be a schema
+# change for a number that is only ever reported. Nothing is lost by that:
+# `_recently_abandoned` recomputes the count from the database on the next
+# cycle. What it does leave is a window of up to one poll interval after a
+# restart in which these read as their initial values while alerts really are
+# abandoned (tracked in docs/BACKLOG.md).
 POLL_MINUTES = int(os.getenv("CALLUP_POLL_MINUTES", "15"))
-_poller_state = {"enabled": False, "last_cycle_at": None, "task": None}
+_poller_state = {
+    "enabled": False,
+    "last_cycle_at": None,
+    "task": None,
+    "last_cycle_ok": None,
+    "alerts_pending": 0,
+    "alerts_abandoned": 0,
+}
 _started_at = datetime.utcnow()
 
 
@@ -56,10 +92,19 @@ async def _callup_poller():
                 result = await run_in_threadpool(run_poll_cycle, db)
                 if result["new"] or result["emailed"]:
                     logger.info("Call-up poll: %s", result)
+                _poller_state["alerts_pending"] = result["pending"]
+                _poller_state["alerts_abandoned"] = result["abandoned"]
+                _poller_state["last_cycle_ok"] = True
             finally:
                 db.close()
         except Exception:
             logger.exception("Call-up poll cycle errored")
+            # The counts are deliberately left at their last known values
+            # rather than zeroed: a cycle that raised did not un-abandon
+            # anything, and reporting 0 here would clear a real signal on the
+            # strength of a *second* failure. `last_cycle_ok` is what says the
+            # numbers beside it are from an earlier cycle.
+            _poller_state["last_cycle_ok"] = False
         _poller_state["last_cycle_at"] = datetime.utcnow()
         await asyncio.sleep(POLL_MINUTES * 60)
 
@@ -139,6 +184,14 @@ def health():
             "interval_minutes": POLL_MINUTES,
             "last_cycle_at": last.isoformat() + "Z" if last else None,
             "stale": stale,
+            # A live poller whose alerts are all failing to send reports
+            # `stale: false` — correctly, since the loop is running. These
+            # three are what distinguish "polling" from "polling and actually
+            # delivering"; see the _poller_state comment above for what each
+            # one means and which of them is worth failing a probe over.
+            "last_cycle_ok": _poller_state["last_cycle_ok"],
+            "alerts_pending": _poller_state["alerts_pending"],
+            "alerts_abandoned": _poller_state["alerts_abandoned"],
         },
     }
     return JSONResponse(body, status_code=200 if db_ok else 503)
