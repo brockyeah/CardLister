@@ -132,9 +132,18 @@ convention:
    `ebay_api._get_app_token()` and `ebay_api._base_url()`; bounded
    `httpx` timeout (the shutdown-join argument in invariant #12 applies to
    any network call on this container); positive cache by `kid` in a
-   module-level dict like `ebay_api._token_cache`, plus a short **negative
-   cache** (minutes) so a forged-kid spammer costs eBay's API one 404 per
-   window, not one per POST.
+   module-level dict like `ebay_api._token_cache`, plus a short, **bounded**
+   negative cache. Per-kid caching alone bounds nothing against an attacker
+   minting a *fresh* syntactically valid kid per POST (Codex's review of
+   this design caught that the first draft claimed otherwise), so misses
+   are also governed by a **global fetch budget** — a small sliding
+   allowance of outbound key fetches per minute across all kids; once
+   spent, the fetch returns `None` without a network call, which the
+   caller reports as unverified. Genuine traffic never notices (eBay has a
+   handful of signing keys, all cached after first sight); a fresh-kid
+   flood costs eBay's API and our threadpool a fixed trickle instead of
+   one authenticated GET per POST, and the negative cache's entry cap
+   (evict oldest) keeps memory flat.
 3. **`verify_notice(body_bytes, header) -> bool`** — glue: decode, fetch,
    re-flow the PEM, then `cryptography`'s
    `public_key.verify(sig, data, ec.ECDSA(hashes.SHA1()))` against the two
@@ -151,7 +160,10 @@ Handler changes (`routers/ebay_compliance.py`):
   sanitized userId (the existing repr+cap treatment stays). This branch is
   where the future OAuth feature deletes tokens.
 - **Not verified** (bad header, unknown kid, signature mismatch, key fetch
-  failed) → log at warning, fire a throttled owner alert (see below), and
+  failed) → log at warning, fire a throttled owner alert (see below;
+  scheduled as a FastAPI background task, never inline — the alert does
+  sync email/ntfy network I/O with tens of seconds of combined timeout,
+  which must not block the lone event loop), and
   answer per a **confirm-then-enforce rollout**: shadow mode by default
   (ack anyway — verification reports on real traffic but cannot yet cost a
   genuine notice), **412** once `EBAY_SIGNATURE_ENFORCE=1` is set, which
@@ -168,7 +180,17 @@ Handler changes (`routers/ebay_compliance.py`):
   portal registration working on a deployment that has a verification token
   but no Browse credentials, which is a real configuration this app has
   already lived in (the Browse source is described as "dormant until
-  credentials are configured", `ebay_api.py:3-7`).
+  credentials are configured", `ebay_api.py:3-7`). **This degrade is safe
+  only while the app provably stores no eBay user data** — a terminal 2xx
+  on a notice nobody verified is harmless exactly as long as there is
+  nothing a genuine notice would oblige us to delete (Codex's review made
+  this scoping explicit). The eBay OAuth design therefore inherits a named
+  obligation: the moment seller tokens can persist, an unverifiable notice
+  on a deployment holding any must stop being terminally acked — 412 even
+  without credentials (eBay retries until the misconfiguration is fixed),
+  or gate the degrade on the seller-token table being empty. That change
+  belongs to the OAuth design, but it is recorded here because this is the
+  document that creates the fallback it must revoke.
 - The 64 KB body cap and 413 behavior are untouched; so is the GET
   challenge handshake; so is `test_auth_sweep.py`'s PUBLIC list (no new
   routes).
@@ -242,8 +264,11 @@ environment. Use `cryptography`; add nothing to `requirements.txt`.
   threadpool wrap is instead kept honest by code review and the scan.py
   precedent; noted rather than tested).
 - **Forged-kid spam turning us into a proxy for eBay's key API** → strict
-  header validation before any fetch, negative cache, and the existing
-  64 KB cap. The remaining cost per attacker window is one outbound GET.
+  header validation before any fetch, and — because per-kid negative
+  caching is useless against a fresh kid per POST — the global fetch
+  budget above, plus the entry-capped negative cache and the existing
+  64 KB body cap. The remaining attacker-driven cost is a fixed trickle of
+  outbound GETs per minute, whatever the request volume.
 - **Key rotation** → a rotated key arrives as a *new* kid, which misses the
   cache and fetches fresh; cache-by-kid handles rotation with no TTL logic.
   A small max-size guard on the positive cache (it can only grow by one

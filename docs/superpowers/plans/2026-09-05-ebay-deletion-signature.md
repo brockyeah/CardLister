@@ -36,18 +36,27 @@ module attributes so tests patch `ebay_api` the way `test_callups.py`
 patches `callups`). `httpx` GET of
 `{base}/commerce/notification/v1/public_key/{kid}` with a bounded timeout
 (15.0, matching the module's other calls — invariant #12's shutdown-join
-argument). Module-level caches: `_key_cache[kid] = pem` (unbounded growth is
-impossible in practice — one entry per genuine eBay signing key ever seen —
-but cap at 32 entries anyway), `_negative_cache[kid] = expiry` with a
-~5-minute TTL so a forged-kid flood costs one outbound GET per window.
-Never raises.
+argument). Module-level caches and a global budget (Codex's review caught that
+per-kid negative caching alone bounds nothing against a fresh forged kid
+per POST): `_key_cache[kid] = pem` (unbounded growth is impossible in
+practice — one entry per genuine eBay signing key ever seen — but cap at
+32 entries anyway); `_negative_cache[kid] = expiry` with a ~5-minute TTL
+**and an entry cap** (~256, evict oldest) so its memory is flat under a
+kid-per-POST flood; and a **global miss budget** — a sliding allowance of
+outbound key fetches per minute across all kids (~10) — after which
+`fetch_public_key` returns `None` with no network call. Genuine traffic
+lives entirely in the positive cache; the budget is what turns an
+unauthenticated flood from one authenticated eBay GET (and one threadpool
+network wait) per POST into a fixed trickle. Never raises.
 
 **Test**: with `ebay_api._get_app_token` patched to a token and `httpx`
 patched (or `fetch_public_key`'s inner transport faked): a 200 caches and a
 second call does not re-fetch (count calls); a 404 returns `None` and is
 negative-cached (second call inside the TTL makes no request); token `None`
-(unconfigured) returns `None` without any HTTP call. Include a
-cache-clearing fixture — module-level caches leak between tests otherwise
+(unconfigured) returns `None` without any HTTP call; a flood of *distinct*
+kids stops producing HTTP calls once the miss budget is spent (count calls
+across the flood), and the negative cache never exceeds its entry cap.
+Include a cache-clearing fixture — module-level caches leak between tests otherwise
 (the `db_session` fixture precedent: isolation is opt-in here).
 
 ## Step 3 — PEM re-flow + dual-path ECDSA verify
@@ -110,8 +119,14 @@ capped body read (which stays byte-for-byte):
   worker is the reason).
 - Verified → log `verified` (same repr+cap userId sanitization) and ack.
   This is the branch the future OAuth feature extends with token deletion.
-- Not verified → log at warning, call
-  `billing_alerts.notify_deletion_notice_rejected()` (step 5), and then:
+- Not verified → log at warning, schedule
+  `billing_alerts.notify_deletion_notice_rejected()` (step 5) as a
+  **FastAPI background task** — never call it inline: it does sync email +
+  ntfy network I/O (up to ~20s + ~15s of timeout) and an inline call from
+  the async handler would block the lone event loop once per throttle
+  window, stalling `/api/health` and every other request (Codex).
+  `_sync_card_to_sheets` in `routers/cards.py` is the repo's pattern, and
+  the alert's own throttle makes post-response ordering irrelevant. Then:
   **shadow mode by default** — ack `{"ack": true}` anyway unless
   `EBAY_SIGNATURE_ENFORCE=1` is set, in which case raise
   `HTTPException(412)` (eBay retries 412s; forgers get nothing). Shadow
@@ -200,7 +215,12 @@ sequence, not a smoke test:
    (recommended) vs refusing.** Degrading keeps the portal registration
    valid on a deployment with no Browse credentials — the configuration the
    endpoint originally shipped for. The cost: such a deployment keeps
-   today's forgeable log, and nothing but the log line says so.
+   today's forgeable log, and nothing but the log line says so. Scoped
+   hard (per Codex's review): this fallback is legitimate only while no
+   eBay user data is stored, and the OAuth design carries the recorded
+   obligation to revoke it — an unverifiable notice on a deployment
+   holding seller tokens must 412, not terminally ack — before tokens can
+   persist (see the design's credentials-unset bullet).
 3. **Alert channel.** Step 5 reuses email + ntfy with its own throttle
    (recommended); log-only is the alternative if a public endpoint being
    probed turns out to page too often in practice. (The throttle should make
