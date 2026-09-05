@@ -82,7 +82,14 @@ why): first the raw `body` bytes, then — only if raw fails — the
 `json.dumps(json.loads(body), separators=(",", ":"),
 ensure_ascii=False).encode()`. `True` on either clean verify; every
 failure path (unparseable body included, for the fallback) returns
-`False`. `cryptography` is already in the environment via
+`False`. "Never raises" is the contract, and the handling that delivers it
+is **per attempt**, not one blanket except around the pair:
+`cryptography`'s `verify()` signals mismatch by raising
+`InvalidSignature`, so catch exactly that per candidate input and let the
+fallback's own serialization step fail loudly in tests — a bare except
+spanning both attempts would report a genuine bug (say, a `TypeError`
+building the re-serialization) as an ordinary "signature didn't verify"
+(the auto-review's catch). `cryptography` is already in the environment via
 `python-jose[cryptography]` (`requirements.txt`); do **not** use the
 `ecdsa` package (open PYSEC-2026-1325 backlog item).
 
