@@ -21,9 +21,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   of the whole eBay OAuth/Sell-API track. The design grounds eBay's actual
   scheme in their reference listener SDK (base64-JSON `X-EBAY-SIGNATURE`
   header, ECDSA over SHA-1, public key fetched by kid with the same
-  client-credentials token the Browse source already mints) and pins the one
-  porting trap: the signature covers the raw body bytes, and Python cannot
-  re-serialize its way back to them the way the Node SDK does. Recommends
+  client-credentials token the Browse source already mints) and confronts
+  the one genuinely underdocumented choice — what bytes eBay signs — with a
+  dual-path verifier (raw received bytes first, the SDKs' compact
+  re-serialization as fallback) plus a genuinely eBay-signed test vector
+  vendored from the reference SDK, so the choice is pinned by interop
+  evidence rather than asserted. Recommends
   412-on-failure — reversing the backlog item's own "still 2xx" assumption,
   because a 2xx is a terminal ack that discards eBay's redelivery of a
   genuine notice we failed to verify — with a throttled owner alert bounding

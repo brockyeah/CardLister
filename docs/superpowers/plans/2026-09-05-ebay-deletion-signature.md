@@ -50,7 +50,7 @@ negative-cached (second call inside the TTL makes no request); token `None`
 cache-clearing fixture — module-level caches leak between tests otherwise
 (the `db_session` fixture precedent: isolation is opt-in here).
 
-## Step 3 — PEM re-flow + ECDSA verify over raw bytes
+## Step 3 — PEM re-flow + dual-path ECDSA verify
 
 **Gate before this step:** manually cross-check the scheme (header fields,
 ECDSA/SHA-1, key endpoint, 204/412 semantics) against eBay's own guide
@@ -66,22 +66,37 @@ compact response omits (after `-----BEGIN PUBLIC KEY-----`, before
 `verify_notice(body: bytes, header: str) -> bool` gluing steps 1–3:
 decode header → fetch key → load via
 `cryptography.hazmat.primitives.serialization.load_pem_public_key` →
-`public_key.verify(signature, body, ec.ECDSA(hashes.SHA1()))`. `True` only
-on a clean verify; every failure path returns `False`. `cryptography` is
-already in the environment via `python-jose[cryptography]`
-(`requirements.txt`); do **not** use the `ecdsa` package (open
-PYSEC-2026-1325 backlog item).
+verify with `ec.ECDSA(hashes.SHA1())` against the **two candidate inputs
+in order** (per the design's "verifier's input" section, which grounds
+why): first the raw `body` bytes, then — only if raw fails — the
+`JSON.stringify`-equivalent compact re-serialization
+`json.dumps(json.loads(body), separators=(",", ":"),
+ensure_ascii=False).encode()`. `True` on either clean verify; every
+failure path (unparseable body included, for the fallback) returns
+`False`. `cryptography` is already in the environment via
+`python-jose[cryptography]` (`requirements.txt`); do **not** use the
+`ecdsa` package (open PYSEC-2026-1325 backlog item).
 
-**Test**: generate a local `SECP256R1` keypair; sign a body; a
-newline-stripped PEM of the public key re-flows, loads, and verifies —
-pinning the re-flow against the real loader, not string equality. The
-signature-over-raw-bytes contract gets its own case: a body whose compact
-JSON differs from Python's default `json.dumps` round-trip (non-ASCII
-player name, no spaces after separators), signed over the exact bytes —
-verifies as bytes, and the test asserts
-`json.dumps(json.loads(body)).encode() != body` so the case actually
-exercises the trap it exists to pin. Tampered body → `False`; signature
-from a different key → `False`.
+**Test**: two anchors, one per path.
+*Own-keypair (raw path):* generate a local `SECP256R1` keypair; sign a
+body; a newline-stripped PEM of the public key re-flows, loads, and
+verifies — pinning the re-flow against the real loader, not string
+equality. The body for this case is chosen so a *default* `json.dumps`
+round-trip would alter it (non-ASCII player name, no spaces after
+separators) and the test asserts
+`json.dumps(json.loads(body)).encode() != body`, so the raw path is
+demonstrably doing the work. Tampered body → `False`; signature from a
+different key → `False`.
+*eBay-signed vector (fallback path):* vendor the VALID sample from the
+Node SDK's `test/test.json` (payload + genuine signature header + matching
+public key; attribute the source in the fixture) into
+`backend/tests/fixtures/`, monkeypatch `fetch_public_key` to return its
+key, and assert `verify_notice` accepts it — the fixture stores the parsed
+payload rather than wire bytes, so it exercises exactly the
+re-serialization fallback and proves interop against a signature eBay
+actually minted. Also assert the fixture *fails* when the compact
+re-serialization is replaced by a default `json.dumps`, so the
+separators/`ensure_ascii` choices can't regress silently.
 
 ## Step 4 — wire into the handler
 

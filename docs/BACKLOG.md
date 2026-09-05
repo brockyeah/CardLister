@@ -722,9 +722,12 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       2026-08-16 weekly deep review) — **design + plan written 2026-09-05**
       (`docs/superpowers/specs/2026-09-05-ebay-deletion-signature-design.md`,
       `docs/superpowers/plans/2026-09-05-ebay-deletion-signature.md`):
-      recommends in-process ECDSA/SHA-1 verification over the **raw body
-      bytes** (a `json.dumps` round-trip breaks the signature — the Node
-      SDK's re-serialize trick doesn't port), key fetch via the app token
+      recommends in-process ECDSA/SHA-1 verification with a **dual-path
+      verifier input** (raw received bytes first, the official SDKs'
+      compact re-serialization as fallback — what eBay signs is inferred
+      from its SDKs, not documented, so the design verifies under either
+      reading and pins interop with a genuinely eBay-signed vector from the
+      reference SDK's test data), key fetch via the app token
       `ebay_api._get_app_token()` already mints, cached by kid with a
       negative cache, and **412 on failure** — reversing this item's own
       "still 2xx" parenthetical after grounding in eBay's reference SDK

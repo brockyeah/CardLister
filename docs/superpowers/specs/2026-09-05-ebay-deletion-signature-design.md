@@ -76,18 +76,43 @@ genuine notice):
   it does not**. 412 is eBay's documented "delivery failed, retry" signal;
   any 2xx is a terminal ack.
 
-**One Python-specific trap, and it is the load-bearing detail of the whole
-implementation:** the Node SDK verifies `JSON.stringify(message)` — it
-re-serializes the *parsed* body. That works in Node because eBay sends
-compact JSON and V8 preserves key order, so the round-trip reproduces the
-wire bytes. Python's `json.dumps(json.loads(body))` does **not** reproduce
-them (default separators insert spaces; and reproducing another runtime's
-serialization is exactly the kind of contract that breaks silently). The
-signature is over the bytes eBay sent, and our handler already has them: it
-reads the raw stream into `body` for the 64 KB cap
-(`ebay_compliance.py:82-86`). **Verify the raw body bytes**, never a
-re-serialization. A wrong choice here fails every genuine notice while
-passing every test we could write against our own serializer.
+**The verifier's input is the load-bearing detail of the whole
+implementation, and what eBay signs is not directly documented — so state
+the evidence, not just a conclusion.** What is establishable from the
+official SDKs: none verifies the raw received bytes. Node verifies
+`JSON.stringify(parsedBody)`; the Ruby community verifier, `to_json` of the
+parsed hash; the .NET SDK re-serializes a typed `Message` model with
+`System.Text.Json` (compact, `UnsafeRelaxedJsonEscaping`); the PHP SDK,
+bare `json_encode($message)`. All four reconstruct a *compact
+re-serialization of the parsed payload* — and they disagree among
+themselves on escaping edge cases (PHP's default escapes `/` and
+non-ASCII; Node's and .NET's do not), so they cannot all be byte-exact
+against arbitrary payloads. The interpretation under which they all work
+on real notices is that eBay signs the compact JSON it sends — i.e. the
+signed bytes *are* the wire bytes — with each SDK's round-trip merely
+reconstructing them, fragilely, in its own serializer. But that is an
+inference, not a documented contract, and CodeRabbit's review of this
+design was right to flag a pure raw-bytes verifier as resting on it.
+
+**Recommendation: verify both candidate inputs, raw first.** The handler
+already holds the raw received bytes (it reads the stream into `body` for
+the 64 KB cap, `ebay_compliance.py:82-86`); try those, and on mismatch
+retry once against the `JSON.stringify`-equivalent compact re-serialization
+— `json.dumps(json.loads(body), separators=(",", ":"),
+ensure_ascii=False).encode()`. If signed == wire (the likely truth), the
+raw path always passes and the fallback never runs; if eBay ever signs a
+canonical form that differs from the received bytes, the fallback is the
+path every official SDK effectively takes, so genuine notices still
+verify; a forged notice fails both. The cost is one extra in-memory verify
+call, only on the failure path. Never verify a *default* `json.dumps`
+round-trip — its `", "`/`": "` separators match nothing any SDK produces.
+
+**An offline ground-truth fixture exists and the tests must pin it:** the
+Node SDK's `test/test.json` carries a VALID sample — a real
+MARKETPLACE_ACCOUNT_DELETION payload with its genuine signature header and
+the matching public key. Vendored into `backend/tests/fixtures/` (with
+attribution), it proves our re-serialization path interoperates with an
+actual eBay-signed vector, not just with signatures we minted ourselves.
 
 ## Approaches
 
@@ -111,9 +136,10 @@ convention:
    cache** (minutes) so a forged-kid spammer costs eBay's API one 404 per
    window, not one per POST.
 3. **`verify_notice(body_bytes, header) -> bool`** — glue: decode, fetch,
-   re-flow the PEM, `cryptography`'s
-   `public_key.verify(sig, body_bytes, ec.ECDSA(hashes.SHA1()))`. Never
-   raises.
+   re-flow the PEM, then `cryptography`'s
+   `public_key.verify(sig, data, ec.ECDSA(hashes.SHA1()))` against the two
+   candidate inputs in order: the raw `body_bytes`, then the compact
+   re-serialization (see "the verifier's input" above). Never raises.
 
 Handler changes (`routers/ebay_compliance.py`):
 
@@ -189,10 +215,15 @@ environment. Use `cryptography`; add nothing to `requirements.txt`.
 
 ## What could go wrong
 
-- **Verifying a re-serialization instead of the raw bytes** — covered above;
-  the plan pins it with a test whose body contains JSON that
-  Python's default `json.dumps` round-trip would alter (e.g. non-compact
-  separators, non-ASCII), signed over the exact wire bytes.
+- **Choosing the wrong verifier input** — the deepest risk here, treated at
+  length above: what eBay signs is inferred from its SDKs, not documented.
+  Mitigated three ways: the dual-path verifier (raw bytes, then the
+  stringify-equivalent compact re-serialization) passes under either
+  interpretation; the vendored Node-SDK VALID vector pins interop against a
+  genuinely eBay-signed sample; and the plan's own-keypair test signs a body
+  that a *default* `json.dumps` round-trip would alter (non-compact
+  separators, non-ASCII), so the trap of verifying a casually re-serialized
+  body stays fenced.
 - **PEM re-flow wrong** → every fetch "succeeds" and every verify fails.
   Pinned by a test that runs `formatKey`-equivalent on a newline-stripped
   PEM of a locally generated key and successfully loads + verifies with it.
