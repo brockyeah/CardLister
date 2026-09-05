@@ -29,9 +29,12 @@ only in `[Unreleased]` on a branch is not in prod yet.
   evidence rather than asserted. Recommends
   412-on-failure — reversing the backlog item's own "still 2xx" assumption,
   because a 2xx is a terminal ack that discards eBay's redelivery of a
-  genuine notice we failed to verify — with a throttled owner alert bounding
-  the keyset-compliance risk that reversal buys, and a graceful degrade to
-  today's unverified ack when no eBay credentials are configured. Zero
+  genuine notice we failed to verify — shipped in shadow mode (ack + log +
+  throttled owner alert only) until `EBAY_SIGNATURE_ENFORCE=1` is set,
+  which the owner does only after a genuine eBay signature has verified
+  against production; plus a graceful degrade to today's unverified ack
+  when no eBay credentials are configured, explicitly scoped to the era
+  before seller OAuth tokens can exist. Zero
   Anthropic-call delta; no new dependency, schema, or route.
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
