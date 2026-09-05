@@ -151,10 +151,17 @@ Handler changes (`routers/ebay_compliance.py`):
   sanitized userId (the existing repr+cap treatment stays). This branch is
   where the future OAuth feature deletes tokens.
 - **Not verified** (bad header, unknown kid, signature mismatch, key fetch
-  failed) → **412**, log at warning, and fire a throttled owner alert (see
-  below). eBay retries a 412, so a *genuine* notice that failed because our
-  key fetch was down gets redelivered when it recovers; a forged notice gets
-  412 and nobody cares.
+  failed) → log at warning, fire a throttled owner alert (see below), and
+  answer per a **confirm-then-enforce rollout**: shadow mode by default
+  (ack anyway — verification reports on real traffic but cannot yet cost a
+  genuine notice), **412** once `EBAY_SIGNATURE_ENFORCE=1` is set, which
+  the owner does only after a genuine eBay signature — the portal's "Send
+  Test Notification" — has logged `verified` against production. eBay
+  retries a 412, so from then on a *genuine* notice that failed because
+  our key fetch was down gets redelivered when it recovers; a forged
+  notice gets 412 and nobody cares. (The shadow stage is the auto-review's
+  refinement: it settles the verifier-input question empirically before
+  the failure mode with teeth is armed.)
 - **Credentials unset** (`EBAY_APP_ID`/`EBAY_CERT_ID` missing —
   `ebay_api.is_configured()` false) → verification is impossible; keep
   today's behavior exactly: ack 2xx, log `unverified`. This keeps the
@@ -179,8 +186,10 @@ phone push on the first rejected notice.
 **Tradeoffs:** matches eBay's own SDK semantics; genuine notices are never
 silently dropped (412 → retry); the one new risk is that a systematic
 verifier bug answers 412 to *every* genuine notice, which — sustained and
-ignored — risks the keyset. The alert exists precisely to bound "ignored";
-the challenge handshake (what the portal actually probes) is untouched.
+ignored — risks the keyset. Three bounds on it: the alert bounds
+"ignored"; the shadow-then-enforce rollout means 412 is armed only after a
+genuine eBay signature has verified in production; and the challenge
+handshake (what the portal actually probes) is untouched.
 
 ### B. Verify, but always ack 2xx; act only on verified
 

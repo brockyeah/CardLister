@@ -111,17 +111,30 @@ capped body read (which stays byte-for-byte):
 - Verified → log `verified` (same repr+cap userId sanitization) and ack.
   This is the branch the future OAuth feature extends with token deletion.
 - Not verified → log at warning, call
-  `billing_alerts.notify_deletion_notice_rejected()` (step 5), raise
-  `HTTPException(412)`. eBay retries 412s; forgers get nothing.
+  `billing_alerts.notify_deletion_notice_rejected()` (step 5), and then:
+  **shadow mode by default** — ack `{"ack": true}` anyway unless
+  `EBAY_SIGNATURE_ENFORCE=1` is set, in which case raise
+  `HTTPException(412)` (eBay retries 412s; forgers get nothing). Shadow
+  mode is the auto-review's refinement of the empirical question in step
+  3's gate: verification runs and reports on real traffic — the log and
+  the alert say exactly what would have been rejected and on which path —
+  while a verifier bug cannot yet cost a genuine notice or the endpoint's
+  compliance standing. The owner flips `EBAY_SIGNATURE_ENFORCE=1` on
+  Railway after the portal's "Send Test Notification" logs `verified`
+  against production (see post-merge below). The flag is read per-request
+  like the module's other env config, so the flip needs no deploy.
 - 413 cap, GET challenge, OAuth landing pages: untouched.
 
 **Test** (extend `test_ebay_compliance.py`): with `EBAY_APP_ID`/`EBAY_CERT_ID`
 set (monkeypatch) and `ebay_notifications.fetch_public_key` patched to the
 step-3 test key: valid signature → 200 + `verified` in the log record
-(caplog, as `test_deletion_notice_sanitizes_user_id_in_log` does); tampered
-body → 412; absent/garbage header → 412 **and** the patched
-`fetch_public_key` was never called; fetch returning `None` → 412 + alert
-called (patch the alert too). With credentials unset: existing
+(caplog, as `test_deletion_notice_sanitizes_user_id_in_log` does). With
+`EBAY_SIGNATURE_ENFORCE=1` additionally set: tampered body → 412;
+absent/garbage header → 412 **and** the patched `fetch_public_key` was
+never called; fetch returning `None` → 412 + alert called (patch the alert
+too). Without the enforce flag, the same three failure shapes → 200 ack
+**with** the warning log and the alert still fired — shadow mode reports,
+never rejects. With credentials unset: existing
 `test_deletion_notice_acks_without_stored_data` and the sanitization test
 pass **unmodified** — that is the degrade contract. Oversized body still
 413 with credentials set (the cap must fire before any verification work).
@@ -145,7 +158,9 @@ sending, does not disturb `_last_alert_at` / `_last_callup_alert_at`.
 ## Step 6 — docs
 
 - `.env.example`: note that `EBAY_APP_ID`/`EBAY_CERT_ID` now also enable
-  deletion-notice verification (they are already documented for Browse).
+  deletion-notice verification (they are already documented for Browse),
+  and document `EBAY_SIGNATURE_ENFORCE` with its confirm-then-enforce
+  purpose.
 - `CHANGELOG.md`: entry under `[Unreleased]`, moved to a dated heading on
   merge per convention.
 - `docs/BACKLOG.md`: move the item to Shipped with the date; annotate the
@@ -153,10 +168,19 @@ sending, does not disturb `_last_alert_at` / `_last_callup_alert_at`.
 
 ## Post-merge manual verification (the step tests cannot stand in for)
 
-eBay's developer portal has a "Send Test Notification" button on the
-notification-endpoint form. Fire it against production; the Railway log must
-show the `verified` line. If it shows a 412 instead, the alert from step 5
-should already be on the owner's phone — that is the system working.
+The deploy lands in shadow mode, so this is a confirm-then-enforce
+sequence, not a smoke test:
+
+1. eBay's developer portal has a "Send Test Notification" button on the
+   notification-endpoint form. Fire it against production.
+2. The Railway log must show the `verified` line — and which path (raw vs
+   re-serialized) verified it, settling the step-3 question empirically on
+   a genuine eBay signature. A warning line instead means the verifier is
+   wrong somewhere; shadow mode has already acked the notice, so nothing
+   is lost — fix before enforcing.
+3. Only then set `EBAY_SIGNATURE_ENFORCE=1` on Railway. From that point a
+   412 on a real notice means the alert from step 5 is already on the
+   owner's phone — that is the system working.
 
 ## Decisions needed before implementation
 
@@ -165,9 +189,13 @@ should already be on the owner's phone — that is the system working.
    semantics"; the design reverses that after grounding in eBay's reference
    SDK, whose semantics are 204-verified / 412-failed, precisely *because*
    of retry semantics — a 2xx is a terminal ack, so acking an unverified
-   genuine notice discards eBay's redelivery. The risk the reversal buys:
-   a systematically broken verifier 412s real notices until fixed, bounded
-   by the step-5 alert. Approve the reversal or pick Approach B.
+   genuine notice discards eBay's redelivery. The risk the reversal buys —
+   a systematically broken verifier 412s real notices until fixed — is now
+   doubly bounded: by the step-5 alert, and by the shadow-mode rollout in
+   step 4, under which 412 is only ever enabled *after* a genuine eBay
+   signature has verified against production. Approve the reversal (as the
+   enforce-flag end state) or pick Approach B (which is equivalent to
+   never setting the flag, minus the intent).
 2. **Degrade-to-unverified-ack when `EBAY_APP_ID`/`EBAY_CERT_ID` are unset
    (recommended) vs refusing.** Degrading keeps the portal registration
    valid on a deployment with no Browse credentials — the configuration the
