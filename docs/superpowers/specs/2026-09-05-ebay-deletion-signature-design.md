@@ -47,8 +47,11 @@ eBay publishes as the reference — `github.com/eBay/event-notification-nodejs-s
 `lib/validator.js` + `lib/constants.js`) and the Marketplace Account Deletion
 guide (`developer.ebay.com/develop/guides/sell/marketplace-user-account-deletion`;
 note the guide itself is unreachable from the scheduled sandbox's egress
-proxy, so the SDK source is the primary citation here — worth one manual
-cross-check against the guide before implementation):
+proxy, so the SDK source is the primary citation here. A manual cross-check
+against the guide is a **hard gate** before the verification code lands —
+plan steps 3–4 — not optional polish: a wrong curve/hash assumption fails
+silently in exactly the shape this design warns about, 412-ing every
+genuine notice):
 
 - `X-EBAY-SIGNATURE` is **base64-encoded JSON** carrying at least `kid` (the
   id of the eBay public key that signed this notice) and `signature` (the

@@ -52,6 +52,14 @@ cache-clearing fixture — module-level caches leak between tests otherwise
 
 ## Step 3 — PEM re-flow + ECDSA verify over raw bytes
 
+**Gate before this step:** manually cross-check the scheme (header fields,
+ECDSA/SHA-1, key endpoint, 204/412 semantics) against eBay's own guide
+(`developer.ebay.com/develop/guides/sell/marketplace-user-account-deletion`)
+from a machine that can reach it. The design is grounded in the reference
+Node SDK because the guide is egress-blocked from the scheduled sandbox; a
+wrong curve/hash assumption here fails silently by 412-ing every genuine
+notice, so the cross-check is a hard prerequisite of steps 3–4, not polish.
+
 Same module: `_reflow_pem(key: str) -> str` inserting the newlines eBay's
 compact response omits (after `-----BEGIN PUBLIC KEY-----`, before
 `-----END PUBLIC KEY-----`), and
