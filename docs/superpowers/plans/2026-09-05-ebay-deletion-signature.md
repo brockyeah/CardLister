@@ -132,11 +132,23 @@ capped body read (which stays byte-for-byte):
   ntfy network I/O (up to ~20s + ~15s of timeout) and an inline call from
   the async handler would block the lone event loop once per throttle
   window, stalling `/api/health` and every other request (Codex).
-  `_sync_card_to_sheets` in `routers/cards.py` is the repo's pattern, and
-  the alert's own throttle makes post-response ordering irrelevant. Then:
+  **And never `raise HTTPException(412)` after `add_task`** — FastAPI
+  attaches `BackgroundTasks` to the response only on a normal return; a
+  raised exception is answered by the exception middleware's own response,
+  which carries no background, so the scheduled alert is silently dropped
+  in exactly the enforce-mode case that needs it (the auto-review's
+  catch — note `_sync_card_to_sheets`'s call sites in `routers/cards.py`
+  all return normally, so the precedent never exercises schedule-then-
+  raise). The 412 is therefore **returned, not raised**:
+  `JSONResponse(status_code=412, content={"detail": …},
+  background=background_tasks)`, keeping HTTPException's body shape. The
+  alert's own throttle makes post-response ordering irrelevant. The
+  step's test asserting "412 **and** alert called" is the guard for this
+  exact trap — if it fails, fix the response construction, never the
+  assertion. Then:
   **shadow mode by default** — ack `{"ack": true}` anyway unless
-  `EBAY_SIGNATURE_ENFORCE=1` is set, in which case raise
-  `HTTPException(412)` (eBay retries 412s; forgers get nothing). Shadow
+  `EBAY_SIGNATURE_ENFORCE=1` is set, in which case return the 412
+  response described above (eBay retries 412s; forgers get nothing). Shadow
   mode is the auto-review's refinement of the empirical question in step
   3's gate: verification runs and reports on real traffic — the log and
   the alert say exactly what would have been rejected and on which path —

@@ -163,7 +163,11 @@ Handler changes (`routers/ebay_compliance.py`):
   failed) → log at warning, fire a throttled owner alert (see below;
   scheduled as a FastAPI background task, never inline — the alert does
   sync email/ntfy network I/O with tens of seconds of combined timeout,
-  which must not block the lone event loop), and
+  which must not block the lone event loop — and the 412 must then be
+  **returned as a manually built response carrying those background
+  tasks, never raised**: FastAPI drops `BackgroundTasks` scheduled before
+  a raised `HTTPException`, which would silence the alert in exactly the
+  enforce-mode rejection it exists to report), and
   answer per a **confirm-then-enforce rollout**: shadow mode by default
   (ack anyway — verification reports on real traffic but cannot yet cost a
   genuine notice), **412** once `EBAY_SIGNATURE_ENFORCE=1` is set, which
