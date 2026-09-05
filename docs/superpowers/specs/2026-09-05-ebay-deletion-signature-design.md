@@ -297,8 +297,10 @@ Full test list is per-step in the plan doc. The shape: tests generate a
 local EC keypair, monkeypatch `ebay_notifications.fetch_public_key` (module
 attribute, per the repo's patching convention) to return its public half,
 and sign real bodies with the private half — valid signature acks and logs
-`verified`; tampered body 412s; malformed header 412s with the fetch never
-called; fetch failure 412s and fires the (patched) alert; unset credentials
-preserves today's unverified ack; the existing 413 and challenge tests keep
-passing untouched. Ship gates as always: full backend suite green, frontend
+`verified`; with `EBAY_SIGNATURE_ENFORCE=1` set, a tampered body 412s, a
+malformed header 412s with the fetch never called, and a fetch failure
+412s and fires the (patched) alert; without the flag (shadow mode, the
+default) those same failures ack 200 with the warning log and the alert
+still fired; unset credentials preserves today's unverified ack; the
+existing 413 and challenge tests keep passing untouched. Ship gates as always: full backend suite green, frontend
 build green (no frontend surface in this change).
