@@ -10,6 +10,33 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Added
+- Design + plan for verifying eBay's signature on account-deletion notices
+  (docs only, no implementation — the owner approves the approach before code
+  exists). The compliance endpoint acks any POST and its log — the audit
+  trail for the future duty to delete seller OAuth tokens — is writable by
+  anyone with the URL; the backlog names verification the hard prerequisite
+  of the whole eBay OAuth/Sell-API track. The design grounds eBay's actual
+  scheme in their reference listener SDK (base64-JSON `X-EBAY-SIGNATURE`
+  header, ECDSA over SHA-1, public key fetched by kid with the same
+  client-credentials token the Browse source already mints) and confronts
+  the one genuinely underdocumented choice — what bytes eBay signs — with a
+  dual-path verifier (raw received bytes first, the SDKs' compact
+  re-serialization as fallback) plus a genuinely eBay-signed test vector
+  vendored from the reference SDK, so the choice is pinned by interop
+  evidence rather than asserted. Recommends
+  412-on-failure — reversing the backlog item's own "still 2xx" assumption,
+  because a 2xx is a terminal ack that discards eBay's redelivery of a
+  genuine notice we failed to verify — shipped in shadow mode (ack + log +
+  throttled owner alert only) until `EBAY_SIGNATURE_ENFORCE=1` is set,
+  which the owner does only after a genuine eBay signature has verified
+  against production; plus a graceful degrade to today's unverified ack
+  when no eBay credentials are configured, explicitly scoped to the era
+  before seller OAuth tokens can exist. Zero
+  Anthropic-call delta; no new dependency, schema, or route.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so

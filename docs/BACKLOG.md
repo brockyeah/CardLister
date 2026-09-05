@@ -719,7 +719,29 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       exist, an unverified notice becomes an unauthenticated "delete this
       user's tokens" request (medium; **design first** — key fetch + cache +
       verify, still 2xx on failure per eBay retry semantics; found by the
-      2026-08-16 weekly deep review)
+      2026-08-16 weekly deep review) — **design + plan written 2026-09-05**
+      (`docs/superpowers/specs/2026-09-05-ebay-deletion-signature-design.md`,
+      `docs/superpowers/plans/2026-09-05-ebay-deletion-signature.md`):
+      recommends in-process ECDSA/SHA-1 verification with a **dual-path
+      verifier input** (raw received bytes first, the official SDKs'
+      compact re-serialization as fallback — what eBay signs is inferred
+      from its SDKs, not documented, so the design verifies under either
+      reading and pins interop with a genuinely eBay-signed vector from the
+      reference SDK's test data), key fetch via the app token
+      `ebay_api._get_app_token()` already mints, cached by kid with an
+      entry-capped negative cache and a global per-minute fetch budget
+      (per-kid caching alone bounds nothing against a fresh forged kid per
+      POST), and **412 on failure behind a confirm-then-enforce
+      rollout** — the 412 reverses this item's own "still 2xx" parenthetical
+      after grounding in eBay's reference SDK (204-verified / 412-failed; a
+      2xx is a terminal ack that discards eBay's redelivery), but ships in
+      shadow mode (ack + log + alert) until `EBAY_SIGNATURE_ENFORCE=1` is
+      set after a genuine signature verifies in production. Degrades to
+      today's unverified ack when `EBAY_APP_ID`/`EBAY_CERT_ID` are unset,
+      scoped to the era before seller OAuth tokens can exist. Zero Anthropic-call delta; no
+      new dependency (`cryptography` via python-jose), no schema, no new
+      route. **Awaiting owner approval on the three decisions at the end of
+      the plan doc.**
 - [ ] SPA mount wiring test: `test_spa_fallback.py` exercises `SpaStaticFiles`
       on a throwaway app over a temp dir, and `backend/static` doesn't exist
       in CI — so reverting `main.py`'s mount to plain `StaticFiles(html=True)`
