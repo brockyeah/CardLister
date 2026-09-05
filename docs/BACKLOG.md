@@ -728,8 +728,10 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       from its SDKs, not documented, so the design verifies under either
       reading and pins interop with a genuinely eBay-signed vector from the
       reference SDK's test data), key fetch via the app token
-      `ebay_api._get_app_token()` already mints, cached by kid with a
-      negative cache, and **412 on failure behind a confirm-then-enforce
+      `ebay_api._get_app_token()` already mints, cached by kid with an
+      entry-capped negative cache and a global per-minute fetch budget
+      (per-kid caching alone bounds nothing against a fresh forged kid per
+      POST), and **412 on failure behind a confirm-then-enforce
       rollout** — the 412 reverses this item's own "still 2xx" parenthetical
       after grounding in eBay's reference SDK (204-verified / 412-failed; a
       2xx is a terminal ack that discards eBay's redelivery), but ships in
