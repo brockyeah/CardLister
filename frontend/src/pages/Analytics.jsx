@@ -48,11 +48,18 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Same race class the Scanner's pricingSeq guard closes: two filter
+    // clicks in quick succession can resolve out of order, and without the
+    // stale flag the older response would overwrite the newer one under the
+    // newer button's highlight. The cleanup marks the superseded fetch.
+    let stale = false
     setLoading(true)
+    setError('')
     getAnalytics({ range, user: user || undefined, model: model || undefined })
-      .then(setReport)
-      .catch((e) => setError(formatApiError(e, 'Could not load analytics.')))
-      .finally(() => setLoading(false))
+      .then((r) => { if (!stale) setReport(r) })
+      .catch((e) => { if (!stale) setError(formatApiError(e, 'Could not load analytics.')) })
+      .finally(() => { if (!stale) setLoading(false) })
+    return () => { stale = true }
   }, [range, user, model])
 
   const t = report?.totals

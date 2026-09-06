@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { login, setToken, setUsername } from '../api'
+import { formatApiError } from '../lib/apiError.js'
 
 export default function Login() {
   const [username, setUser] = useState('')
@@ -19,7 +20,7 @@ export default function Login() {
       setUsername(resp.username)
       navigate('/')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed')
+      setError(formatApiError(err, 'Login failed'))
     } finally {
       setLoading(false)
     }

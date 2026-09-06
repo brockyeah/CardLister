@@ -366,7 +366,7 @@ export default function Inventory() {
       await unmarkSold(card.id)
       await reload()
     } catch (e) {
-      alert('Unmark failed: ' + (e.response?.data?.detail || e.message))
+      alert('Unmark failed: ' + formatApiError(e, e.message))
     }
   }
 
@@ -420,7 +420,7 @@ export default function Inventory() {
       await deleteCard(card.id)
       await reload()
     } catch (e) {
-      alert('Delete failed: ' + (e.response?.data?.detail || e.message))
+      alert('Delete failed: ' + formatApiError(e, e.message))
     }
   }
 

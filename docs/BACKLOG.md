@@ -5,6 +5,62 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] `resetAfterSave` runs from `doSave`'s click-time closure and can stomp a
+      concurrently reviewed item (2026-09-06 review): with two `ready` items,
+      pressing Save on A and then Review on B during the 1–2s save window let
+      A's completion wipe B's freshly loaded form (`setForm(EMPTY_FORM)`),
+      null the active key, and `setTimeout`-reload B from the stale queue
+      snapshot — silently discarding anything typed into B meanwhile. The
+      2026-09-06 review shipped the stopgap (the queue's Review button is
+      `disabled={submitting}`, closing the only path that switches the active
+      item mid-save), but the underlying shape remains: `resetAfterSave` reads
+      `activeKey` and `queue` from the render that created the click handler.
+      The durable fix is the same one `pricingSeq` embodies — track the active
+      key in a ref and have `resetAfterSave` bail when the item it is
+      finishing is no longer the active one (small; implement directly; inline
+      — `Scanner.jsx`, no test possible without jsdom, so the guard comment
+      must carry the rationale)
+- [ ] `Date Listed` gets neither the bound nor the normalization `Date Sold`
+      got, in the same CSV import loop (2026-09-06 review): the
+      `("date listed", "created_at")` branch in `routers/cards.py` stores the
+      parsed value raw. A mistyped `2062` imports silently and becomes the
+      same permanent furniture the sold-date fix condemned — the inventory
+      list orders `created_at desc`, so the row pins to the top of the
+      inventory forever, and the sheets resync's `(created_at, id)` ordering
+      parks it last. An aware `+14:00` value is stored as its wall clock
+      (SQLite drops tzinfo without converting — the exact bug
+      `normalize_sold_at` exists to prevent), while the same offset on `Date
+      Sold` in the same row is converted to UTC. Reuse the existing pieces:
+      normalize via the same naive-UTC path and warn-and-default on a future
+      value, mirroring the `Date Sold` branch two lines down (small; implement
+      directly; inline — `routers/cards.py` plus a warn-path case in
+      `test_import_csv.py`)
+- [ ] Alert throttle clocks are consumed before delivery is attempted
+      (2026-09-06 review): `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` both stamp `_last_*_alert_at = now`
+      before trying either channel, so a cycle where both channels fail —
+      for the call-up alert, precisely the triggering scenario when ntfy is
+      unconfigured and the mailer is down — delivers nothing yet suppresses
+      the next attempt for the full 6h window, and both callers ignore the
+      return value. Stamping only when `emailed or pushed` (or retrying
+      sooner after a total failure) is strictly better; while in there, add
+      the missing end-to-end case where a cycle has both a failed send and
+      abandoned events (`notify(pending, abandoned)` with both non-zero is
+      pinned only at the unit level today), and consider an autouse fixture
+      for the throttle-clock reset that tests currently do by hand
+      (small; implement directly; inline — `services/billing_alerts.py` +
+      `test_poll_cycle.py`)
+- [ ] The pricing `source` strings deserve the shared-fixture treatment the
+      eBay title and condition tables got (2026-09-06 review, now invariant
+      #16): `pricing.js` refusing `source === 'mock'` is the only thing
+      keeping the $9.99 placeholder out of saved cards, and each side pins its
+      own literal — a backend rename that updates its own test leaves both
+      suites green while the frontend guard silently stops refusing mocks. A
+      fixture both suites read (like `condition_cases.json`) closes it; fold
+      in the duplicated source-label mapping while there (`Scanner.jsx` and
+      `Inventory.jsx` both hand-roll `source === 'ebay_sold' ? 'eBay sold
+      listings' : source`) (small; implement directly; inline —
+      `backend/tests/fixtures/`, both pricing test files, `lib/pricing.js`)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -207,24 +263,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       ordering note anchored on the PATCH/DELETE routes, which still carry the
       same hazard (quick win; implement directly; inline — cards.py only,
       or fold into the permalink item)
-- [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
-      (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
-      `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
-      (48), and only stamps `emailed_at` when `mailer.send_email` returns
-      true. So a failing mailer — wrong SMTP credentials after a Railway env
-      edit, a provider outage, a rate limit — retries the same events every
-      cycle until they cross 48h, at which point they leave the pending window
-      **permanently, unemailed, with nothing recording that an alert was
-      dropped**. Being told a prospect got called up while you hold his 1st
-      Bowman is the feature this app was built around, and this is the one
-      failure mode where it stays quiet and looks healthy: `/api/health`
-      reports the poller fresh, because the heartbeat is stamped after a
-      failure too. The window itself is right (it bounds retries); what's
-      missing is the record. Count events aging out unemailed and surface it —
-      log + the existing ntfy `billing_alerts` push is the cheapest version,
-      and it reuses what's already wired (quick win; implement directly;
-      inline — `services/callups.py` plus a test that fails the mailer and
-      advances the clock past the cutoff)
 - [ ] `/api/health` reports the call-up poller healthy while every alert it
       produces goes undelivered (2026-08-27 review, direct follow-on to the
       delivery alerting that shipped the same day): `_poller_state` tracks only
@@ -463,34 +501,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       pinned in the test makes the insert fail and the append pass. Decide with
       it what the migrations baseline is (earliest deployed shape vs. today's
       production shape) (medium; implement directly; inline)
-- [ ] Mark-sold accepts a date in the future (2026-08-20 review, found while
-      fixing the UTC default): the picker carries no `max`, and
-      `MarkSoldRequest` validates only `sold_price > 0` — nothing bounds
-      `sold_at` at all. A mistyped year (2062) is accepted silently, and from
-      there it is permanent furniture: it appears in the `sold-years` picker
-      forever, it sorts to the end of every tax export, and the only way back
-      is unmark-sold and redo. Cap the input at today's local date and reject a
-      `sold_at` more than a day ahead server-side (a day of slack, since the
-      client submits an instant and the two clocks need not agree). Pair it
-      with a floor on how far back a sale can be dated only if the owner wants
-      one — backdating a sale is legitimate, post-dating one is not (quick win;
-      implement directly; inline — Inventory.jsx plus a schema validator and
-      its test)
-- [ ] Production health monitoring does not depend on the routine's network
-      policy (2026-08-20 review, hit during that run): Phase 1 of the daily
-      routine pings
-      `https://cardlister-production.up.railway.app/api/health`, and from the
-      scheduled cloud sandbox that request is refused by the egress proxy
-      (403 to CONNECT), so the health check silently cannot run — the one step
-      of the routine meant to notice a failed deploy or a stale call-up poller.
-      Nothing is wrong with the app; the check just has no route to it. Move
-      the ping into a scheduled GitHub Actions workflow that fails the run when
-      `ok`/`db` is false or the poller is stale, so health is watched from
-      somewhere that can reach it and a failure shows up as a red run rather
-      than a missing sentence in a report. Keep the routine's own attempt —
-      when it works it is free — but have it report the block explicitly rather
-      than the result (quick win; implement directly; inline — new workflow
-      plus a note in `docs/notes/daily-routine-prompt.md`)
 - [ ] `Date Listed` is the one date the CSV importer still takes on faith
       (2026-08-31, direct follow-on to the sale-date bound that shipped the
       same day): `_parse_date` feeds both columns, and `sold_at` is now bounded
@@ -936,6 +946,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] `POST /api/news/poll-now` can interleave with the background poller
+      (2026-09-06 review): both run `run_poll_cycle` on separate sessions in
+      the threadpool, so a manual poll landing between the background cycle's
+      pending query and its `emailed_at` stamp double-sends the digest, and
+      concurrent inserts of the same `tx_id` hit the unique constraint and 500
+      the manual poll. Window is seconds wide with two users and the endpoint
+      is curl-only — note the shape before adding any UI button for it; an
+      asyncio lock around the cycle would close it (small; implement directly;
+      inline — `routers/news.py` / `main.py`)
 - [ ] Batch-pairing vision assist (rainy-day; explicitly deferred by owner
       2026-08-15): one cheap Haiku call per batch classifying thumbnails as
       front/back to improve the pairing proposal — Approach B in

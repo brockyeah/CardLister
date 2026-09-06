@@ -169,7 +169,8 @@ def _compose_digest(events: list) -> tuple[str, str]:
 
 def run_poll_cycle(db: Session) -> dict:
     """One poll: fetch trailing 2-day window, record new call-ups, email the
-    alertable un-emailed ones as a single digest. Returns {new, emailed}."""
+    alertable un-emailed ones as a single digest. Returns {new, emailed,
+    pending, abandoned}."""
     today = datetime.utcnow().date()
     start = (today - timedelta(days=2)).isoformat()
     end = today.isoformat()

@@ -17,8 +17,10 @@ import time
 
 import httpx
 
+# Module import only (no bound `send_email`): a test that patches
+# `mailer.send_email` must intercept this module's sends the same way it
+# intercepts callups' — a bound import would split that seam in two.
 from . import mailer
-from .mailer import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,13 @@ def send_test_alert() -> dict:
         "If you can read this, the channel works. No action needed."
     )
     return {
-        "email_configured": bool(os.getenv("SENDGRID_API_KEY") or os.getenv("SMTP_USERNAME")),
+        # The mailer's own definition of configured (provider creds AND
+        # recipients), not a bare provider-env check: SMTP_USERNAME with an
+        # empty ALERT_EMAILS must report unconfigured here, or the endpoint
+        # whose purpose is verifying wiring claims a channel that cannot send.
+        "email_configured": mailer.is_configured(),
         "push_configured": bool(os.getenv("NTFY_TOPIC", "").strip()),
-        "email_sent": send_email(title, body),
+        "email_sent": mailer.send_email(title, body),
         "push_sent": _push_via_ntfy(title, body),
     }
 
@@ -92,7 +98,7 @@ def notify_credits_exhausted(detail: str) -> bool:
         f"(Repeat alerts suppressed for {ALERT_THROTTLE_SECONDS // 3600}h.)"
     )
     try:
-        emailed = send_email(title, body)
+        emailed = mailer.send_email(title, body)
         pushed = _push_via_ntfy(title, body)
         logger.warning("Credits-exhausted alert sent (email=%s, push=%s): %s", emailed, pushed, detail)
         return emailed or pushed
@@ -169,7 +175,7 @@ def notify_callup_alerts_undelivered(
     )
 
     try:
-        emailed = send_email(title, body)
+        emailed = mailer.send_email(title, body)
         pushed = _push_via_ntfy(title, body)
         logger.warning(
             "Call-up delivery alert sent (email=%s, push=%s): pending=%s abandoned=%s",
