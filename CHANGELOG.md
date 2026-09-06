@@ -10,6 +10,76 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+Weekly deep review (2026-09-06) of the PRs #63–#68 week: whole-subsystem pass
+over the poller/alerts, learning, validation, and the new frontend libs.
+
+### Fixed
+- The alert-test endpoint no longer claims an email channel that cannot send.
+  `send_test_alert` answered "is email configured?" with a bare provider-env
+  check (`SENDGRID_API_KEY` or `SMTP_USERNAME`), while the mailer itself also
+  requires recipients — so `SMTP_USERNAME` with an empty `ALERT_EMAILS`
+  returned `email_configured: true, email_sent: false` from the endpoint whose
+  sole purpose is verifying wiring. It now reports `mailer.is_configured()`,
+  the same answer the call-up delivery alert already used to diagnose
+  misconfiguration; `billing_alerts` also now calls the mailer through the
+  module (not a bound import), so a test patching `mailer.send_email`
+  intercepts its sends the same way it intercepts the digest's.
+- The mark-sold picker's own default date could be refused at extreme UTC
+  offsets. The client anchors a picked day at noon UTC, so a user at +14:00
+  submitting their local "today" during its first two hours sends an instant
+  up to 26 hours ahead of the server clock — past the flat one-day skew
+  allowance, which 422'd the value the modal itself pre-filled. The bound is
+  now 26 hours, still refusing the mistyped-year case it exists for.
+- Analytics now ignores out-of-order report responses. Two filter clicks in
+  quick succession could resolve out of order and render the older range's
+  numbers under the newer button's highlight — the same race class the
+  Scanner's `pricingSeq` guard closed — and a transient fetch error left its
+  banner up for the rest of the session, over perfectly fresh data. The
+  effect now marks superseded fetches stale and clears the error on each new
+  one.
+- Saving one batch item can no longer stomp another being reviewed. The
+  queue's Review button stayed enabled during the 1–2s save window, and the
+  save's completion handler runs from its click-time closure — switching
+  items mid-save let it wipe the newly loaded form and silently reload the
+  item, discarding anything typed meanwhile. Review is now disabled while a
+  save is in flight (the deeper closure fix is filed in the backlog).
+- The vision prompts' don't-copy caveat now names all five copy-specific
+  fields. `COPY_SPECIFIC_FIELDS` withholds autograph and patch status from
+  the exact-match overlay for the same reason as parallel/refractor/serial —
+  they vary per physical copy — but both prompt caveats listed only the last
+  three, leaving the cheatsheet free to teach a per-copy autograph as if it
+  were a per-set rule.
+- Login and the Inventory unmark/delete alerts now format API errors through
+  the shared `lib/apiError.js` helper instead of hand-rolling
+  `e.response?.data?.detail` — Login was the one remaining place a 422's
+  array `detail` could reach JSX as an object, the white-screen that helper
+  exists to prevent.
+
+### Added
+- The scan endpoint's learning seam is now pinned by a test. Every other
+  endpoint test runs in mock mode, where extraction returns before touching
+  anything past the image path — so the cheatsheet could stop being sent, the
+  threadpool call's positional argument order could rot, or the exact-match
+  overlay could be disconnected, all with the suite green. The new test
+  drives the real branch and asserts the full positional contract, the
+  empty-cheatsheet→None coercion, and that the overlay's output is returned
+  and persisted.
+
+### Documentation
+- `CALLUP_ALERT_THROTTLE_SECONDS` documented in `.env.example` beside its
+  sibling (same import-time `int("")` startup crash on an empty value),
+  `run_poll_cycle`'s docstring caught up with its own return keys, and
+  CLAUDE.md gained invariant #16 (the pricing `source` string `"mock"` is
+  load-bearing across the repo boundary with no shared fixture) plus the
+  billing-alert throttle clocks on invariant #9's per-process-state list.
+  Three already-shipped backlog items (abandoned-alert visibility, the
+  future-sale bound, the health workflow) moved out of "Now / next" so runs
+  stop re-proposing them; new findings filed, and the `Date Listed`
+  normalization gap folded into its existing 2026-08-31 entry rather than
+  filed beside it (caught by the auto-review).
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so

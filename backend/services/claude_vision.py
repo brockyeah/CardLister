@@ -300,8 +300,9 @@ def _extract_via_subscription(
     if extra_context:
         instruction += (
             "\n\nThe user has corrected past scans as follows. Use these to learn this "
-            "collection's naming and numbering conventions, but do NOT copy parallel, "
-            "refractor, or serial-number status from them — those vary per physical copy:\n"
+            "collection's naming and numbering conventions, but do NOT copy autograph, "
+            "patch, parallel, refractor, or serial-number status from them — those vary "
+            "per physical copy:\n"
             + extra_context
         )
     prompt = f"{SYSTEM_PROMPT}\n\n{instruction}"
@@ -389,8 +390,9 @@ def extract_card_from_image(
         if extra_context:
             instruction += (
                 "\n\nThe user has corrected past scans as follows. Use these to learn this "
-                "collection's naming and numbering conventions, but do NOT copy parallel, "
-                "refractor, or serial-number status from them — those vary per physical copy:\n"
+                "collection's naming and numbering conventions, but do NOT copy autograph, "
+                "patch, parallel, refractor, or serial-number status from them — those vary "
+                "per physical copy:\n"
                 + extra_context
             )
         content.append({"type": "text", "text": instruction})

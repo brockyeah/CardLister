@@ -179,7 +179,7 @@ def test_undelivered_alert_pushes_and_names_a_missing_mail_config(monkeypatch):
             return True
         return _send
 
-    monkeypatch.setattr(callups.billing_alerts, "send_email", record("email"))
+    monkeypatch.setattr(callups.billing_alerts.mailer, "send_email", record("email"))
     monkeypatch.setattr(callups.billing_alerts, "_push_via_ntfy", record("push"))
     monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: False)
 
@@ -193,7 +193,7 @@ def test_undelivered_alert_pushes_and_names_a_missing_mail_config(monkeypatch):
 
 def _capture_body(monkeypatch, configured=True):
     bodies = []
-    monkeypatch.setattr(callups.billing_alerts, "send_email", lambda s, b: True)
+    monkeypatch.setattr(callups.billing_alerts.mailer, "send_email", lambda s, b: True)
     monkeypatch.setattr(callups.billing_alerts, "_push_via_ntfy",
                         lambda s, b: bodies.append(b) or True)
     monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: configured)
@@ -245,7 +245,7 @@ def test_undelivered_alert_is_throttled(monkeypatch):
     # at 15-minute polling that is 96 pushes a day without the throttle.
     _reset_callup_throttle()
     pushes = []
-    monkeypatch.setattr(callups.billing_alerts, "send_email", lambda s, b: True)
+    monkeypatch.setattr(callups.billing_alerts.mailer, "send_email", lambda s, b: True)
     monkeypatch.setattr(callups.billing_alerts, "_push_via_ntfy",
                         lambda s, b: pushes.append(b) or True)
     monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: True)
@@ -259,7 +259,7 @@ def test_callup_and_billing_alerts_do_not_share_a_throttle_clock(monkeypatch):
     # Two unrelated outages can be live at once; one must not silence the other.
     _reset_callup_throttle()
     callups.billing_alerts._last_alert_at = 0.0
-    monkeypatch.setattr(callups.billing_alerts, "send_email", lambda s, b: True)
+    monkeypatch.setattr(callups.billing_alerts.mailer, "send_email", lambda s, b: True)
     monkeypatch.setattr(callups.billing_alerts, "_push_via_ntfy", lambda s, b: True)
     monkeypatch.setattr(callups.billing_alerts.mailer, "is_configured", lambda: True)
 
