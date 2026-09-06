@@ -76,7 +76,9 @@ over the poller/alerts, learning, validation, and the new frontend libs.
   billing-alert throttle clocks on invariant #9's per-process-state list.
   Three already-shipped backlog items (abandoned-alert visibility, the
   future-sale bound, the health workflow) moved out of "Now / next" so runs
-  stop re-proposing them; new findings filed.
+  stop re-proposing them; new findings filed, and the `Date Listed`
+  normalization gap folded into its existing 2026-08-31 entry rather than
+  filed beside it (caught by the auto-review).
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 

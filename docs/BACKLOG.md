@@ -20,21 +20,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       finishing is no longer the active one (small; implement directly; inline
       — `Scanner.jsx`, no test possible without jsdom, so the guard comment
       must carry the rationale)
-- [ ] `Date Listed` gets neither the bound nor the normalization `Date Sold`
-      got, in the same CSV import loop (2026-09-06 review): the
-      `("date listed", "created_at")` branch in `routers/cards.py` stores the
-      parsed value raw. A mistyped `2062` imports silently and becomes the
-      same permanent furniture the sold-date fix condemned — the inventory
-      list orders `created_at desc`, so the row pins to the top of the
-      inventory forever, and the sheets resync's `(created_at, id)` ordering
-      parks it last. An aware `+14:00` value is stored as its wall clock
-      (SQLite drops tzinfo without converting — the exact bug
-      `normalize_sold_at` exists to prevent), while the same offset on `Date
-      Sold` in the same row is converted to UTC. Reuse the existing pieces:
-      normalize via the same naive-UTC path and warn-and-default on a future
-      value, mirroring the `Date Sold` branch two lines down (small; implement
-      directly; inline — `routers/cards.py` plus a warn-path case in
-      `test_import_csv.py`)
 - [ ] Alert throttle clocks are consumed before delivery is attempted
       (2026-09-06 review): `notify_credits_exhausted` and
       `notify_callup_alerts_undelivered` both stamp `_last_*_alert_at = now`
@@ -509,11 +494,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       harmless: `created_at` is the Sheets "Date Listed" column, it is the
       primary sort key of the resync (`created_at, id` — the ordering
       invariant #1 depends on), and the planned days-to-sell analytics measures
-      created→sold, which a future listing date makes negative. Apply the same
+      created→sold, which a future listing date makes negative. The
+      2026-09-06 review added the normalization half: an aware `+14:00` value
+      is stored as its wall clock (SQLite drops tzinfo without converting —
+      the exact bug `normalize_sold_at` exists to prevent), while the same
+      offset on `Date Sold` in the same row is converted to UTC, and a future
+      `created_at` also pins the row to the top of the `created_at desc`
+      inventory list forever. Apply the same
       `reject_future_sold_at` bound (rename it for both callers) with the same
-      drop-and-warn treatment, and decide with it whether `created_at` should
+      drop-and-warn treatment plus the naive-UTC normalization, and decide
+      with it whether `created_at` should
       fall back to now the way a missing `sold_at` does (quick win; implement
-      directly; inline — `routers/cards.py` plus a test)
+      directly; inline — `routers/cards.py` plus a warn-path case in
+      `test_import_csv.py`)
 - [ ] Test fixtures that are ahead of the calendar fail on a date, not on a
       change (2026-08-31, hit while adding the sale-date bound): the sold-export
       ordering test marked a card sold on `2026-12-20`, so the new bound turned
