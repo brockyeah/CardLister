@@ -5,6 +5,20 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] `storage_usage` guards only one of its three file loops against a file
+      vanishing mid-scan (2026-09-07, Claude Auto Review on PR #77; pre-existing
+      and deliberately left out of that PR rather than widening it): the
+      `other_bytes` walk added there wraps `is_file()`/`stat()` in
+      `try/except OSError`, because a backup snapshot can be unlinked by its own
+      `BackgroundTask` while the endpoint is reading. The `db_bytes` line and
+      the `uploads/` counting loop immediately above it do the same `stat()`
+      with no guard, so the identical race still 500s a read-only readout — and
+      the inconsistency is now *within a single function*, which is worse for
+      the next reader than either extreme. The window is small and the endpoint
+      is not hot, so this is robustness rather than a live bug; the fix is to
+      hoist one small helper that stats a path and returns 0 on `OSError`, and
+      use it in all three places (quick win; implement directly; inline —
+      `routers/analytics.py` only)
 - [ ] The storage tiles report usage but never **capacity**, so there is no
       warning before the volume fills (2026-09-07 daily run, found while adding
       the `other_bytes` figure): nothing in `backend/` calls `shutil.disk_usage`
