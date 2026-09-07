@@ -39,10 +39,21 @@ only in `[Unreleased]` on a branch is not in prod yet.
   renders scan photos today; it stops being harmless the moment anything does
   (the scan-history browser is the obvious first caller), at which point every
   never-saved scan older than the 48h grace window renders a broken thumbnail.
-  `cleanup_uploads` now clears `image_path`/`back_image_path` on exactly the
-  scans whose files it removed, in the same call, and reports `scans_cleared`
+  `cleanup_uploads` now clears `image_path`/`back_image_path` on the scans
+  whose photos are gone, in the same call, and reports `scans_cleared`
   alongside the existing counts. Scans whose photos a card still references are
   untouched.
+  The set is recomputed from **what is on disk**, not from the call's own
+  delete list (CodeRabbit review on PR #77). That distinction is load-bearing:
+  the unlinks hit the filesystem before the DB write, so if `db.commit()`
+  failed, the files were gone while the rows still pointed at them — and since
+  `_orphaned_uploads` only ever sees files that still *exist*, a later run
+  could never find those rows again, leaving them stranded permanently. Reading
+  disk truth makes the pass self-healing and idempotent instead: a plain re-run
+  repairs a scan whose photo went missing for any reason, which also means it
+  retroactively fixes every dangling path left by cleanups that ran before this
+  behaviour shipped. Same shape as the Sheets resync being a clear-then-rewrite
+  — that is what makes it usable as a repair tool.
 
 ### Changed
 - The queue-depth check is now **measured in Phase 1, where it can still change

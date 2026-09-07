@@ -101,6 +101,37 @@ def test_cleanup_clears_scan_paths_for_deleted_files(db_session):
     assert referenced.image_path == "/uploads/kept.jpg"
 
 
+def test_cleanup_repairs_scan_paths_whose_files_are_already_gone(db_session):
+    """The sweep is self-healing, not just correct on its own deletions.
+
+    The unlinks are committed to the filesystem before the DB write, so if
+    db.commit() fails the files are gone while the Scan rows still point at
+    them — and _orphaned_uploads only ever sees files that still exist, so
+    keying the repair on that call's own delete list would strand those rows
+    forever. Deriving it from disk instead means a plain re-run fixes them.
+    Same path covers every cleanup that ran before this behaviour shipped.
+    """
+    root = uploads_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    for f in root.iterdir():
+        f.unlink()
+    # A scan pointing at a file that is already absent, and nothing for this
+    # call to delete — so the repair cannot be coming from the delete list.
+    db_session.add(Scan(username="tester", image_path="/uploads/vanished.jpg",
+                        back_image_path="/uploads/vanished-back.jpg"))
+    db_session.commit()
+
+    with TestClient(app) as client:
+        r = client.post("/api/analytics/uploads/cleanup", headers=_auth(client))
+        assert r.status_code == 200, r.text
+        assert r.json() == {"deleted": 0, "freed_bytes": 0, "scans_cleared": 1}
+
+    db_session.expire_all()
+    repaired = db_session.query(Scan).one()
+    assert repaired.image_path is None
+    assert repaired.back_image_path is None
+
+
 def test_cleanup_with_no_uploads_dir(db_session):
     root = uploads_dir()
     if root.is_dir():

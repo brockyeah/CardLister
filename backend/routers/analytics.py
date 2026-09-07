@@ -358,7 +358,6 @@ def cleanup_uploads(db: Session = Depends(get_db)):
     """Delete orphaned upload files. Recomputes the orphan set at call time."""
     deleted = 0
     freed = 0
-    removed = set()
     for path, size in _orphaned_uploads(db):
         try:
             path.unlink()
@@ -366,35 +365,48 @@ def cleanup_uploads(db: Session = Depends(get_db)):
             continue
         deleted += 1
         freed += size
-        removed.add(path.name)
 
     # Scan rows deliberately do not protect their files from the sweep (see
     # _orphaned_uploads), so a scan that was never saved as a card is left
-    # holding a path to a file this call just deleted. Nothing renders scan
-    # photos today, which is the only reason that has been harmless; the moment
+    # holding a path to a file the sweep deleted. Nothing renders scan photos
+    # today, which is the only reason that has been harmless; the moment
     # anything does — the scan-history browser is the obvious first caller — a
     # dangling path is a broken image with nothing to distinguish "reclaimed"
-    # from "lost". Clear the columns on exactly the scans whose files went, so
-    # the row stays honest about what it still has.
+    # from "lost". Clear the columns so the row stays honest about what it has.
     #
-    # Basenames are compared in Python rather than filtered in SQL because the
-    # stored value is a public URL path, not a bare filename; this mirrors how
-    # _orphaned_uploads already loads every card path to compare the same way,
-    # and the sweep is a manual admin action, not a hot path.
+    # The set is recomputed from what is on disk now, NOT from the delete list
+    # above, and that is the load-bearing part: the unlinks are already
+    # committed to the filesystem by the time this runs, so keying on the
+    # in-memory list would strand exactly the rows a failed db.commit() left
+    # behind — _orphaned_uploads only ever sees files that still exist, so a
+    # later run could never find them again. Reading disk truth instead makes
+    # the pass self-healing and idempotent: a re-run repairs a scan whose photo
+    # went missing for any reason, including every cleanup that ran before this
+    # behaviour shipped. Same shape as the Sheets resync being a
+    # clear-then-rewrite, which is what makes it usable as a repair tool.
+    #
+    # Basenames are compared in Python because the stored value is a public URL
+    # path, not a bare filename; this mirrors how _orphaned_uploads already
+    # loads every card path to compare the same way, and the sweep is a manual
+    # admin action, not a hot path.
+    present = set()
+    root = uploads_dir()
+    if root.is_dir():
+        present = {p.name for p in root.iterdir() if p.is_file()}
+
     scans_cleared = 0
-    if removed:
-        for scan in db.query(Scan).all():
-            touched = False
-            if scan.image_path and os.path.basename(scan.image_path) in removed:
-                scan.image_path = None
-                touched = True
-            if scan.back_image_path and os.path.basename(scan.back_image_path) in removed:
-                scan.back_image_path = None
-                touched = True
-            if touched:
-                scans_cleared += 1
-        if scans_cleared:
-            db.commit()
+    for scan in db.query(Scan).all():
+        touched = False
+        if scan.image_path and os.path.basename(scan.image_path) not in present:
+            scan.image_path = None
+            touched = True
+        if scan.back_image_path and os.path.basename(scan.back_image_path) not in present:
+            scan.back_image_path = None
+            touched = True
+        if touched:
+            scans_cleared += 1
+    if scans_cleared:
+        db.commit()
 
     return {"deleted": deleted, "freed_bytes": freed, "scans_cleared": scans_cleared}
 
