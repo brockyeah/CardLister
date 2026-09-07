@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.database import uploads_dir
 from backend.main import app
-from backend.models import Card
+from backend.models import Card, Scan
 from backend.routers.analytics import ORPHAN_GRACE_HOURS
 
 
@@ -58,12 +58,47 @@ def test_orphan_detection_and_cleanup(db_session):
 
         r = client.post("/api/analytics/uploads/cleanup", headers=headers)
         assert r.status_code == 200, r.text
-        assert r.json() == {"deleted": 1, "freed_bytes": 100}
+        assert r.json() == {"deleted": 1, "freed_bytes": 100, "scans_cleared": 0}
 
     assert not stale.exists()
     assert fresh.exists()
     assert front.exists()
     assert back.exists()
+
+
+def test_cleanup_clears_scan_paths_for_deleted_files(db_session):
+    """A swept file must not leave a Scan row pointing at it.
+
+    Scan rows deliberately don't protect their files, so an unsaved scan's
+    photo is exactly what the sweep reclaims — which is precisely why the row
+    is the one left holding a dangling path.
+    """
+    root = uploads_dir()
+    if root.is_dir():
+        for f in root.iterdir():
+            f.unlink()
+    _make_file("scanfront.jpg", age_hours=ORPHAN_GRACE_HOURS + 1)
+    _make_file("scanback.jpg", age_hours=ORPHAN_GRACE_HOURS + 1)
+    kept = _make_file("kept.jpg", age_hours=ORPHAN_GRACE_HOURS + 1)
+    # A second scan whose photo a card still references: its file survives the
+    # sweep, so its paths must survive too.
+    db_session.add(Card(player_name="Keeper", image_path="/uploads/kept.jpg"))
+    db_session.add(Scan(username="tester", image_path="/uploads/scanfront.jpg",
+                        back_image_path="/uploads/scanback.jpg"))
+    db_session.add(Scan(username="tester", image_path="/uploads/kept.jpg"))
+    db_session.commit()
+
+    with TestClient(app) as client:
+        r = client.post("/api/analytics/uploads/cleanup", headers=_auth(client))
+        assert r.status_code == 200, r.text
+        assert r.json() == {"deleted": 2, "freed_bytes": 20, "scans_cleared": 1}
+
+    assert kept.exists()
+    db_session.expire_all()
+    swept, referenced = db_session.query(Scan).order_by(Scan.id).all()
+    assert swept.image_path is None
+    assert swept.back_image_path is None
+    assert referenced.image_path == "/uploads/kept.jpg"
 
 
 def test_cleanup_with_no_uploads_dir(db_session):
