@@ -10,6 +10,118 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Fixed
+- The storage tiles no longer under-report the volume they exist to watch.
+  `storage_usage` added `os.path.getsize(DB_PATH)` to the uploads directory and
+  called that the footprint, so **anything else sharing the Railway volume was
+  invisible** — the SQLite `-wal`/`-shm` sidecars if journal mode is ever
+  changed, a backup snapshot mid-download, and worst of all a snapshot leaked by
+  a client that disconnected, which is a full copy of the database and is only
+  bounded to an hour by the backup sweep. These tiles are the app's only view of
+  volume pressure, so the number they show is the one that will be believed when
+  Railway starts refusing writes. The endpoint now walks the DB's own directory
+  and reports the remainder as a separate `other_bytes` figure, surfaced as an
+  "Other on volume" tile. Deliberately **not** folded into `db_bytes`: a growing
+  remainder is a leak, and folding it in would disguise it as the database
+  getting bigger — which is the one reading that would send the owner looking in
+  the wrong place. `uploads/` is pruned from the walk so it cannot be
+  double-counted, symlinks are skipped rather than followed off-volume, and a
+  file that vanishes mid-walk (a snapshot being unlinked by its own
+  `BackgroundTask`) is stepped over instead of turning a read-only readout into
+  a 500.
+- Orphan cleanup no longer leaves a `Scan` row pointing at a file it just
+  deleted. `_orphaned_uploads` deliberately lets scan rows go unprotected — an
+  unsaved scan's photo is exactly the disk growth the tool reclaims — but the
+  `Scan` row survived with a path to nothing, and nothing recorded that the
+  photo had been reclaimed rather than lost. Harmless only because nothing
+  renders scan photos today; it stops being harmless the moment anything does
+  (the scan-history browser is the obvious first caller), at which point every
+  never-saved scan older than the 48h grace window renders a broken thumbnail.
+  `cleanup_uploads` now clears `image_path`/`back_image_path` on the scans
+  whose photos are gone, in the same call, and reports `scans_cleared`
+  alongside the existing counts. Scans whose photos a card still references are
+  untouched.
+  The set is recomputed from **what is on disk**, not from the call's own
+  delete list (CodeRabbit review on PR #77). That distinction is load-bearing:
+  the unlinks hit the filesystem before the DB write, so if `db.commit()`
+  failed, the files were gone while the rows still pointed at them — and since
+  `_orphaned_uploads` only ever sees files that still *exist*, a later run
+  could never find those rows again, leaving them stranded permanently. Reading
+  disk truth makes the pass self-healing and idempotent instead: a plain re-run
+  repairs a scan whose photo went missing for any reason, which also means it
+  retroactively fixes every dangling path left by cleanups that ran before this
+  behaviour shipped. Same shape as the Sheets resync being a clear-then-rewrite
+  — that is what makes it usable as a repair tool.
+
+### Changed
+- The queue-depth check is now **measured in Phase 1, where it can still change
+  what gets built** (Codex review on PR #77). As first written it lived in
+  Phase 4, so its own instruction to "prefer the smallest useful change, or
+  none" arrived after Phase 3 had already implemented, pushed and opened a PR —
+  advice that could never reach the decision it was written for. Step 1 now
+  measures the queue, step 7 consults it before building, and step 13 reports
+  it. The threshold also counts the PR the run is about to open, since that is
+  the one that tips the count.
+- The "stay silent if nothing shipped" rule **no longer suppresses the queue
+  report** (Codex review on PR #77). A run that ships nothing *because* the
+  queue is deep is exactly the run whose one fact the owner needs, and the
+  unconditional silence rule would have swallowed precisely that notification —
+  the failure mode the queue-depth change exists to fix, reintroduced two steps
+  later. A tripped queue threshold is now an explicit exemption from silence.
+- The daily routine now reports **review-queue depth before its own output**.
+  It ships 1–2 quick wins a day and cannot merge anything, so when the owner
+  stops merging, its PRs accumulate silently: each run reads a `main` further
+  behind the work, and every branch's `[Unreleased]` entry becomes a conflict
+  against the others. That has now happened twice — eight PRs open on
+  2026-08-31, six on 2026-09-07 with nothing merged for a week — and the run
+  knew it both times and never said so, because the report was scoped to what
+  the run itself did. "Nothing has merged in N days" is the single fact that
+  changes what the owner should do with the run, so it now leads the
+  notification, and a deep queue tells the run to prefer the smallest useful
+  change over a large one.
+- The routine prompt no longer claims three automated reviewers when one is
+  running. CodeRabbit stopped reviewing on its own (verified on PRs #73–#76,
+  each carrying only *"this repository does not receive automatic reviews
+  because it has fewer than 10 stars"*; #71 and #72 were still reviewed, so the
+  change is on their side, not a misconfiguration here). It still reads
+  `.coderabbit.yaml` and quotes the config back, which is what made the loss
+  easy to miss. This mattered specifically because the prompt used the *count*
+  of reviewers as its stated reason not to self-review. The prompt now names the
+  Claude Auto Review Action as the one automatic pass and tells the run to post
+  the notice's own escape hatch — a `@coderabbitai review` comment — after
+  opening the PR.
+
+### Documentation
+- **CLAUDE.md's storage note no longer contradicts the code** (Codex review on
+  PR #77). The `backup.db` paragraph still said a leaked snapshot was
+  "invisible to `storage_usage`, which counts only the DB file and the uploads
+  dir" — true when written, false as of the `other_bytes` change above. That
+  mattered more than an ordinary stale comment: Phase 0 of the daily routine
+  makes every future automated run read CLAUDE.md before touching anything, so
+  a run could have reasoned from the old claim or re-proposed the bug that was
+  just fixed. The paragraph now says the sweep is what reclaims the space and
+  the tile is what makes the leak legible.
+- **Codex does appear on the PR, and the docs said it never would.** Both
+  CLAUDE.md and the routine prompt told runs that Codex reviews only out of
+  band and that nothing would show up on the PR — so "don't look for it there".
+  It is in fact configured as a GitHub reviewer and posts inline P1/P2 comments
+  as `chatgpt-codex-connector[bot]`; it left three on this PR, all three
+  correct. Following the old instruction would have meant ignoring them. Both
+  files now describe both halves: the bot findings on the PR, which are to be
+  verified and fixed like any other bot's, and the owner's separate out-of-band
+  runs, which still mean a quiet PR is not a pass.
+- `docs/notes/daily-routine-prompt.md` now carries a standing warning that the
+  **live cloud prompt has drifted behind it**, with the two concrete gaps. The
+  serious one is step 11: the live prompt still lacks PR #69's
+  `chore/changelog-<date>` branch rule, so it instructs the run to date a
+  changelog heading on its working branch — which CI's `changelog-guard` job now
+  fails by construction. That has not bitten only because no PR with
+  `[Unreleased]` entries has merged since the guard shipped; the next one will.
+  The file is the only readable record of prompts that live in the cloud, so a
+  silent divergence between the two is invisible until it breaks a run.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so

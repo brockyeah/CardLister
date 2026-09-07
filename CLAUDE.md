@@ -90,7 +90,7 @@ An in-process asyncio task polls MLB transactions every `CALLUP_POLL_MINUTES`, e
 
 SQLite, no Alembic. `create_all()` only creates missing tables — it never ALTERs — so **every new column on an existing table needs an entry in `_COLUMN_MIGRATIONS`**, a hand-maintained list applied idempotently at startup. New *tables* need nothing. `uploads_dir()` is derived as `Path(DB_PATH).parent / "uploads"`, so one Railway volume at `/data` holds both the DB and every photo.
 
-`GET /api/analytics/backup.db` stages its `VACUUM INTO` snapshot in that same directory rather than a system temp dir — the container's `/tmp` is ephemeral disk sized for neither a full copy of the DB nor its growth. A backup therefore briefly doubles the DB's footprint on the volume; out-of-space returns 507 rather than a blank 500. The staging file is unlinked by a `BackgroundTask`, which a client disconnect skips, so each request first sweeps `cardlister-backup-*.db` files older than an hour — without that, a leak is permanent and invisible to `storage_usage`, which counts only the DB file and the uploads dir.
+`GET /api/analytics/backup.db` stages its `VACUUM INTO` snapshot in that same directory rather than a system temp dir — the container's `/tmp` is ephemeral disk sized for neither a full copy of the DB nor its growth. A backup therefore briefly doubles the DB's footprint on the volume; out-of-space returns 507 rather than a blank 500. The staging file is unlinked by a `BackgroundTask`, which a client disconnect skips, so each request first sweeps `cardlister-backup-*.db` files older than an hour — without that, a leak is permanent. It is no longer *invisible*: `storage_usage` walks the DB's own directory one level deep and reports everything that is neither the DB file nor `uploads/` as `other_bytes`, so a leaked snapshot shows up on the "Other on volume" tile. The sweep is still what reclaims the space — the tile only makes the leak legible.
 
 ### Frontend (`frontend/src`)
 
@@ -177,7 +177,7 @@ to push" does not work across the two.
 
 - **Never merge PRs — that is the owner's call.** Open the PR, drive it to green, respond to the Claude auto-review action's findings (it exists to give a second opinion from a clean context; don't self-review in its place).
 
-**NOTE** Codex will review your output once you are done with any implementation. This happens outside GitHub — the owner runs Codex themselves and relays its findings back in chat. Nothing will appear on the PR, so don't wait for it, look for it in CI, or treat its absence as a pass. Expect follow-up concerns to arrive from the owner after work looks finished, and treat them as review feedback on code you already shipped.
+**NOTE** Codex reviews your output once you are done with any implementation, and it arrives two ways. It **does** post on the PR as `chatgpt-codex-connector[bot]` (configured as a GitHub reviewer for this repo; triggers on PR open, ready-for-review, and `@codex review`), leaving inline P1/P2 comments — verified 2026-09-07 on PR #77. Treat those like any other review bot's findings: verify each against the code and push the fix. The owner **also** runs Codex themselves outside GitHub and relays findings back in chat, and that half leaves no trace on the PR — so a quiet PR is still not a pass, and follow-up concerns arriving after work looks finished are review feedback on code you already shipped. (This note previously said nothing would ever appear on the PR, which by 2026-09-07 meant ignoring real findings.)
 
 ## Other agent configs
 
