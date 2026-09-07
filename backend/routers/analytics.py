@@ -358,6 +358,7 @@ def cleanup_uploads(db: Session = Depends(get_db)):
     """Delete orphaned upload files. Recomputes the orphan set at call time."""
     deleted = 0
     freed = 0
+    removed = set()
     for path, size in _orphaned_uploads(db):
         try:
             path.unlink()
@@ -365,14 +366,58 @@ def cleanup_uploads(db: Session = Depends(get_db)):
             continue
         deleted += 1
         freed += size
-    return {"deleted": deleted, "freed_bytes": freed}
+        removed.add(path.name)
+
+    # Scan rows deliberately do not protect their files from the sweep (see
+    # _orphaned_uploads), so a scan that was never saved as a card is left
+    # holding a path to a file this call just deleted. Nothing renders scan
+    # photos today, which is the only reason that has been harmless; the moment
+    # anything does — the scan-history browser is the obvious first caller — a
+    # dangling path is a broken image with nothing to distinguish "reclaimed"
+    # from "lost". Clear the columns on exactly the scans whose files went, so
+    # the row stays honest about what it still has.
+    #
+    # Basenames are compared in Python rather than filtered in SQL because the
+    # stored value is a public URL path, not a bare filename; this mirrors how
+    # _orphaned_uploads already loads every card path to compare the same way,
+    # and the sweep is a manual admin action, not a hot path.
+    scans_cleared = 0
+    if removed:
+        for scan in db.query(Scan).all():
+            touched = False
+            if scan.image_path and os.path.basename(scan.image_path) in removed:
+                scan.image_path = None
+                touched = True
+            if scan.back_image_path and os.path.basename(scan.back_image_path) in removed:
+                scan.back_image_path = None
+                touched = True
+            if touched:
+                scans_cleared += 1
+        if scans_cleared:
+            db.commit()
+
+    return {"deleted": deleted, "freed_bytes": freed, "scans_cleared": scans_cleared}
 
 
 @router.get("/storage")
 def storage_usage():
     """DB file + uploads footprint, so Railway volume pressure is visible
-    next to the cleanup tools that relieve it."""
-    db_bytes = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    next to the cleanup tools that relieve it.
+
+    The volume holds more than those two, and it used to be invisible here: the
+    SQLite -wal/-shm sidecars if journal mode is ever changed, a backup snapshot
+    mid-download, and a snapshot leaked by a client that disconnected (bounded
+    to an hour by the backup sweep, but a full copy of the database while it
+    lasts). These tiles are the app's only view of volume pressure, so the
+    number they show is the one that gets believed when Railway starts refusing
+    writes. Everything else in the DB's directory is now walked and reported as
+    `other_bytes` — deliberately a separate figure rather than folded into
+    db_bytes, so a growing remainder reads as a leak instead of as database
+    growth.
+    """
+    db_file = Path(DB_PATH).resolve()
+    db_bytes = db_file.stat().st_size if db_file.is_file() else 0
+
     uploads_count = 0
     uploads_bytes = 0
     root = uploads_dir()
@@ -381,10 +426,36 @@ def storage_usage():
             if path.is_file():
                 uploads_count += 1
                 uploads_bytes += path.stat().st_size
+
+    # Deliberately one level deep, not a recursive walk. Every case this figure
+    # exists for — the -wal/-shm sidecars, a backup snapshot mid-download, one
+    # leaked by a disconnect — is minted as a direct sibling of the DB file, and
+    # uploads/ is the only subdirectory anything here creates. A recursive walk
+    # would also be a trap in development, where DB_PATH defaults to
+    # ./cardlister.db and the "volume" is therefore the repo root: it would
+    # traverse .git, .venv and node_modules on every Analytics page load.
+    other_bytes = 0
+    volume = db_file.parent
+    if volume.is_dir():
+        for path in volume.iterdir():
+            # uploads/ is reported on its own above; a symlink is not this
+            # volume's footprint, wherever it points.
+            if path == db_file or path == root or path.is_symlink():
+                continue
+            try:
+                if path.is_file():
+                    other_bytes += path.stat().st_size
+            except OSError:
+                # A file that vanished mid-scan — a backup snapshot being
+                # unlinked by its own BackgroundTask — must not turn a
+                # read-only readout into a 500.
+                continue
+
     return {
         "db_bytes": db_bytes,
         "uploads_count": uploads_count,
         "uploads_bytes": uploads_bytes,
+        "other_bytes": other_bytes,
     }
 
 
