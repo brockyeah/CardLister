@@ -45,6 +45,20 @@ only in `[Unreleased]` on a branch is not in prod yet.
   untouched.
 
 ### Changed
+- The queue-depth check is now **measured in Phase 1, where it can still change
+  what gets built** (Codex review on PR #77). As first written it lived in
+  Phase 4, so its own instruction to "prefer the smallest useful change, or
+  none" arrived after Phase 3 had already implemented, pushed and opened a PR —
+  advice that could never reach the decision it was written for. Step 1 now
+  measures the queue, step 7 consults it before building, and step 13 reports
+  it. The threshold also counts the PR the run is about to open, since that is
+  the one that tips the count.
+- The "stay silent if nothing shipped" rule **no longer suppresses the queue
+  report** (Codex review on PR #77). A run that ships nothing *because* the
+  queue is deep is exactly the run whose one fact the owner needs, and the
+  unconditional silence rule would have swallowed precisely that notification —
+  the failure mode the queue-depth change exists to fix, reintroduced two steps
+  later. A tripped queue threshold is now an explicit exemption from silence.
 - The daily routine now reports **review-queue depth before its own output**.
   It ships 1–2 quick wins a day and cannot merge anything, so when the owner
   stops merging, its PRs accumulate silently: each run reads a `main` further
@@ -69,6 +83,24 @@ only in `[Unreleased]` on a branch is not in prod yet.
   opening the PR.
 
 ### Documentation
+- **CLAUDE.md's storage note no longer contradicts the code** (Codex review on
+  PR #77). The `backup.db` paragraph still said a leaked snapshot was
+  "invisible to `storage_usage`, which counts only the DB file and the uploads
+  dir" — true when written, false as of the `other_bytes` change above. That
+  mattered more than an ordinary stale comment: Phase 0 of the daily routine
+  makes every future automated run read CLAUDE.md before touching anything, so
+  a run could have reasoned from the old claim or re-proposed the bug that was
+  just fixed. The paragraph now says the sweep is what reclaims the space and
+  the tile is what makes the leak legible.
+- **Codex does appear on the PR, and the docs said it never would.** Both
+  CLAUDE.md and the routine prompt told runs that Codex reviews only out of
+  band and that nothing would show up on the PR — so "don't look for it there".
+  It is in fact configured as a GitHub reviewer and posts inline P1/P2 comments
+  as `chatgpt-codex-connector[bot]`; it left three on this PR, all three
+  correct. Following the old instruction would have meant ignoring them. Both
+  files now describe both halves: the bot findings on the PR, which are to be
+  verified and fixed like any other bot's, and the owner's separate out-of-band
+  runs, which still mean a quiet PR is not a pass.
 - `docs/notes/daily-routine-prompt.md` now carries a standing warning that the
   **live cloud prompt has drifted behind it**, with the two concrete gaps. The
   serious one is step 11: the live prompt still lacks PR #69's

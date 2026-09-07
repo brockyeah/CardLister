@@ -70,7 +70,11 @@ PHASE 0 — Ground yourself (always):
 
 PHASE 1 — Health check (always):
 1. Check repo state: open PRs (drive any of ours toward green), open issues, CI
-   status on main, and security/dependency alerts. Hit production health at
+   status on main, and security/dependency alerts. **Measure the review queue
+   here, not later: count the open PRs and note the date of the last merge to
+   main.** The queue is an input to what you build (step 7) and the lead of your
+   report (step 13), so it has to be known before Phase 3, not discovered after
+   it. Hit production health at
    https://cardlister-production.up.railway.app/api/health — confirm ok/db true,
    that the reported revision matches origin/main HEAD (if it lags, a deploy
    failed), and that the call-up poller is not stale.
@@ -103,7 +107,12 @@ PHASE 2 — Ideas (always):
    already used there.
 
 PHASE 3 — Build (standing authorization):
-7. Implement the top 1–2 quick wins from the backlog without asking. Gates: full
+7. Implement the top 1–2 quick wins from the backlog without asking. **First
+   consult the queue depth from step 1: if nothing has merged in 3+ days or 4+
+   PRs are already open, the binding constraint is the owner's review time, not
+   your output — ship the smallest useful change, or none, and say which you
+   chose and why.** Count the PR you are about to open when you apply that
+   threshold; it is the one that tips the queue. Gates: full
    backend suite green and frontend build green. Backend: run from the repo
    root as `python3 -m pytest backend/tests -q` (locally, where the repo-root
    venv exists, `.venv/bin/python -m pytest backend/tests -q`). Frontend:
@@ -132,9 +141,12 @@ PHASE 3 — Build (standing authorization):
     "this repository does not receive automatic reviews because it has fewer
     than 10 stars" and stops — so after opening the PR, post a single
     `@coderabbitai review` comment on it to trigger the pass by hand; if that
-    produces nothing, say so in the report rather than assuming it ran. Codex is
-    run by the owner outside GitHub and relayed in chat, so never wait for Codex
-    on the PR or read its absence as a pass. Stay subscribed to the PR and
+    produces nothing, say so in the report rather than assuming it ran. Codex
+    now reviews ON the PR as `chatgpt-codex-connector[bot]`, posting inline
+    P1/P2 comments — it is configured as a GitHub reviewer for this repo — so
+    treat its findings like any other bot's: verify each against the code and
+    push the fix. The owner may also run Codex separately and relay findings in
+    chat, so a quiet PR is still not a pass. Stay subscribed to the PR and
     address findings as event wakes deliver them — that is how a PR reaches
     green with no owner intervention. Do not block your Phase 4 report waiting
     on reviews that have not arrived yet; the session will wake when they do.
@@ -154,17 +166,20 @@ PHASE 3 — Build (standing authorization):
 
 PHASE 4 — Report (always):
 12. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
-13. Report the review queue: count the open PRs and note the date of the last
-    merge to main. If nothing has merged in 3+ days, or 4+ PRs are open, say so
-    FIRST in the notification, ahead of what you shipped — at that point the
-    binding constraint is the owner's review time, not the routine's output, and
-    a run that reports only its own work hides the one fact that should change
-    what the owner does next. When the queue is that deep, prefer the smallest
-    useful change (or none) over a large one, and say which you chose.
+13. Report the review queue measured in step 1. If nothing has merged in 3+
+    days, or 4+ PRs are open (counting any you opened today), say so FIRST in
+    the notification, ahead of what you shipped — at that point the binding
+    constraint is the owner's review time, not the routine's output, and a run
+    that reports only its own work hides the one fact that should change what
+    the owner does next. Say which build choice the depth led you to in step 7.
 14. Send exactly one notification: lead with queue depth if it tripped the rule
     above, otherwise with what shipped or broke, then top picks — include the PR
     link if one was opened. State plainly anything you could not finish and why.
-    If truly nothing changed and nothing shipped, stay silent.
+    If truly nothing changed and nothing shipped, stay silent — **unless the
+    queue tripped the step 13 rule, which is never silent.** A run that shipped
+    nothing *because* the queue is deep is exactly the run whose one fact the
+    owner needs, and the silence rule would otherwise suppress precisely that
+    notification.
 ```
 
 ### Rationale
@@ -205,9 +220,14 @@ PHASE 4 — Report (always):
   trustworthy.
 - **Reviewers, none of them the author — but count them honestly.** The Auto Review Action
   authenticates with the owner's subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so it costs no
-  API credits and reviews from a context that never saw the code being written. Codex is
-  run by the owner outside GitHub and relayed in chat — it will never appear on the PR,
-  so its absence must not be read as approval. The routine deliberately does NOT also
+  API credits and reviews from a context that never saw the code being written.
+  **Codex now reviews on the PR** as `chatgpt-codex-connector[bot]` — verified 2026-09-07
+  on PR #77, where it posted three inline P2 findings, all three correct. The docs had
+  said Codex "will never appear on the PR" and told runs not to look for it there, which
+  by then would have meant ignoring real findings; it is set up as a GitHub reviewer for
+  this repo and triggers on PR open, ready-for-review, and `@codex review`. The owner may
+  still run Codex separately and relay findings in chat, so a quiet PR is not a pass. The
+  routine deliberately does NOT also
   review in-session: the author reviewing their own work is the weakest possible pass.
   **CodeRabbit stopped reviewing automatically** (verified 2026-09-07 on PRs #73–#76,
   each carrying only the notice *"This repository does not receive automatic reviews
