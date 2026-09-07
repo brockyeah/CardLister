@@ -5,6 +5,88 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] The storage tiles report usage but never **capacity**, so there is no
+      warning before the volume fills (2026-09-07 daily run, found while adding
+      the `other_bytes` figure): nothing in `backend/` calls `shutil.disk_usage`
+      or `statvfs` — verified by grep — so `/api/analytics/storage` answers "how
+      much am I using" and cannot answer "how much is left". The Railway volume
+      is a fixed size, and the app's only reaction to running out today is
+      *after* the fact: `GET /api/analytics/backup.db` returns 507 once
+      `VACUUM INTO` fails, which is the moment a backup is most wanted and least
+      possible. A backup briefly **doubles** the DB's footprint on that volume
+      (CLAUDE.md says so), so the threshold that matters is not "full" but "less
+      than one DB-size free" — a figure the panel now has every input for except
+      the total. Add `total_bytes`/`free_bytes` from `shutil.disk_usage` on the
+      DB's directory, and have the tile warn when free space is under ~2× the
+      database size, so the owner learns before the backup button stops working
+      rather than from a 507 (quick win; implement directly; inline —
+      `routers/analytics.py` plus the Analytics tile, alongside `other_bytes`)
+- [ ] Unknown models undercount cost, despite a comment promising they can't
+      (2026-09-07 daily run): `analytics.py:44` says *"Unknown/overridden models
+      price at Opus rates so estimates never undercount"* and sets
+      `_DEFAULT_PRICE = (5.0, 25.0)`. But the table directly above it prices
+      `claude-fable-5` at `(10.0, 50.0)` — **double** Opus — so the default is
+      not the maximum of the table and the promise is false for exactly the
+      newest, most expensive family. A model string the table doesn't know
+      (a new Fable revision, a `VISION_MODEL` env override) is billed at half
+      its real rate in the one readout the two users split the Anthropic bill
+      with, and it looks entirely healthy. Either set the default to the
+      table's max and fix the comment to say "the most expensive known rate",
+      or report unknown models as a distinct "unpriced" line rather than
+      guessing — the second is more honest but changes the shape of the report.
+      Worth pairing with the item below, since both are about this table going
+      stale (quick win; implement directly; inline — `analytics.py` plus a case
+      in `test_analytics_cost.py`)
+- [ ] `MODEL_PRICES` is an undated snapshot with no staleness signal — the same
+      trap as invariant #15 (2026-09-07 daily run): the eBay fee schedule in
+      `frontend/src/lib/fees.js` is documented as "a dated snapshot with
+      build-time-only overrides" and carries an invariant explaining that
+      nothing in the repo notices when it goes stale. `analytics.py:36-43` is
+      the identical shape — six hardcoded per-1M-token prices, no date, no
+      source link, no env override at all — and it is worse in one way: the fee
+      schedule at least renders its live numbers in prose via
+      `feeDisclaimer()`, so a human reading the UI can spot a wrong rate, while
+      the model prices are only ever seen already multiplied into a dollar
+      total nobody can sanity-check. When Anthropic changes a price, every cost
+      figure in the app silently drifts and the invoice is the only correction.
+      Cheapest fix is a dated comment plus a line in CLAUDE.md's invariant list
+      so the next reader knows what they're looking at; an env override is the
+      sturdier version (quick win; implement directly; inline — `analytics.py`
+      and CLAUDE.md)
+- [ ] Nothing ever prunes the `scans` table, and it is now the DB's main growth
+      (2026-09-07 daily run, direct follow-on to the orphan-path fix shipped the
+      same day): grep finds no delete of `Scan` anywhere outside the test
+      fixture — `routers/cards.py:486` only reads one. Every real (non-mock)
+      extraction writes a row carrying the full `extracted_json`, and unlike the
+      photos there is no grace window, no sweep, and no tile showing the cost.
+      Deleting a card does not remove its scan; the orphan sweep removes the
+      *file* and (as of today) nulls the path, which leaves the row as pure
+      dead weight: no photo, no card, and — for a scan that never became a card
+      — no `Correction` derived from it either. That is the population worth
+      pruning, and it is precisely identifiable now that the paths are nulled.
+      Note what must NOT be pruned: a scan whose corrections feed
+      `build_cheatsheet` is training data, and `Correction` rows reference
+      scans, so any retention rule has to preserve those or it silently
+      degrades the learning loop. Decide the rule (age? no-card-and-no-
+      correction? both?) before writing it (medium; implement directly; inline —
+      needs the retention predicate pinned by a test that a scan with a
+      correction survives)
+- [ ] Backend tests share one real uploads directory and wipe it, so filesystem
+      isolation is by luck (2026-09-07 daily run, hit while adding a cleanup
+      test): `db_session` isolates DB rows, but nothing isolates the disk —
+      `uploads_dir()` resolves off the real `DB_PATH`, and
+      `test_upload_cleanup.py` opens two tests with `for f in root.iterdir():
+      f.unlink()` while `test_cleanup_with_no_uploads_dir` goes further and
+      `rmdir`s the shared directory outright. Any new test that writes an upload
+      is therefore order-dependent on those three, which is why the existing
+      ones defensively wipe first — the workaround has already been copied three
+      times, and a fourth author who doesn't notice gets a failure that depends
+      on `-p no:randomly` and reproduces only sometimes. `test_storage.py` and
+      `test_backup.py` write into the same directory. Fix with a fixture that
+      points `uploads_dir()` at a `tmp_path` per test (monkeypatch the module
+      attribute — several modules already import a module rather than a function
+      to stay patchable), then delete the defensive wipes (medium; implement
+      directly; inline — `conftest.py` plus the four test files)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -75,40 +157,25 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       PRs #63, #64 and #65 each had to carry an HTML comment in the changelog
       explaining why they were *not* touching it. Nothing has merged since
       2026-08-25, so eight PRs are open at once and every new branch now starts
-      from a `main` that is a week behind the work. Two fixes, and they are
-      independent: (a) step 11 of the daily routine must check the open PR list
-      for one already doing the housekeeping before doing it itself — the
-      CLAUDE.md two-agent section already says "changelog housekeeping is
-      idempotent — check before doing it", so this is the routine prompt
-      failing to encode a rule the repo already states; (b) the daily run
-      should report queue depth in its notification when PRs are piling up,
-      because "nothing merged in five days" is the single fact that changes
-      what the owner should do with the run. Owner decision needed on whether
-      a run should *stop shipping* past some depth (quick win; implement
-      directly; inline — `docs/notes/daily-routine-prompt.md`, and the live
-      routine prompt in the cloud must be edited to match or the doc is
-      fiction)
-- [ ] CodeRabbit has stopped reviewing, and the process still assumes it does
-      (2026-08-31 daily run, verified on two PRs): CodeRabbit's only comment on
-      PR #65 and PR #68 is the same notice — *"This repository does not receive
-      automatic reviews because it has fewer than 10 stars"* — with a "Trigger
-      review" checkbox. It reads `.coderabbit.yaml` (the run configuration is
-      quoted in the notice) and then reviews nothing. Older PRs really were
-      reviewed — #53 and #64 both carry CodeRabbit findings that were fixed —
-      so this is a policy change on their side, not a misconfiguration here.
-      Two things follow. First, **the repo currently has one automated reviewer,
-      not two**, while `docs/notes/daily-routine-prompt.md` tells every run that
-      "three reviewers cover it" and uses that as the reason not to self-review;
-      a premise that is no longer true is worse than no premise. Second,
-      `.coderabbit.yaml` is being actively maintained for a reviewer that is not
-      running — PR #67 updated its download-helper instruction this week. Cheapest
-      fix is to have whoever opens the PR post `@coderabbitai review` on it (the
-      notice's own escape hatch), which is a one-line addition to the routine
-      prompt; the alternatives are ten stars or a paid plan, and both are the
-      owner's call. Either way the routine doc needs correcting to say what is
-      actually reviewing (quick win; implement directly; inline —
-      `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
-      only the owner can edit)
+      from a `main` that is a week behind the work. — **both halves shipped
+      2026-09-07** (step-11 check in PR #69, queue-depth reporting today), but
+      the underlying question is still open and is **the owner's to answer**:
+      should a run *stop shipping* past some queue depth? Reporting depth makes
+      the pileup visible; it does not stop the routine adding to it. Re-observed
+      2026-09-07 — six PRs open (#71–#76), all green, nothing merged since
+      2026-09-01
+- [ ] Ten stars or a paid CodeRabbit plan — **owner's call, not a code change**
+      (2026-08-31, re-verified 2026-09-07): CodeRabbit reviews nothing
+      automatically now (*"this repository does not receive automatic reviews
+      because it has fewer than 10 stars"*), and the routine's workaround as of
+      today is to post `@coderabbitai review` by hand on each PR. That is a
+      manual trigger on every PR forever, and it only works while the free tier
+      honours it. Worth deciding whether the second automated reviewer is worth
+      ten stars or a paid plan, or whether the Claude Auto Review Action alone
+      is enough — in which case `.coderabbit.yaml` should stop being maintained
+      (PR #67 updated it this week for a reviewer that was not running) and the
+      manual trigger should come back out of the routine prompt (no effort;
+      owner decision; not implementable here)
 - [ ] An implausible sale price is accepted as readily as a plausible one
       (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
       validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
@@ -420,32 +487,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       `run_in_threadpool` (async `import_csv` has the same shape but is
       milliseconds-scale; fix opportunistically) (medium; implement directly;
       inline — scan.py only)
-- [ ] `storage_usage` under-reports the volume it exists to watch (2026-08-21
-      review, noticed while moving backup snapshots onto that volume): the
-      panel adds `os.path.getsize(DB_PATH)` to the uploads directory and calls
-      that the footprint, so anything else on the volume is invisible — the
-      SQLite `-wal`/`-shm` sidecars if journal mode is ever changed, a backup
-      snapshot mid-download, and a snapshot leaked by a client that
-      disconnected (bounded to an hour by the new sweep, but a full copy of the
-      database while it lasts). The tiles are the only view of volume pressure
-      the app has, and the number they show is the one that will be believed
-      when Railway starts refusing writes. Walk the DB's directory instead of
-      naming one file, and report the remainder as a third figure rather than
-      folding it into `db_bytes`, so a growing "other" is legible rather than
-      looking like database growth (quick win; implement directly; inline —
-      `routers/analytics.py` plus the Analytics tile)
-- [ ] Orphan cleanup leaves `Scan.image_path` pointing at a file it deleted
-      (2026-08-21 review): `_orphaned_uploads` deliberately lets scan rows go
-      unprotected — an unsaved scan's photo is exactly the disk growth the tool
-      reclaims — but the `Scan` row survives with a path to nothing. Harmless
-      today, because nothing renders scan photos; it stops being harmless the
-      moment the "Scan history browser" item below ships, which would show a
-      broken thumbnail for every scan older than the 48h grace window that was
-      never saved. Null the two path columns on the scans whose files the
-      cleanup removed, in the same call, so the record stays honest about what
-      it still has and the history browser can say "photo reclaimed" instead of
-      rendering a hole (quick win; implement directly; inline —
-      `routers/analytics.py:cleanup_uploads` plus a test)
 - [ ] CI guards for the two invariants that break an already-deployed install
       (2026-08-20 review): invariants #1 and #4 are the two whose failure mode
       is silent *and* remote — they work on a fresh DB and a fresh sheet, and
@@ -1032,6 +1073,33 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-07 — `storage_usage` reports what else is on the volume: it added
+      `getsize(DB_PATH)` to the uploads directory and called that the
+      footprint, so WAL sidecars, a backup snapshot mid-download, and a
+      snapshot leaked by a disconnect (a full copy of the DB) were all
+      invisible to the app's only view of volume pressure. The endpoint now
+      walks the DB's directory and reports the remainder as a separate
+      `other_bytes` figure with an "Other on volume" tile — separate, not
+      folded into `db_bytes`, so a leak reads as a leak rather than as database
+      growth. `uploads/` is pruned from the walk, symlinks are skipped rather
+      than followed off-volume, and a file vanishing mid-walk is stepped over
+- [x] 2026-09-07 — Orphan cleanup clears the `Scan` paths it invalidates:
+      scan rows deliberately don't protect their files, so the sweep left every
+      never-saved scan holding a path to a deleted photo, with nothing
+      recording that it had been reclaimed rather than lost. `cleanup_uploads`
+      now nulls `image_path`/`back_image_path` on exactly the scans whose files
+      it removed and reports `scans_cleared`. Unblocks the scan-history browser,
+      which would otherwise have rendered a broken thumbnail per swept scan
+- [x] 2026-09-07 — The daily routine reports review-queue depth before its own
+      output, and no longer claims three automated reviewers when one is
+      running. Both halves of the 2026-08-31 process item: the queue-depth half
+      (nothing merged in 3+ days, or 4+ PRs open, now leads the notification and
+      tells the run to prefer the smallest useful change) and the CodeRabbit
+      correction (it stopped reviewing automatically — the prompt now names the
+      Claude Action as the one automatic pass and posts `@coderabbitai review`
+      by hand). The step-11 half had already shipped in PR #69. **The live cloud
+      prompt still has to be updated by the owner** — see the warning at the top
+      of `docs/notes/daily-routine-prompt.md`
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
       and fails the run on a non-200, an unreachable or non-JSON response, an
