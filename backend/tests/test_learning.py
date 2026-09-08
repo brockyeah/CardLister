@@ -290,9 +290,33 @@ def test_exact_match_survives_a_malformed_extraction(db_session):
     ))
     db_session.commit()
 
-    for bad in ({"brand": ["Bowman", "Topps"]}, {"card_number": {"n": "BCP-132"}}):
+    for bad in ({"brand": ["Bowman", "Topps"]}, {"card_number": {"n": "BCP-132"}},
+                {"year": [2024]}, {"year": {"value": 2024}}):
         extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
                      "set_name": "Chrome", "confidence_notes": "", **bad}
         merged = apply_exact_match(db_session, extracted)   # must not raise
         assert merged["set_name"] == "Chrome"
         assert not merged["confidence_notes"]
+
+
+def test_exact_match_still_accepts_a_string_year(db_session):
+    """A year that arrives as "2024" rather than 2024 must still match.
+
+    `Correction.year` is an INTEGER column and SQLite's type affinity coerces
+    `year = '2024'` to the integer, so a string year from vision matches today.
+    The malformed-extraction guard therefore admits `str` as well as `int`;
+    narrowing it to `int` would silently stop applying those overlays, which is
+    the same invisible degradation this PR set out to remove.
+    """
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    extracted = {"year": "2024", "brand": "Bowman", "card_number": "BCP-132",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome Prospects"

@@ -40,15 +40,23 @@ only in `[Unreleased]` on a branch is not in prod yet.
   match. Brands and card numbers are ASCII in practice, and the divergence can
   only ever cost a missed overlay, never produce a wrong one.
   Moving the comparison into the database also moved where a *malformed*
-  extraction lands, so the same change closes that: `_norm` passes non-strings
-  through untouched and these values come from model-extracted JSON, so a bad
-  extraction can hand the lookup a list or a dict. That was inert as a Python
-  `==` — a list never equals a normalized column value, so the answer was
-  `None` — but as a bound parameter it is
+  extraction lands, so the same change closes that. Nothing validates the
+  extracted JSON (unlike `check_duplicate`, whose year arrives through a
+  Pydantic schema) and `_norm` passes non-strings through untouched, so a bad
+  extraction can hand the lookup a list or a dict — and a non-empty one is
+  truthy, so it passes the emptiness check and reaches the query. For brand and
+  card number that was inert as a Python `==`, since a list never equals a
+  normalized column value; as a bound parameter it is
   `sqlite3.ProgrammingError: type 'list' is not supported`, which reaches the
-  client as a 500 on the scan. There is no match to find either way, so the
-  lookup now answers `None` for a non-string, exactly as it did before, and a
-  test pins it.
+  client as a 500 on the scan. The same crash was already reachable through
+  `year`, which has always been compared in SQL — that one predates this
+  change and is fixed here too, since it is the same one-line guard. All three
+  now answer `None`, which is the answer there was to give anyway.
+  `year` deliberately admits `str` as well as `int`: the column is INTEGER and
+  SQLite's affinity coerces `year = '2024'`, so a string year from vision
+  matches today and has to keep matching. Narrowing the guard to `int` would
+  silently drop those overlays — the same invisible degradation this entry is
+  about — so a test pins that case alongside the crash cases.
 
 - A Sheets append whose response cannot be parsed no longer grows a second copy
   of the card. `sync_card`'s append branch writes the row, then reads

@@ -154,14 +154,24 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     year = extracted.get("year")
     if not card_number or not brand or not year:
         return None
-    # `_norm` passes non-strings through untouched, and both values come from
-    # model-extracted JSON — so a malformed extraction can hand us a list or a
-    # dict here. That was inert while the match was a Python `==` (a list never
-    # equals a normalized column value, so the answer was None); as a bound
-    # parameter it is `sqlite3.ProgrammingError: type 'list' is not supported`,
-    # i.e. a 500 on POST /api/scan. There is no match to find either way, so
-    # answer None as before.
+    # All three values come from model-extracted JSON, which nothing validates
+    # (unlike `check_duplicate`, whose year arrives through a Pydantic schema),
+    # and `_norm` passes non-strings through untouched — so a malformed
+    # extraction can hand us a list or a dict. A non-empty one is truthy, so it
+    # sails past the check above and reaches the query as a bound parameter,
+    # where it is `sqlite3.ProgrammingError: type 'list' is not supported`:
+    # a 500 on POST /api/scan. For brand and card number that is new here (the
+    # match used to be a Python `==`, which a list simply lost); for `year` the
+    # crash predates this change. There is no match to find in any of those
+    # cases, so answer None instead.
+    #
+    # `year` admits str as well as int on purpose: the column is INTEGER, and
+    # SQLite's type affinity coerces `year = '2024'` to the integer, so a
+    # string year from vision matches today and must keep matching. Narrowing
+    # this to `int` would silently drop those overlays (test below pins it).
     if not isinstance(brand, str) or not isinstance(card_number, str):
+        return None
+    if not isinstance(year, (int, str)):
         return None
     rows = (
         db.query(Correction)
