@@ -5,6 +5,115 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] CLAUDE.md tells every run to ignore the reviewer that found the most
+      (2026-09-08 daily run, observed on PR #78): the **NOTE** at the end of
+      CLAUDE.md says Codex review "happens outside GitHub — the owner runs
+      Codex themselves and relays its findings back in chat. Nothing will
+      appear on the PR, so don't wait for it, look for it in CI, or treat its
+      absence as a pass." That is no longer true. A
+      `chatgpt-codex-connector[bot]` is installed on the repo and posts inline
+      review comments directly on the PR — its own notice says reviews trigger
+      on opening a PR, marking a draft ready, or commenting `@codex review`.
+      This is not a footnote: on PR #78 Codex raised **both** of the findings
+      that mattered, and the second one was that the fix for the first was
+      *inert* — `tableRange` read from `updates` instead of the response root,
+      so the recovery could never fire, with the test fake nesting the field
+      the same wrong way so four tests passed against a code path that did
+      nothing. The Claude auto-review had reviewed the same code twice and
+      affirmatively signed off on it both times, including the specific
+      reasoning Codex overturned. So the standing instruction points future
+      runs away from the reviewer with the best hit rate on this repo, and the
+      doc's "don't treat its absence as a pass" is now backwards — its
+      *presence* is what a run should wait for.
+      Fix: correct the NOTE to say Codex reviews on the PR (and how to trigger
+      it), keep the chat-relay path as an additional channel rather than the
+      only one, and have the routine wait for the Codex review the same way it
+      waits for the Claude action. Worth deciding at the same time whether a
+      run should re-request Codex after each push, since it reviews a specific
+      commit and a fix lands after the review that prompted it (quick win;
+      implement directly; inline — CLAUDE.md, plus
+      `docs/notes/daily-routine-prompt.md`, which repeats the same claim; note
+      CLAUDE.md is also touched by open PRs #74/#76/#77, so this wants to land
+      on its own small branch rather than widening a feature PR)
+- [ ] A total alert-delivery failure buys six hours of silence (2026-09-08
+      review): both `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` in `services/billing_alerts.py` stamp
+      their throttle clock (`_last_alert_at = now`) **before** attempting
+      delivery, then return whether either channel worked. So when *both*
+      channels fail — no `ALERT_EMAILS`, a revoked SendGrid key, ntfy
+      unreachable — the outage is recorded as alerted and suppressed for six
+      hours with nothing having been delivered. That is the exact failure shape
+      PR #64 removed from the call-up poller one layer down: the poller now
+      escalates undelivered alerts to `billing_alerts`, and `billing_alerts`
+      then drops the escalation on the floor if its own channels are also down,
+      which is precisely the case where both are most likely to be down at
+      once. Fix: stamp the clock only when at least one channel delivered, so a
+      failed attempt is retried on the next scan or poll cycle; keep the stamp
+      unconditional for a *partial* success (one channel is enough). Worth
+      deciding at the same time whether a shorter retry interval should apply
+      to the all-failed case so a transient provider blip does not wait a full
+      cycle. Note also that both clocks are module-level process state, so a
+      Railway deploy resets them and an ongoing outage re-alerts — the
+      opposite error, and the harmless one (quick win; implement directly;
+      inline — `services/billing_alerts.py` plus tests that patch both
+      channels to fail and assert the second call still attempts delivery)
+- [ ] The alert-wiring self-test reports email configured when it is not
+      (2026-09-08 review, found beside the item above): `send_test_alert`
+      builds its readout from `bool(SENDGRID_API_KEY or SMTP_USERNAME)`, but
+      `mailer.is_configured()` — the check `send_email` actually gates on —
+      additionally requires `ALERT_EMAILS` and a from-address, and for the SMTP
+      path `SMTP_PASSWORD` too. Set a SendGrid key and no recipients and the
+      panel answers `email_configured: true`, `email_sent: false`, which reads
+      as a provider problem when it is a missing env var the readout could have
+      named. The whole point of a wiring test is to be the one thing that is
+      right about the wiring. Fix: report `mailer.is_configured()` itself, and
+      return the specific missing piece rather than a bare boolean. Sharpens
+      the "integration-configuration readout on Analytics manage-data" item
+      below rather than replacing it — that one adds a readout, this one
+      corrects the readout that already exists (quick win; implement directly;
+      inline — `services/billing_alerts.py`, `services/mailer.py`)
+- [ ] The ntfy push is an unauthenticated public channel carrying raw provider
+      error text (2026-09-08 review): `_push_via_ntfy` posts to
+      `https://ntfy.sh/<NTFY_TOPIC>` with no credential, and an ntfy topic is
+      public by construction — the topic name *is* the secret, and anyone who
+      knows or guesses it can read every alert **and publish to it**, so a
+      forged "credits exhausted" push is as easy as reading a real one. The
+      body is not nothing: `notify_credits_exhausted` interpolates the raw
+      Anthropic API error string, which is provider text this app does not
+      control the contents of. Low severity — this is a two-user internal tool
+      and no card or price data goes over it — but the cost of closing it is
+      one header. Fix: support an optional `NTFY_TOKEN` sent as
+      `Authorization: Bearer`, document in `.env.example` that the topic name
+      is a shared secret and should be long and random, and truncate the
+      interpolated provider error to a bounded prefix (quick win; implement
+      directly; inline — `services/billing_alerts.py`, `.env.example`)
+- [ ] There is no migration path for an **index** on an existing table
+      (2026-09-08 review, found while moving `find_exact_match`'s match into
+      SQL): `_COLUMN_MIGRATIONS` closes exactly one hole in the no-Alembic
+      setup — a new *column* — and `init_db` otherwise relies on
+      `create_all`, which skips a table that already exists and therefore never
+      creates an index added to a model later. So an `Index(...)` on
+      `Correction` or `Card` would exist on a fresh DB and on every test run,
+      and silently not exist on the deployed one: the same failure shape as
+      invariant #4, in the one direction that invariant's wording ("New
+      *tables* need nothing") reads as already covered. It is not hypothetical
+      any more: `find_exact_match` now filters `year` + `lower(trim(brand))` +
+      `lower(trim(card_number))` in SQL on **every scan**, against a
+      `corrections` table that grows forever and has an index on none of those
+      three. Measured at 401 rows it is 2.5 ms, so this is a ceiling to raise
+      before it is hit, not a fire — but the fix has to land before the index
+      does, or the index is a lie on production only. Sketch: an
+      `_INDEX_MIGRATIONS` list applied by `ensure_columns`' sibling using
+      `CREATE INDEX IF NOT EXISTS` (idempotent by construction, unlike ALTER
+      TABLE), a `test_migrations.py` case that builds a pre-index DB and
+      asserts the index appears, and an invariant-list entry so the next
+      person does not have to rediscover it. Function-based indexes on
+      `lower(trim(...))` are supported by SQLite but only used when the
+      expression matches exactly — worth pinning with an `EXPLAIN QUERY PLAN`
+      assertion rather than assuming (medium; **design doc first** — it is a
+      schema-migration mechanism, which CLAUDE.md puts behind a spec + plan;
+      inline — `backend/database.py`, `backend/tests/test_migrations.py`,
+      CLAUDE.md invariant #4)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -304,54 +413,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       future *server-side* net (P&L, tax export) could share it. Pick before
       building — the second one is the one that scales (quick win; implement
       directly; inline)
-- [ ] `find_exact_match` silently stops applying old corrections as a year
-      fills up (found 2026-08-24, re-filed 2026-08-25 — one bug, two entries,
-      merged here): `services/learning.py:99-110` filters
-      `Correction.year == year`, orders by `created_at desc`, `limit(100)`,
-      then linear-scans that page in Python for a brand + card-number match.
-      A baseball inventory concentrates hard in a few years — 2023 Bowman
-      Chrome alone can carry hundreds of corrections — so once one year passes
-      100 rows, a correction the user made for that exact card falls out of the
-      window and the overlay just stops happening. No error, no note: the
-      learning loop quietly degrades for the earliest cards, which are exactly
-      the ones the user is most likely to have already taught, and it gets
-      worse the more the tool is used.
-      **Fix: move the match into SQL and drop the limit** — both fields are
-      already normalized on write (`_norm` casefolds and strips), so a
-      `func.lower(func.trim(...))` filter matches, the way `check_duplicate`
-      already does it in `routers/cards.py`. Bounded by the match, not by
-      recency. **Caveat to carry into the implementation (measured):** SQL
-      `lower()` is not `str.casefold()` — casefold maps `ß` to `ss` and
-      SQLite's `lower()` is ASCII-only, so the two diverge on non-ASCII input.
-      Brands and card numbers are ASCII in practice (`Bowman`, `BCP-100`), so
-      this is a boundary to state rather than a blocker; a case-folding
-      difference would show up as a *missed* overlay, never a wrong one.
-      Fetching every row for the year and comparing in Python would be exact
-      but reintroduces the unbounded scan this item exists to remove — it just
-      moves the ceiling from 100 rows to all of them.
-      A `match_key` column written at record time was the other proposal and is
-      **rejected**: it is a schema change on an existing table, so it needs a
-      `_COLUMN_MIGRATIONS` entry plus a backfill whose normalization has to
-      reproduce `_norm` exactly or old corrections stay invisible anyway — all
-      to solve something the existing normalized columns already answer
-      (quick win–medium; implement directly; inline — needs a test with >100
-      corrections in one year pinning that the 101st still matches)
-- [ ] A failed row-number parse duplicates a card in the Sheets mirror
-      (2026-08-24 review): `sync_card`'s append branch
-      (`services/google_sheets.py:292-306`) writes the row, then parses
-      `updates.updatedRange` to learn which row it landed on, and returns
-      `None` if that parse raises. `_sync_card_to_sheets` only persists
-      `sheets_row` when a row comes back, so the card keeps a NULL
-      `sheets_row` — and its **next** edit takes the append branch again,
-      adding a second row for the same card while the first stays behind.
-      Every later edit appends again. Nothing raises, nothing logs, and the
-      inventory silently grows copies in the sheet. The append itself
-      succeeded, so the recovery is to find the row rather than give up:
-      fall back to `_last_used_row` (already written, already called under
-      the same lock by `rewrite_all_rows`) when the range is unparseable.
-      Note the resync repair tool fixes the symptom but only when someone
-      notices (medium; implement directly; inline — needs a fake whose append
-      returns a malformed `updatedRange`)
 - [ ] Backfill the conditions already in the database (2026-08-24, follow-on
       to the condition dropdown shipped the same day): `normalize_condition`
       is applied at the two seams where new values arrive — the review form
@@ -1031,6 +1092,25 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       (medium; implement directly; inline)
 
 ## Shipped
+
+- [x] 2026-09-08 — The exact-card correction overlay is bounded by the match
+      instead of by recency: `find_exact_match` filtered corrections to the
+      year, took the 100 most recent, and scanned that page in Python, so once
+      a year passed 100 corrections — 2024 Bowman Chrome alone can — the
+      card's own correction fell out of the window and the overlay stopped
+      happening, with no error and no note, worst for the earliest cards the
+      user had already taught. Brand and card number now match in SQL
+      (`lower(trim(...))`, the same shape `check_duplicate` uses) with no
+      limit. Exercised against a real 401-correction year: the overlay lands in
+      2.5 ms where it previously did not land at all
+- [x] 2026-09-08 — An unparseable `updatedRange` no longer duplicates a card in
+      the Sheets mirror: `sync_card`'s append branch returned `None` when it
+      could not read the row number out of the API response, so the caller
+      never persisted `sheets_row`, and the card's next edit appended a second
+      row — and every edit after that another one, silently. The append had
+      succeeded, so the row is recoverable: it now falls back to
+      `_last_used_row` under the same lock, and returns `None` only when that
+      probe reports header-only or itself fails
 
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours

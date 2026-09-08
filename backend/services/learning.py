@@ -12,6 +12,7 @@ are NEVER overridden — the same card number exists as base, refractor, gold /5
 import json
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import Correction, Scan
@@ -129,20 +130,70 @@ def build_cheatsheet(db: Session) -> str:
 
 def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     """Corrected IDENTITY fields from the latest correction of the same card
-    (normalized brand + card number + year), or None."""
+    (normalized brand + card number + year), or None.
+
+    Brand and card number are matched **in SQL**, so the result is bounded by
+    the match rather than by recency. It used to fetch the 100 most recent
+    corrections for the year and scan that page in Python, which quietly broke
+    down on exactly the inventory this app has: a collection concentrates in a
+    few years, so once one year passes 100 corrections, a correction the user
+    made for this very card falls out of the window and the overlay simply
+    stops happening — no error, no note, worse the longer the tool is used,
+    and worst for the earliest cards, which are the ones already taught.
+
+    Boundary worth stating: SQLite's `lower()`/`trim()` are not Python's
+    `casefold()`/`strip()` (ASCII-only case mapping; `trim` strips spaces, not
+    all whitespace), so the SQL filter is slightly *stricter* than `_norm` on
+    non-ASCII or tab-padded input. Brands and card numbers are ASCII in
+    practice ("Bowman", "BCP-100"), and the divergence can only ever cost a
+    missed overlay, never produce a wrong one. The `_norm` re-check below is
+    kept as the authority on what counts as a match.
+    """
     card_number = _norm(extracted.get("card_number"))
     brand = _norm(extracted.get("brand"))
     year = extracted.get("year")
     if not card_number or not brand or not year:
         return None
+    # All three values come from model-extracted JSON, which nothing validates
+    # (unlike `check_duplicate`, whose year arrives through a Pydantic schema),
+    # and `_norm` passes non-strings through untouched — so a malformed
+    # extraction can hand us a list or a dict. A non-empty one is truthy, so it
+    # sails past the check above and reaches the query as a bound parameter,
+    # where it is `sqlite3.ProgrammingError: type 'list' is not supported`:
+    # a 500 on POST /api/scan. For brand and card number that is new here (the
+    # match used to be a Python `==`, which a list simply lost); for `year` the
+    # crash predates this change. There is no match to find in any of those
+    # cases, so answer None instead.
+    #
+    # `year` admits str as well as int on purpose: the column is INTEGER, and
+    # SQLite's type affinity coerces `year = '2024'` to the integer, so a
+    # string year from vision matches today and must keep matching. Narrowing
+    # this to `int` would silently drop those overlays (test below pins it).
+    if not isinstance(brand, str) or not isinstance(card_number, str):
+        return None
+    # `bool` is a subclass of `int`, so a `True` year would otherwise sail
+    # through and quietly query `year = 1`, matching a 1-AD correction rather
+    # than reporting no match. Not a crash, just a wrong question to ask.
+    if isinstance(year, bool) or not isinstance(year, (int, str)):
+        return None
+    # SQLite's INTEGER is signed 64-bit and the driver refuses anything wider:
+    # `OverflowError: Python int too large to convert to SQLite INTEGER`, which
+    # is the same 500 on POST /api/scan as the list/dict case above, reached
+    # through a year the model wrote as a huge number (CodeRabbit, PR #78).
+    if isinstance(year, int) and not -(2 ** 63) <= year <= 2 ** 63 - 1:
+        return None
     rows = (
         db.query(Correction)
         .filter(Correction.year == year)
+        # Same shape as check_duplicate in routers/cards.py: both columns are
+        # already normalized on write, so a lower(trim(...)) comparison finds
+        # the card without paging.
+        .filter(func.lower(func.trim(Correction.brand)) == brand)
+        .filter(func.lower(func.trim(Correction.card_number)) == card_number)
         # id tiebreaker for the same reason as build_cheatsheet: this returns
         # the *latest* correction for the card, and two rows sharing a
         # created_at would otherwise resolve in whatever order SQLite chose.
         .order_by(Correction.created_at.desc(), Correction.id.desc())
-        .limit(100)
         .all()
     )
     for row in rows:

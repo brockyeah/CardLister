@@ -11,6 +11,8 @@ with a fake spreadsheet that records every call, per the repo's testing note.
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from backend.main import app
@@ -32,10 +34,19 @@ _range = range
 class FakeSheet:
     """Minimal stand-in for the Sheets API, holding rows as a dict {row_no: values}."""
 
-    def __init__(self, rows=None, fail_on=None):
+    def __init__(self, rows=None, fail_on=None, append_range=None,
+                 table_range=None, append_side_effect=None):
         self.rows = dict(rows or {})
         self.calls = []          # (op, range) in order
         self.fail_on = fail_on or set()
+        # When set, the append response reports this as `updatedRange` instead
+        # of the real one — the API answering in a shape we cannot parse.
+        self.append_range = append_range
+        # Likewise for `tableRange` (the table's extent *before* the append).
+        self.table_range = table_range
+        # Called right after the append lands, standing in for a writer outside
+        # this process — the owner editing the sheet, another integration.
+        self.append_side_effect = append_side_effect
 
     # --- API surface used by google_sheets.py -------------------------------
     def spreadsheets(self):
@@ -91,9 +102,26 @@ class FakeSheet:
                insertDataOption=None, body=None):
         def run():
             self.calls.append(("append", range))
-            row_no = (max(self.rows) if self.rows else 1) + 1
+            last_before = max(self.rows) if self.rows else 1
+            row_no = last_before + 1
             self.rows[row_no] = body["values"][0]
-            return {"updates": {"updatedRange": f"Inventory!A{row_no}:{END_COL}{row_no}"}}
+            if self.append_side_effect is not None:
+                self.append_side_effect(self)
+            # Real shape: AppendValuesResponse carries `tableRange` at the
+            # ROOT, alongside `updates` (an UpdateValuesResponse, which has no
+            # tableRange of its own). Nesting it under `updates` — as this fake
+            # first did — makes the recovery test vacuous: it passes against an
+            # implementation that reads a field the API never sends there
+            # (Codex, PR #78). Verified against the sheets.v4 discovery doc.
+            return {
+                "spreadsheetId": "sheet-id",
+                "tableRange": (self.table_range if self.table_range is not None
+                               else f"Inventory!A1:{END_COL}{last_before}"),
+                "updates": {
+                    "updatedRange": (self.append_range if self.append_range is not None
+                                     else f"Inventory!A{row_no}:{END_COL}{row_no}"),
+                },
+            }
         return _Exec(run)
 
     # --- helpers ------------------------------------------------------------
@@ -349,3 +377,134 @@ def test_import_then_resync_gives_one_row_per_card(db_session):
         client.post("/api/sheets/resync", headers=headers)
 
     assert sorted(fake.players()) == ["Alpha", "Bravo"]
+
+
+# --- append row-number recovery ---------------------------------------------
+
+def test_append_recovers_its_row_when_updated_range_is_unparseable(db_session):
+    """An unreadable `updatedRange` must not lose the row the append landed on.
+
+    The append succeeded; only the bookkeeping failed. Returning None there is
+    what duplicated cards: the caller persists `sheets_row` only when a row
+    comes back, so the card stayed NULL and its next edit appended again.
+    """
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="")          # `updates.updatedRange` missing
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row == 2
+    assert fake.players() == ["Alpha"]
+
+
+def test_unparseable_append_range_does_not_duplicate_the_card(db_session):
+    """The card's second save updates its row instead of appending a copy."""
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="Inventory!AA")   # no row digits to parse
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+        card.sheets_row = row
+        db_session.commit()
+        row_again = google_sheets.sync_card(card)
+
+    assert row == 2 and row_again == 2
+    assert len(fake.ops("append")) == 1             # exactly one row ever added
+    assert fake.players() == ["Alpha"]              # not ["Alpha", "Alpha"]
+
+
+def test_append_recovery_ignores_a_row_another_writer_added(db_session):
+    """Recovery must not infer our row from the sheet's last row.
+
+    `_sheets_lock` serializes this process, not the spreadsheet: the owner
+    editing the sheet by hand, or another integration appending, can land a row
+    between our append and any later probe. Deriving the row from that probe
+    would hand this card the other writer's row to overwrite on its next save,
+    while the row we actually appended stayed behind — the orphan-plus-clobber
+    the recovery exists to prevent. `tableRange` comes from the same response as
+    the append, so no window exists (Codex, PR #78).
+    """
+    card = _mkcard(db_session, "Alpha")
+
+    def someone_else_appends(fake):
+        fake.rows[max(fake.rows) + 1] = ["Owner's own row"]
+
+    fake = FakeSheet(append_range="", append_side_effect=someone_else_appends)
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+
+    assert row == 2, "must be our appended row, not the other writer's row 3"
+    assert fake.rows[2][0] == "Alpha"
+    assert fake.rows[3] == ["Owner's own row"]     # left untouched
+
+
+def test_append_recovery_places_the_row_after_an_existing_block(db_session):
+    """tableRange's last row + 1 — not a hardcoded row 2."""
+    card = _mkcard(db_session, "Delta")
+    fake = FakeSheet(rows={2: ["A"], 3: ["B"], 4: ["C"]}, append_range="")
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row == 5
+    assert fake.rows[5][0] == "Delta"
+
+
+def test_append_recovery_gives_up_when_neither_range_is_readable(db_session):
+    """Both ranges unparseable: return None rather than guess a row.
+
+    None is the old lossy behaviour — the card re-appends next edit — which is
+    the right trade only here, where any row we named would be a guess.
+    """
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="", table_range="")
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row is None
+
+
+def test_append_recovery_never_claims_the_header_row(db_session):
+    """A tableRange that would place us at row 1 is not a row we can use —
+    handing the card the header to overwrite is worse than not knowing."""
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="", table_range="Inventory!A0:V0")
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row is None
+
+
+def test_fake_append_response_matches_the_real_api_shape():
+    """The fake's append response must have the shape the Sheets API sends.
+
+    This exists because the fake once nested `tableRange` inside `updates`,
+    which is where the recovery code was (wrongly) reading it from — so four
+    tests asserted a recovery that could never fire against the real API, and
+    passed. A fake that encodes the same misunderstanding as the code under
+    test proves nothing, and nothing else in the suite would have caught it.
+
+    Checked against the discovery document shipped with google-api-python-client
+    rather than a hand-copied literal, so it tracks the API rather than someone's
+    memory of it.
+    """
+    import json
+    from pathlib import Path
+
+    import googleapiclient
+
+    doc = (Path(googleapiclient.__file__).parent
+           / "discovery_cache" / "documents" / "sheets.v4.json")
+    if not doc.exists():                       # packaging change upstream
+        pytest.skip("sheets.v4 discovery document not available")
+    schemas = json.loads(doc.read_text())["schemas"]
+
+    fake = FakeSheet()
+    resp = fake.append(body={"values": [["x"]]}).execute()
+
+    append_fields = set(schemas["AppendValuesResponse"]["properties"])
+    update_fields = set(schemas["UpdateValuesResponse"]["properties"])
+    assert "tableRange" in append_fields and "tableRange" not in update_fields, (
+        "the API puts tableRange at the response root, not under updates"
+    )
+    assert set(resp) <= append_fields, f"fake invents root fields: {set(resp) - append_fields}"
+    assert set(resp["updates"]) <= update_fields, (
+        f"fake invents fields under updates: {set(resp['updates']) - update_fields}"
+    )
+    # The two fields the recovery actually depends on, each where the API puts it.
+    assert "tableRange" in resp
+    assert "updatedRange" in resp["updates"]
