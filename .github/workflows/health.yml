@@ -107,6 +107,37 @@ jobs:
           last=$(jq -r '.poller.last_cycle_at // "never"' body.json)
           revision=$(jq -r '.revision // "unknown"' body.json)
 
+          # Alert-delivery fields. Deliberately *not* in the hard shape check
+          # above: production runs whatever Railway last deployed, so between
+          # merging a change to these fields and the deploy finishing, a body
+          # without them is expected and correct. Missing is therefore
+          # "unknown" — reported in the summary and never a failure — while
+          # missing *permanently* shows as `unknown` on run after run, the same
+          # persistent-signal shape the deploy-lag warning below uses.
+          #
+          # `// "unknown"` is wrong for all three for the reason spelled out
+          # for `enabled`: jq's alternative operator swallows `false` and `0`,
+          # which are the meaningful values here — `alerts_abandoned: 0` is the
+          # healthy answer and must not read as a missing field. Test for null.
+          #
+          # The type test has to happen *here*, in jq, and not on the shell
+          # string afterwards: `jq -r` renders the JSON string "unknown" and a
+          # genuinely missing field as the same six characters, so a body
+          # carrying `alerts_abandoned: "unknown"` would be read as the absent
+          # sentinel and skip the abandoned-alert failure check entirely —
+          # the exact fail-open this workflow exists to escape (CodeRabbit,
+          # PR #74). Anything present but of the wrong type collapses to
+          # `invalid`, which no downstream check accepts.
+          _typed() {  # $1 = jq path, $2 = required JSON type
+            jq -r --arg want "$2" \
+              "$1 | if . == null then \"unknown\"
+                    elif (. | type) == \$want then (. | tostring)
+                    else \"invalid\" end" body.json
+          }
+          cycle_ok=$(_typed '.poller.last_cycle_ok' boolean)
+          pending=$(_typed '.poller.alerts_pending' number)
+          abandoned=$(_typed '.poller.alerts_abandoned' number)
+
           {
             echo "### Production health"
             echo
@@ -117,11 +148,51 @@ jobs:
             echo "| poller enabled | \`$enabled\` |"
             echo "| poller stale | \`$stale\` |"
             echo "| poller last cycle | \`$last\` |"
+            echo "| last cycle ok | \`$cycle_ok\` |"
+            echo "| alerts held for retry | \`$pending\` |"
+            echo "| alerts abandoned unsent | \`$abandoned\` |"
             echo "| revision | \`$revision\` |"
             echo "| this run's ref | \`$REF_NAME\` @ \`${GITHUB_SHA:0:7}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           failed=0
+
+          # Absent is expected (the deploy window, see above); present but
+          # unparseable is not. A count that is not a number, or an ok flag
+          # that is not a boolean, means something other than the app answered
+          # — a proxy error page, a future rename — and this file's rule is
+          # that a shape it cannot judge is a failure rather than a pass.
+          # Validating here also lets the comparisons below stay plain
+          # integer tests.
+          #
+          # `invalid` comes from the typed extraction above; the digit test
+          # also catches a negative or fractional count, which no healthy
+          # producer emits. Kept as a second line of defence rather than
+          # trusting the jq alone.
+          for pair in "alerts_pending:$pending" "alerts_abandoned:$abandoned"; do
+            case "${pair#*:}" in
+              unknown) ;;
+              invalid)
+                echo "::error::/api/health reported poller.${pair%%:*} as something other than a number (the raw body is printed above). The probe cannot judge alert delivery from this body."
+                failed=1
+                ;;
+              ''|*[!0-9]*)
+                echo "::error::/api/health reported poller.${pair%%:*} as '${pair#*:}', which is not a count. The probe cannot judge alert delivery from this body."
+                failed=1
+                ;;
+            esac
+          done
+          case "$cycle_ok" in
+            unknown|true|false) ;;
+            invalid)
+              echo "::error::/api/health reported poller.last_cycle_ok as something other than a boolean (the raw body is printed above)."
+              failed=1
+              ;;
+            *)
+              echo "::error::/api/health reported poller.last_cycle_ok as '$cycle_ok', which is not a boolean."
+              failed=1
+              ;;
+          esac
 
           if [ "$status" != "200" ]; then
             echo "::error::/api/health returned HTTP $status (expected 200; it returns 503 when the DB is unreachable)."
@@ -136,6 +207,55 @@ jobs:
           if [ "$stale" = "true" ]; then
             echo "::error::The call-up poller is stale (last cycle: $last). Call-up alerts are not being sent."
             failed=1
+          fi
+
+          # An abandoned alert is a call-up the owner was never told about and
+          # never will be: it left the 48h retry window unsent, and there is no
+          # path that recovers it. That is the failure this app's whole reason
+          # for existing turns on, and until now it was invisible from outside
+          # the container — `stale` stays false through a total mailer outage,
+          # because the loop really is running. It fails the probe.
+          #
+          # The count is a rolling one over a ~2-day band, so it falls back to
+          # zero on its own once the band moves past the abandoned event. A red
+          # run here therefore clears itself; it does not need a human to reset
+          # anything, only to notice.
+          if [ "$abandoned" != "unknown" ] && [ "$abandoned" -gt 0 ] 2>/dev/null; then
+            echo "::error::$abandoned call-up alert(s) passed the 48h retry window unsent and will never be delivered. Check the mailer credentials (SendGrid) and the Railway logs."
+            failed=1
+          fi
+
+          # Held alerts and a failed cycle are warnings, not failures: both are
+          # states the *next* cycle legitimately clears (a transient SMTP
+          # refusal, one MLB Stats API timeout), and a check that flaps red on
+          # a self-healing transient is one people learn to ignore — the same
+          # reasoning as the deploy-lag warning below. What makes them worth
+          # reporting at all is that neither shows up in `stale`, and either
+          # one persisting across runs is the early form of the abandoned-alert
+          # failure above.
+          if [ "$pending" != "unknown" ] && [ "$pending" -gt 0 ] 2>/dev/null; then
+            echo "::warning::$pending call-up alert(s) are held for retry — the last cycle could not email them. They are abandoned permanently if this does not clear within 48h."
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ \`$pending\` call-up alert(s) held for retry — the mailer is failing." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Covers both ways a cycle fails to do its whole job: it raised, or
+          # the MLB Stats API fetch failed. The second is the quiet one — the
+          # fetch degrades to an empty list, which is byte-for-byte what a day
+          # with no call-ups returns — so a total upstream outage completes
+          # every cycle without error while seeing nothing at all.
+          #
+          # A warning rather than a failure because one timed-out fetch is a
+          # transient the next cycle clears, and the window is a trailing two
+          # days, so a short outage loses nothing. An outage *longer* than that
+          # window does lose call-ups permanently — but the fix for that is
+          # deriving the fetch window from the last one actually covered
+          # (tracked in docs/BACKLOG.md), not failing this probe on a blip.
+          # Persistent lag shows as the same warning run after run.
+          if [ "$cycle_ok" = "false" ]; then
+            echo "::warning::The last call-up poll cycle did not complete cleanly — it raised, or the MLB Stats API fetch failed (the loop itself is still running). No call-up can be seen while this persists, and the alert counts beside it are from an earlier cycle. See the Railway logs."
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ The last poll cycle did not complete cleanly (raised, or the MLB fetch failed) — alert counts shown are from an earlier cycle." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # Deploy lag is a *warning*, not a failure. The revision only tracks

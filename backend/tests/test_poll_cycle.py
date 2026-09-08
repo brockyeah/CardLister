@@ -29,7 +29,7 @@ def test_poll_cycle_records_and_emails(db_session):
     # counts what is still awaiting a retry, and a successful send stamps every
     # candidate — reporting the pre-send count would say three alerts are
     # waiting on the very cycle that just delivered them.
-    assert result == {"new": 4, "emailed": 3, "pending": 0, "abandoned": 0}
+    assert result == {"new": 4, "emailed": 3, "pending": 0, "abandoned": 0, "fetch_ok": True}
     send.assert_called_once()
     subject, body = send.call_args.args
     assert "Owned Guy" in subject                       # inventory match leads per spec
@@ -50,7 +50,7 @@ def test_poll_cycle_dedups_second_run(db_session):
          patch("backend.services.callups.mailer.send_email", return_value=True):
         callups.run_poll_cycle(db_session)
         second = callups.run_poll_cycle(db_session)
-    assert second == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0}
+    assert second == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0, "fetch_ok": True}
     assert db_session.query(CallupEvent).count() == 4
 
 
@@ -73,7 +73,7 @@ def test_stale_unemailed_events_are_not_retried(db_session):
          patch("backend.services.callups.mailer.send_email", return_value=True) as send, \
          patch.object(callups.billing_alerts, "notify_callup_alerts_undelivered"):
         result = callups.run_poll_cycle(db_session)
-    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 1}
+    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 1, "fetch_ok": True}
     send.assert_not_called()
 
 
@@ -91,7 +91,7 @@ def test_failing_mailer_alerts_the_owner_out_of_band(db_session):
          patch.object(callups.billing_alerts, "notify_callup_alerts_undelivered") as notify:
         result = callups.run_poll_cycle(db_session)
 
-    assert result == {"new": 4, "emailed": 0, "pending": 3, "abandoned": 0}
+    assert result == {"new": 4, "emailed": 0, "pending": 3, "abandoned": 0, "fetch_ok": True}
     notify.assert_called_once_with(3, 0, callups.ALERT_MAX_AGE_HOURS)
 
 
@@ -129,7 +129,7 @@ def test_alerts_aging_out_unsent_are_counted_and_reported(db_session):
          patch.object(callups.billing_alerts, "notify_callup_alerts_undelivered") as notify:
         result = callups.run_poll_cycle(db_session)
 
-    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 2}
+    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 2, "fetch_ok": True}
     # pending is 0: there is nothing left to retry, which is the whole point.
     notify.assert_called_once_with(0, 2, callups.ALERT_MAX_AGE_HOURS)
 
@@ -150,7 +150,7 @@ def test_events_older_than_the_reporting_band_are_not_re_reported(db_session):
          patch.object(callups.billing_alerts, "notify_callup_alerts_undelivered") as notify:
         result = callups.run_poll_cycle(db_session)
 
-    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0}
+    assert result == {"new": 0, "emailed": 0, "pending": 0, "abandoned": 0, "fetch_ok": True}
     notify.assert_not_called()
 
 
@@ -265,3 +265,43 @@ def test_callup_and_billing_alerts_do_not_share_a_throttle_clock(monkeypatch):
 
     assert callups.billing_alerts.notify_callup_alerts_undelivered(1, 0, 48) is True
     assert callups.billing_alerts.notify_credits_exhausted("credit balance too low") is True
+
+
+def test_a_failed_mlb_fetch_is_not_reported_as_a_successful_cycle(db_session):
+    """An empty list is ambiguous in the one direction that hurts.
+
+    `fetch_callup_transactions` swallows a network error and returns [], which
+    is byte-for-byte what a day with no call-ups returns — so a cycle through
+    a total MLB Stats API outage completes without raising, having seen
+    nothing at all. Reported as a good cycle, that keeps /api/health and the
+    scheduled probe green while no call-up is being detected (Codex, PR #74).
+    """
+    with patch.object(callups, "_get_json", side_effect=RuntimeError("upstream down")):
+        result = callups.run_poll_cycle(db_session)
+    assert result["fetch_ok"] is False
+    # The rest of the cycle still runs on the empty list: alerts recorded by
+    # earlier cycles must keep being retried while MLB is unreachable.
+    assert result["new"] == 0
+
+
+def test_the_default_fetch_still_degrades_to_an_empty_list(db_session):
+    """`strict` is opt-in. The module's stated guarantee — a network call
+    degrades to [] and never crashes its caller — is unchanged for everyone
+    who has not asked to be told."""
+    with patch.object(callups, "_get_json", side_effect=RuntimeError("upstream down")):
+        assert callups.fetch_callup_transactions("2026-07-07", "2026-07-08") == []
+        try:
+            callups.fetch_callup_transactions("2026-07-07", "2026-07-08", strict=True)
+        except callups.CallupFetchError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError("strict=True must surface the failure")
+
+
+def test_a_quiet_day_is_still_a_successful_cycle(db_session):
+    """The other half: no transactions is not a failure. Without this the fix
+    above would just move the false report to the opposite case."""
+    with patch.object(callups, "_get_json", return_value={"transactions": []}):
+        result = callups.run_poll_cycle(db_session)
+    assert result["fetch_ok"] is True
+    assert result["new"] == 0
