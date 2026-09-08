@@ -114,7 +114,8 @@ def test_alerts_test_endpoint_reports_channel_status(monkeypatch):
     from fastapi.testclient import TestClient
     from backend.main import app
 
-    monkeypatch.setattr(billing_alerts, "send_email", lambda s, b: True)
+    monkeypatch.setattr(billing_alerts.mailer, "send_email", lambda s, b: True)
+    monkeypatch.setattr(billing_alerts.mailer, "is_configured", lambda: True)
     monkeypatch.setenv("NTFY_TOPIC", "cardlister-test-topic")
     monkeypatch.setattr(billing_alerts.httpx, "post",
                         lambda url, **kw: types.SimpleNamespace(status_code=200, text=""))
@@ -126,12 +127,34 @@ def test_alerts_test_endpoint_reports_channel_status(monkeypatch):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["push_configured"] is True and body["push_sent"] is True
-        assert body["email_sent"] is True
+        assert body["email_configured"] is True and body["email_sent"] is True
+
+
+def test_alerts_test_reports_email_unconfigured_without_recipients(monkeypatch):
+    """`email_configured` follows the mailer's own definition of configured.
+
+    Provider credentials without recipients cannot send, and this endpoint
+    exists to verify wiring — so SMTP_USERNAME alone must report False, the
+    same answer `notify_callup_alerts_undelivered` gives when it diagnoses a
+    misconfiguration. The two used to disagree.
+    """
+    # Full SMTP credentials, so the only thing missing is the recipient list —
+    # without SMTP_PASSWORD the test passed for the wrong reason (no password
+    # is unconfigured too) and pinned nothing about recipients.
+    monkeypatch.setenv("SMTP_USERNAME", "user@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
+    monkeypatch.delenv("ALERT_EMAILS", raising=False)
+    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+
+    body = billing_alerts.send_test_alert()
+    assert body["email_configured"] is False
+    assert body["email_sent"] is False
 
 
 def test_alert_throttles_and_hits_both_channels(monkeypatch):
     sent, pushed = [], []
-    monkeypatch.setattr(billing_alerts, "send_email", lambda s, b: sent.append(s) or True)
+    monkeypatch.setattr(billing_alerts.mailer, "send_email", lambda s, b: sent.append(s) or True)
     monkeypatch.setenv("NTFY_TOPIC", "cardlister-test-topic")
 
     def fake_post(url, **kwargs):

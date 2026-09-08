@@ -302,3 +302,48 @@ def test_whitespace_hidden_formula_round_trips(db_session):
         assert r.status_code == 200, r.text
         imported = db_session.query(Card).order_by(Card.id.desc()).first()
         assert imported.notes == "\t=SUM(A1:A9)"
+
+
+def test_import_refuses_a_file_over_the_byte_cap(db_session):
+    """The row cap can only be applied after the file is read, decoded and
+    parsed — three full copies resident — so it protected the database and
+    nothing else. There is one worker and one container, so an OOM here is the
+    whole app, and a mis-selected video or DB backup reaches it.
+    """
+    from backend.routers.cards import MAX_IMPORT_BYTES
+
+    oversized = b"Player,Year\n" + b"a" * (MAX_IMPORT_BYTES + 1)
+    with TestClient(app) as client:
+        headers = _auth(client)
+        r = client.post(
+            "/api/cards/import.csv",
+            files={"file": ("huge.csv", io.BytesIO(oversized), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 413, r.status_code
+        assert "10 MB" in r.json()["detail"]
+        # Rejected before any parsing, so nothing was created.
+        assert db_session.query(Card).count() == 0
+
+
+def test_the_byte_cap_leaves_room_for_a_full_sized_export():
+    """The cap must stay well clear of a legitimate import, or it becomes the
+    thing that breaks the feature. A full MAX_IMPORT_ROWS export runs about
+    300 bytes a row even with notes on every one; asserting the headroom keeps
+    a future tightening from silently refusing a real inventory."""
+    from backend.routers.cards import MAX_IMPORT_BYTES, MAX_IMPORT_ROWS
+
+    assert MAX_IMPORT_BYTES > MAX_IMPORT_ROWS * 300
+
+
+def test_a_field_over_the_csv_parser_limit_is_a_422_not_a_500(db_session):
+    """csv.reader raises on a field longer than its 128 KB limit, and nothing
+    caught it — the client got a blank 500 that looks like a broken app rather
+    than a bad file. Reachable under the byte cap, so the cap does not hide it.
+    """
+    with TestClient(app) as client:
+        headers = _auth(client)
+        r = _post_csv(client, headers, "Player,Notes\nWander Franco," + "n" * 200_000 + "\n")
+        assert r.status_code == 422, r.status_code
+        assert "not valid CSV" in r.json()["detail"]
+        assert db_session.query(Card).count() == 0

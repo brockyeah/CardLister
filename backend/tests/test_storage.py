@@ -1,7 +1,9 @@
-"""Storage usage readout: DB file size + uploads count/bytes."""
+"""Storage usage readout: DB file size + uploads count/bytes + the remainder."""
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from backend.database import uploads_dir
+from backend.database import DB_PATH, uploads_dir
 from backend.main import app
 
 
@@ -31,6 +33,49 @@ def test_storage_reports_db_and_uploads(db_session):
             assert data["uploads_bytes"] >= 2048
     finally:
         marker.unlink(missing_ok=True)
+
+
+def test_storage_reports_non_db_non_upload_files_separately(db_session):
+    """A leaked backup snapshot is the case this figure exists for: it shares
+    the volume, it can be a full copy of the database, and it used to be
+    invisible to the only readout the app has of volume pressure."""
+    volume = Path(DB_PATH).resolve().parent
+    volume.mkdir(parents=True, exist_ok=True)
+    leaked = volume / "cardlister-backup-storagetest.db"
+    with TestClient(app) as client:
+        headers = _auth(client)
+        before = client.get("/api/analytics/storage", headers=headers).json()
+        leaked.write_bytes(b"x" * 4096)
+        try:
+            after = client.get("/api/analytics/storage", headers=headers).json()
+        finally:
+            leaked.unlink(missing_ok=True)
+
+    assert after["other_bytes"] == before["other_bytes"] + 4096
+    # The snapshot is neither the database nor a photo, so neither of those
+    # figures may absorb it — that conflation is the bug this closes.
+    assert after["db_bytes"] == before["db_bytes"]
+    assert after["uploads_bytes"] == before["uploads_bytes"]
+    assert after["uploads_count"] == before["uploads_count"]
+
+
+def test_storage_other_bytes_excludes_uploads_and_db(db_session):
+    """uploads/ is reported on its own, so it must not also land in the
+    remainder — double-counting would overstate the volume it is watching."""
+    root = uploads_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    marker = root / "other-bytes-marker.jpg"
+    with TestClient(app) as client:
+        headers = _auth(client)
+        before = client.get("/api/analytics/storage", headers=headers).json()
+        marker.write_bytes(b"x" * 1024)
+        try:
+            after = client.get("/api/analytics/storage", headers=headers).json()
+        finally:
+            marker.unlink(missing_ok=True)
+
+    assert after["uploads_bytes"] == before["uploads_bytes"] + 1024
+    assert after["other_bytes"] == before["other_bytes"]
 
 
 def test_storage_counts_only_files(db_session):

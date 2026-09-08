@@ -19,7 +19,24 @@ DEFAULT_FEEDS = [
 KEYWORDS = ["called up", "call-up", "call up", "contract selected", "selected the contract",
             "promoted", "top prospect", "debut", "recalled", "roster move"]
 _CACHE_TTL = 900  # 15 min
-_cache = {"at": 0.0, "articles": []}
+
+# Separate, shorter TTL for a result that came back empty. Empty is not the
+# rare case: both feeds failing (10s timeout each, so ~20s of blocked worker
+# thread per request) produces one, and so does any stretch — most of the
+# winter — where no MLB headline clears the `score_article(a) > 0` floor.
+# NewsSection fires GET /api/news on every Scanner mount, so without caching
+# the empty result the app re-fetches both feeds on every page load, precisely
+# when fetching is most expensive and least likely to work. Holding it for the
+# full 15 minutes would be the other error: a transient feed outage would keep
+# the panel blank long after the feeds recovered. Two minutes collapses a burst
+# of page loads while letting a recovery show up on the next one.
+_EMPTY_CACHE_TTL = 120  # 2 min
+
+# `limit` is part of the key because it shapes the payload: a cached top-8
+# served to a caller asking for 3 would be silently wrong. Only the router
+# calls this today, always with the default, so this costs nothing and closes
+# the hole rather than relying on that staying true.
+_cache = {"at": 0.0, "articles": [], "limit": None}
 
 
 def _feeds() -> list[str]:
@@ -73,9 +90,15 @@ def _fetch_feed(url: str) -> list[dict]:
 
 
 def fetch_articles(limit: int = 8) -> list[dict]:
-    """Top scored articles across all feeds. Cached 15 min."""
+    """Top scored articles across all feeds. Cached 15 min (2 min when empty)."""
     now = time.time()
-    if _cache["articles"] and now - _cache["at"] < _CACHE_TTL:
+    # Freshness is keyed on the timestamp stored beside the payload, never on
+    # the payload's truthiness: the earlier `if _cache["articles"] and ...`
+    # form meant an empty result could never satisfy the guard, so the one
+    # case where fetching costs the most — both feeds timing out — was also
+    # the one case that re-fetched on every single request.
+    ttl = _CACHE_TTL if _cache["articles"] else _EMPTY_CACHE_TTL
+    if _cache["at"] and now - _cache["at"] < ttl and _cache["limit"] == limit:
         return _cache["articles"]
     all_articles = []
     for url in _feeds():
@@ -85,5 +108,5 @@ def fetch_articles(limit: int = 8) -> list[dict]:
             "published_iso": a["published_iso"], "age_days": a["age_days"],
             "summary": _clean_summary(a.get("summary", ""))}
            for a in scored[:limit] if score_article(a) > 0]
-    _cache.update(at=now, articles=top)
+    _cache.update(at=now, articles=top, limit=limit)
     return top

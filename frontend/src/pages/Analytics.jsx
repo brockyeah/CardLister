@@ -48,11 +48,18 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Same race class the Scanner's pricingSeq guard closes: two filter
+    // clicks in quick succession can resolve out of order, and without the
+    // stale flag the older response would overwrite the newer one under the
+    // newer button's highlight. The cleanup marks the superseded fetch.
+    let stale = false
     setLoading(true)
+    setError('')
     getAnalytics({ range, user: user || undefined, model: model || undefined })
-      .then(setReport)
-      .catch((e) => setError(formatApiError(e, 'Could not load analytics.')))
-      .finally(() => setLoading(false))
+      .then((r) => { if (!stale) setReport(r) })
+      .catch((e) => { if (!stale) setError(formatApiError(e, 'Could not load analytics.')) })
+      .finally(() => { if (!stale) setLoading(false) })
+    return () => { stale = true }
   }, [range, user, model])
 
   const t = report?.totals
@@ -379,10 +386,19 @@ function ManageData({ users, onDone }) {
         Download a database backup regularly — inventory, scans, and usage history all live in it.
       </p>
       {storage && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
           <Tile label="Database size" value={fmtBytes(storage.db_bytes)} />
           <Tile label="Photos on server" value={fmt(storage.uploads_count)} />
           <Tile label="Photo storage" value={fmtBytes(storage.uploads_bytes)} />
+          {/* Everything else sharing the Railway volume — WAL sidecars, a
+              backup snapshot mid-download, or one leaked by a disconnect.
+              Kept separate from "Database size" so growth here reads as a
+              leak rather than as the database getting bigger. */}
+          <Tile
+            label="Other on volume"
+            value={fmtBytes(storage.other_bytes ?? 0)}
+            hint={storage.other_bytes > 0 ? 'Backups or WAL files' : undefined}
+          />
           <Tile
             label="Reclaimable"
             value={orphanCount(orphans) == null ? '—' : fmt(orphanCount(orphans))}

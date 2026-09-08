@@ -5,6 +5,501 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] A total alert-delivery failure buys six hours of silence (2026-09-08
+      review): both `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` in `services/billing_alerts.py` stamp
+      their throttle clock (`_last_alert_at = now`) **before** attempting
+      delivery, then return whether either channel worked. So when *both*
+      channels fail — no `ALERT_EMAILS`, a revoked SendGrid key, ntfy
+      unreachable — the outage is recorded as alerted and suppressed for six
+      hours with nothing having been delivered. That is the exact failure shape
+      PR #64 removed from the call-up poller one layer down: the poller now
+      escalates undelivered alerts to `billing_alerts`, and `billing_alerts`
+      then drops the escalation on the floor if its own channels are also down,
+      which is precisely the case where both are most likely to be down at
+      once. Fix: stamp the clock only when at least one channel delivered, so a
+      failed attempt is retried on the next scan or poll cycle; keep the stamp
+      unconditional for a *partial* success (one channel is enough). Worth
+      deciding at the same time whether a shorter retry interval should apply
+      to the all-failed case so a transient provider blip does not wait a full
+      cycle. Note also that both clocks are module-level process state, so a
+      Railway deploy resets them and an ongoing outage re-alerts — the
+      opposite error, and the harmless one (quick win; implement directly;
+      inline — `services/billing_alerts.py` plus tests that patch both
+      channels to fail and assert the second call still attempts delivery)
+- [ ] The ntfy push is an unauthenticated public channel carrying raw provider
+      error text (2026-09-08 review): `_push_via_ntfy` posts to
+      `https://ntfy.sh/<NTFY_TOPIC>` with no credential, and an ntfy topic is
+      public by construction — the topic name *is* the secret, and anyone who
+      knows or guesses it can read every alert **and publish to it**, so a
+      forged "credits exhausted" push is as easy as reading a real one. The
+      body is not nothing: `notify_credits_exhausted` interpolates the raw
+      Anthropic API error string, which is provider text this app does not
+      control the contents of. Low severity — this is a two-user internal tool
+      and no card or price data goes over it — but the cost of closing it is
+      one header. Fix: support an optional `NTFY_TOKEN` sent as
+      `Authorization: Bearer`, document in `.env.example` that the topic name
+      is a shared secret and should be long and random, and truncate the
+      interpolated provider error to a bounded prefix (quick win; implement
+      directly; inline — `services/billing_alerts.py`, `.env.example`)
+- [ ] There is no migration path for an **index** on an existing table
+      (2026-09-08 review, found while moving `find_exact_match`'s match into
+      SQL): `_COLUMN_MIGRATIONS` closes exactly one hole in the no-Alembic
+      setup — a new *column* — and `init_db` otherwise relies on
+      `create_all`, which skips a table that already exists and therefore never
+      creates an index added to a model later. So an `Index(...)` on
+      `Correction` or `Card` would exist on a fresh DB and on every test run,
+      and silently not exist on the deployed one: the same failure shape as
+      invariant #4, in the one direction that invariant's wording ("New
+      *tables* need nothing") reads as already covered. It is not hypothetical
+      any more: `find_exact_match` now filters `year` + `lower(trim(brand))` +
+      `lower(trim(card_number))` in SQL on **every scan**, against a
+      `corrections` table that grows forever and has an index on none of those
+      three. Measured at 401 rows it is 2.5 ms, so this is a ceiling to raise
+      before it is hit, not a fire — but the fix has to land before the index
+      does, or the index is a lie on production only. Sketch: an
+      `_INDEX_MIGRATIONS` list applied by `ensure_columns`' sibling using
+      `CREATE INDEX IF NOT EXISTS` (idempotent by construction, unlike ALTER
+      TABLE), a `test_migrations.py` case that builds a pre-index DB and
+      asserts the index appears, and an invariant-list entry so the next
+      person does not have to rediscover it. Function-based indexes on
+      `lower(trim(...))` are supported by SQLite but only used when the
+      expression matches exactly — worth pinning with an `EXPLAIN QUERY PLAN`
+      assertion rather than assuming (medium; **design doc first** — it is a
+      schema-migration mechanism, which CLAUDE.md puts behind a spec + plan;
+      inline — `backend/database.py`, `backend/tests/test_migrations.py`,
+      CLAUDE.md invariant #4)
+- [ ] `storage_usage` guards only one of its three file loops against a file
+      vanishing mid-scan (2026-09-07, Claude Auto Review on PR #77; pre-existing
+      and deliberately left out of that PR rather than widening it): the
+      `other_bytes` walk added there wraps `is_file()`/`stat()` in
+      `try/except OSError`, because a backup snapshot can be unlinked by its own
+      `BackgroundTask` while the endpoint is reading. The `db_bytes` line and
+      the `uploads/` counting loop immediately above it do the same `stat()`
+      with no guard, so the identical race still 500s a read-only readout — and
+      the inconsistency is now *within a single function*, which is worse for
+      the next reader than either extreme. The window is small and the endpoint
+      is not hot, so this is robustness rather than a live bug; the fix is to
+      hoist one small helper that stats a path and returns 0 on `OSError`, and
+      use it in all three places (quick win; implement directly; inline —
+      `routers/analytics.py` only)
+- [ ] The storage tiles report usage but never **capacity**, so there is no
+      warning before the volume fills (2026-09-07 daily run, found while adding
+      the `other_bytes` figure): nothing in `backend/` calls `shutil.disk_usage`
+      or `statvfs` — verified by grep — so `/api/analytics/storage` answers "how
+      much am I using" and cannot answer "how much is left". The Railway volume
+      is a fixed size, and the app's only reaction to running out today is
+      *after* the fact: `GET /api/analytics/backup.db` returns 507 once
+      `VACUUM INTO` fails, which is the moment a backup is most wanted and least
+      possible. A backup briefly **doubles** the DB's footprint on that volume
+      (CLAUDE.md says so), so the threshold that matters is not "full" but "less
+      than one DB-size free" — a figure the panel now has every input for except
+      the total. Add `total_bytes`/`free_bytes` from `shutil.disk_usage` on the
+      DB's directory, and have the tile warn when free space is under ~2× the
+      database size, so the owner learns before the backup button stops working
+      rather than from a 507 (quick win; implement directly; inline —
+      `routers/analytics.py` plus the Analytics tile, alongside `other_bytes`)
+- [ ] Unknown models undercount cost, despite a comment promising they can't
+      (2026-09-07 daily run): `analytics.py:44` says *"Unknown/overridden models
+      price at Opus rates so estimates never undercount"* and sets
+      `_DEFAULT_PRICE = (5.0, 25.0)`. But the table directly above it prices
+      `claude-fable-5` at `(10.0, 50.0)` — **double** Opus — so the default is
+      not the maximum of the table and the promise is false for exactly the
+      newest, most expensive family. A model string the table doesn't know
+      (a new Fable revision, a `VISION_MODEL` env override) is billed at half
+      its real rate in the one readout the two users split the Anthropic bill
+      with, and it looks entirely healthy. Either set the default to the
+      table's max and fix the comment to say "the most expensive known rate",
+      or report unknown models as a distinct "unpriced" line rather than
+      guessing — the second is more honest but changes the shape of the report.
+      Worth pairing with the item below, since both are about this table going
+      stale (quick win; implement directly; inline — `analytics.py` plus a case
+      in `test_analytics_cost.py`)
+- [ ] `MODEL_PRICES` is an undated snapshot with no staleness signal — the same
+      trap as invariant #15 (2026-09-07 daily run): the eBay fee schedule in
+      `frontend/src/lib/fees.js` is documented as "a dated snapshot with
+      build-time-only overrides" and carries an invariant explaining that
+      nothing in the repo notices when it goes stale. `analytics.py:36-43` is
+      the identical shape — six hardcoded per-1M-token prices, no date, no
+      source link, no env override at all — and it is worse in one way: the fee
+      schedule at least renders its live numbers in prose via
+      `feeDisclaimer()`, so a human reading the UI can spot a wrong rate, while
+      the model prices are only ever seen already multiplied into a dollar
+      total nobody can sanity-check. When Anthropic changes a price, every cost
+      figure in the app silently drifts and the invoice is the only correction.
+      Cheapest fix is a dated comment plus a line in CLAUDE.md's invariant list
+      so the next reader knows what they're looking at; an env override is the
+      sturdier version (quick win; implement directly; inline — `analytics.py`
+      and CLAUDE.md)
+- [ ] Nothing ever prunes the `scans` table, and it is now the DB's main growth
+      (2026-09-07 daily run, direct follow-on to the orphan-path fix shipped the
+      same day): grep finds no delete of `Scan` anywhere outside the test
+      fixture — `routers/cards.py:486` only reads one. Every real (non-mock)
+      extraction writes a row carrying the full `extracted_json`, and unlike the
+      photos there is no grace window, no sweep, and no tile showing the cost.
+      Deleting a card does not remove its scan; the orphan sweep removes the
+      *file* and (as of today) nulls the path, which leaves the row as pure
+      dead weight: no photo, no card, and — for a scan that never became a card
+      — no `Correction` derived from it either. That is the population worth
+      pruning, and it is precisely identifiable now that the paths are nulled.
+      Note what must NOT be pruned: a scan whose corrections feed
+      `build_cheatsheet` is training data, and `Correction` rows reference
+      scans, so any retention rule has to preserve those or it silently
+      degrades the learning loop. Decide the rule (age? no-card-and-no-
+      correction? both?) before writing it (medium; implement directly; inline —
+      needs the retention predicate pinned by a test that a scan with a
+      correction survives)
+- [ ] Backend tests share one real uploads directory and wipe it, so filesystem
+      isolation is by luck (2026-09-07 daily run, hit while adding a cleanup
+      test): `db_session` isolates DB rows, but nothing isolates the disk —
+      `uploads_dir()` resolves off the real `DB_PATH`, and
+      `test_upload_cleanup.py` opens two tests with `for f in root.iterdir():
+      f.unlink()` while `test_cleanup_with_no_uploads_dir` goes further and
+      `rmdir`s the shared directory outright. Any new test that writes an upload
+      is therefore order-dependent on those three, which is why the existing
+      ones defensively wipe first — the workaround has already been copied three
+      times, and a fourth author who doesn't notice gets a failure that depends
+      on `-p no:randomly` and reproduces only sometimes. `test_storage.py` and
+      `test_backup.py` write into the same directory. Fix with a fixture that
+      points `uploads_dir()` at a `tmp_path` per test (monkeypatch the module
+      attribute — several modules already import a module rather than a function
+      to stay patchable), then delete the defensive wipes (medium; implement
+      directly; inline — `conftest.py` plus the four test files)
+- [ ] Ten stars or a paid CodeRabbit plan — **owner's call, not a code change**
+      (2026-08-31, re-verified 2026-09-07): CodeRabbit reviews nothing
+      automatically now (*"this repository does not receive automatic reviews
+      because it has fewer than 10 stars"*), and the routine's workaround as of
+      today is to post `@coderabbitai review` by hand on each PR. That is a
+      manual trigger on every PR forever, and it only works while the free tier
+      honours it. Worth deciding whether the second automated reviewer is worth
+      ten stars or a paid plan, or whether the Claude Auto Review Action alone
+      is enough — in which case `.coderabbit.yaml` should stop being maintained
+      (PR #67 updated it this week for a reviewer that was not running) and the
+      manual trigger should come back out of the routine prompt (no effort;
+      owner decision; not implementable here)
+- [ ] `resetAfterSave` runs from `doSave`'s click-time closure and can stomp a
+      concurrently reviewed item (2026-09-06 review): with two `ready` items,
+      pressing Save on A and then Review on B during the 1–2s save window let
+      A's completion wipe B's freshly loaded form (`setForm(EMPTY_FORM)`),
+      null the active key, and `setTimeout`-reload B from the stale queue
+      snapshot — silently discarding anything typed into B meanwhile. The
+      2026-09-06 review shipped the stopgap (the queue's Review button is
+      `disabled={submitting}`; the integration PR for #71–#78 gave "Clear
+      queue" the same guard, since it also switches the active item mid-save),
+      but the underlying shape remains: `resetAfterSave` reads
+      `activeKey` and `queue` from the render that created the click handler.
+      The durable fix is the same one `pricingSeq` embodies — track the active
+      key in a ref and have `resetAfterSave` bail when the item it is
+      finishing is no longer the active one (small; implement directly; inline
+      — `Scanner.jsx`, no test possible without jsdom, so the guard comment
+      must carry the rationale)
+- [ ] Alert throttle clocks are consumed before delivery is attempted
+      (2026-09-06 review): `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` both stamp `_last_*_alert_at = now`
+      before trying either channel, so a cycle where both channels fail —
+      for the call-up alert, precisely the triggering scenario when ntfy is
+      unconfigured and the mailer is down — delivers nothing yet suppresses
+      the next attempt for the full 6h window, and both callers ignore the
+      return value. Stamping only when `emailed or pushed` (or retrying
+      sooner after a total failure) is strictly better; while in there, add
+      the missing end-to-end case where a cycle has both a failed send and
+      abandoned events (`notify(pending, abandoned)` with both non-zero is
+      pinned only at the unit level today), and consider an autouse fixture
+      for the throttle-clock reset that tests currently do by hand
+      (small; implement directly; inline — `services/billing_alerts.py` +
+      `test_poll_cycle.py`)
+- [ ] The pricing `source` strings deserve the shared-fixture treatment the
+      eBay title and condition tables got (2026-09-06 review, now invariant
+      #16): `pricing.js` refusing `source === 'mock'` is the only thing
+      keeping the $9.99 placeholder out of saved cards, and each side pins its
+      own literal — a backend rename that updates its own test leaves both
+      suites green while the frontend guard silently stops refusing mocks. A
+      fixture both suites read (like `condition_cases.json`) closes it; fold
+      in the duplicated source-label mapping while there (`Scanner.jsx` and
+      `Inventory.jsx` both hand-roll `source === 'ebay_sold' ? 'eBay sold
+      listings' : source`) (small; implement directly; inline —
+      `backend/tests/fixtures/`, both pricing test files, `lib/pricing.js`)
+- [ ] Actions and container images are pinned by tag, not by digest
+      (2026-09-04, raised by CodeRabbit on PR #74 and noted independently by
+      the Claude auto-review): every workflow step here references a mutable
+      identifier — `actions/checkout@v4`, `actions/setup-python@v5`,
+      `actions/setup-node@v4`, and now `docker://rhysd/actionlint:1.7.12`. A
+      tag can be repointed by whoever owns it, so a compromised upstream reaches
+      CI without anything in this repo changing. Both reviewers called it
+      non-blocking and consistent with how the repo already works, which is
+      exactly why it belongs here rather than in whichever PR happens to add
+      the next step: pinning one job's checkout to a SHA while five others stay
+      on `@v4` buys almost nothing and leaves the file looking like nobody
+      decided. Worth doing as one sweep, with a note on how the pins get
+      updated afterwards — a digest-pinned repo with no refresh habit is how
+      you end up running a two-year-old checkout with known bugs, which is a
+      different failure, not a smaller one (quick win; implement directly;
+      inline — all four workflow files at once, plus a line in CLAUDE.md or a
+      Dependabot `github-actions` entry to keep them moving)
+
+- [ ] Nothing exercises the shell inside the workflows, only its syntax
+      (2026-09-04 daily run, found while adding actionlint): the new
+      `workflows` job catches a YAML typo or an unquoted expansion, and that
+      is a real gain — it caught its own step name on the first run — but it
+      cannot tell whether `health.yml`'s probe *decides correctly*. That probe
+      is now ~130 lines of bash making eight pass/fail/warn judgements, and
+      `changelog-guard` is another block of real logic; between them they are
+      the two things standing between a broken production and nobody noticing,
+      and both are verified today only by whoever last edited them running the
+      script by hand (which this run did, against seven fabricated bodies, in
+      a throwaway harness that was then deleted). Make that harness a checked-in
+      one: extract a named step's `run:` block from the workflow YAML, run it
+      with a stubbed `curl` on PATH and a fixture body, and assert the exit
+      code and the annotations. Cheap, and it means the next edit to the probe
+      cannot quietly invert a condition — the failure mode this whole workflow
+      exists to escape (medium; implement directly; inline — one test module
+      plus a fixtures directory; note it needs `bash` and `jq` on the runner,
+      both present on ubuntu-latest, and pytest would have to skip on a host
+      without them)
+- [ ] A restart blanks the poller's alert counts for up to one poll interval
+      (2026-09-04 daily run, honest follow-on to the health fields shipped the
+      same day): `alerts_pending` / `alerts_abandoned` / `last_cycle_ok` live
+      on `_poller_state`, which starts empty in a fresh process, so between a
+      Railway restart and the first completed cycle — up to
+      `CALLUP_POLL_MINUTES`, 15 minutes by default — `/api/health` reports
+      `abandoned: 0` and `last_cycle_ok: null` while alerts really are
+      abandoned, and the 3-hourly probe passes clean if it lands in that
+      window. Nothing is lost permanently: `_recently_abandoned` recomputes
+      the count from the database on the next cycle, so the signal returns.
+      Two candidate fixes and they differ in more than effort — compute the
+      abandoned count on demand inside `/api/health` (exact, but adds a DB
+      query with the alertable filter to an unauthenticated endpoint that is
+      polled by monitors), or report the pre-first-cycle state as `unknown`
+      rather than `0` so the probe can say "not yet known" instead of "fine".
+      The second is smaller and honest; the first is the one that actually
+      closes the window (quick win; implement directly; inline — `main.py`
+      plus `health.yml`'s unknown handling, which already exists for the
+      deploy-window case)
+- [ ] Changing a user's password does not invalidate their existing sessions
+      (2026-09-04 daily run): `require_auth` re-reads `CARDLISTER_USERS` on
+      every request and rejects a token whose `sub` is no longer in it — which
+      is why removing a user takes effect immediately, as CLAUDE.md says. But
+      the token carries nothing about the *password*, so editing a user's
+      password on Railway leaves every token minted under the old one valid
+      for the rest of its 30-day TTL. That is exactly backwards from what
+      changing a password is for: the one action taken when a credential is
+      believed compromised is the one that does not end the compromised
+      session, and the only lever that does is rotating `JWT_SECRET`, which
+      signs everyone out and is nowhere written down as the actual remedy.
+      Fix shape without a schema change: put a short fingerprint of the
+      password (an HMAC under `JWT_SECRET`, truncated) in the token and
+      compare it against the current password in `require_auth` — a changed
+      password then fails the comparison and the session ends, while the
+      existing "unknown user" check keeps working unchanged. Decide as part of
+      it what the 30-day TTL should be if sessions can now be ended
+      deliberately (medium; **design first** — auth; per CLAUDE.md's
+      design-doc rule, and because getting the fingerprint wrong locks both
+      users out of a single-container app with no admin path back in)
+- [ ] Nothing records *which preset* produced a scan, so the cost/accuracy
+      trade cannot be measured (2026-09-04 daily run): the three presets exist
+      precisely to trade money against accuracy — `cost` is sonnet-4-6 at
+      1100px, `accuracy` is opus-4-7 at 2000px with high thinking effort — and
+      the app already stores both halves of the evidence needed to judge them.
+      `UsageEvent` has the tokens and the model, and every `Correction` row is
+      a measured miss on a specific scan. What is missing is the join: `Scan`
+      records `model` only, so a `balance` scan and an `accuracy` scan are
+      indistinguishable in the data (both are opus-4-7), and the question the
+      owner actually has — "is accuracy mode worth roughly double the money?"
+      — is unanswerable from the database. Recording the preset on the `Scan`
+      row makes it a one-query answer: corrections per scan, grouped by
+      preset. Worth doing before the fee/cost work further down, since it is
+      the input that decides whether the default preset is the right default
+      (medium; **design first** — schema: a new column on an existing table,
+      so it needs a `_COLUMN_MIGRATIONS` entry per invariant #4, and the
+      design should settle whether the effort/px cap are worth storing beside
+      it or whether the preset key is enough to derive them)
+
+- [ ] `Card.notes` has no upper length bound anywhere in the pipeline
+      (2026-09-03 review): `notes` is `Text nullable=True` on the model and
+      `Optional[str]` on `CardBase` / `CardUpdate` with no `max_length`, and
+      it reaches the DB from three seams — the review form, vision extraction
+      (`confidence_notes` is separate but the model can and does put text into
+      `notes` too), and CSV import. A runaway extraction, a mis-selected
+      textarea paste, or a mangled `Notes` column in an imported CSV can
+      therefore land arbitrary bytes into the row, then into the Sheets
+      `Notes` column (which stops rendering usefully past a few thousand
+      characters) and into the pasted eBay description (which is capped at
+      500,000 but reads as wrong text long before that). A `Field(max_length=4000)`
+      on both schema classes rejects the runaway with a 422 rather than storing
+      something unmanageable; 4000 is comfortably above every legitimate note
+      today (the longest in production is ~180 chars) and below what makes the
+      three consumers behave badly (quick win; implement directly; inline —
+      `backend/schemas.py` plus a test)
+- [ ] `POST /api/analytics/alerts/test` fires two real channels with no
+      cooldown (2026-09-03 review): the endpoint deliberately bypasses the
+      throttle so the owner can verify the ntfy topic + email recipients are
+      wired up, but nothing bounds repeat calls either. A stuck button, a
+      rapid double-click, or a hostile logged-in user (both configured users
+      pass `require_auth`, and the analytics owner gate is still in design
+      per the 2026-08-17 spec) can hammer SendGrid credits and the ntfy
+      topic. Add a small module-level cooldown separate from the outage
+      throttle — 30-60s — so a repeat call inside the window returns
+      `{"skipped": true, "seconds_until_next": N}` without touching either
+      channel. Testing works exactly the way it does today on the first
+      press; a debounced re-press says why nothing was sent (quick win;
+      implement directly; inline — `services/billing_alerts.py` plus a test
+      that patches `time.time` and asserts the second call skips)
+- [ ] `build_description` renders empty always-emitted lines as blank rows in
+      the pasted eBay description (2026-09-03 review): the seven "always"
+      lines (Player, Year, Brand, Set, Card Number, Team, Condition) are
+      emitted with `card.field or ''`, so an autograph patch with no card
+      number pastes into eBay's sell form as `Player: …\nYear: …\nBrand:
+      …\nSet: …\nCard Number: \nTeam: \nCondition: NM`, which reads as an
+      unfinished description rather than an intentionally-sparse one. Drop
+      lines whose value is empty or whitespace-only, parallel to how the flag
+      lines already do (`if card.is_rookie:`). Keep Player as a hint the field
+      is missing — a listing with no player at all is unusual enough to leave
+      the placeholder in as a red flag. Quick win, but *is* the eBay listing
+      text: verify by regenerating an existing card's clipboard text and eyeballing
+      it, since a change here affects every seller-visible listing (quick
+      win; implement directly; inline — `routers/ebay.py` plus a test)
+- [ ] An alert that fails to send starts its own six-hour silence (2026-09-02
+      daily run): both `notify_credits_exhausted` and
+      `notify_callup_alerts_undelivered` stamp their throttle clock
+      (`_last_alert_at = now`) **before** attempting delivery, and then return
+      `emailed or pushed`. So when both channels fail — SendGrid down, ntfy
+      unreachable, `NTFY_TOPIC` unset, `ALERT_EMAILS` empty — the outage is
+      recorded as alerted and every call for the next six hours returns early
+      without trying again. The two alerts this affects are the two the app has
+      *because* something is already broken, and one of them is specifically
+      about email not working: "call-up alerts are not being delivered" is most
+      likely to fire exactly when the mailer is the thing that is down, which is
+      also when its own send fails and buys six hours of silence. The throttle
+      is right in shape (a burst of failing scans must not produce one alert
+      each) and wrong in placement. Stamp it on a *delivered* alert, and give a
+      failed attempt its own much shorter back-off — a few minutes — so a hard
+      outage retries without hammering the provider on every scan. Note the
+      poll cycle calls the call-up one at most every `CALLUP_POLL_MINUTES`
+      anyway, so the failure back-off only really bounds the credits alert
+      (quick win; implement directly; inline — `services/billing_alerts.py`
+      plus tests that fail both channels and assert the next call retries, and
+      that a successful one still suppresses)
+- [ ] A failed news refresh blanks the Prospect Wire, and the feed walk has no
+      total budget (2026-09-02 daily run, direct follow-on to the empty-result
+      caching that shipped the same day): `fetch_articles` walks `_feeds()`
+      serially and each `_fetch_feed` carries its own 10s timeout, so the wall
+      clock is N × 10s with nothing capping the total — and `NEWS_FEEDS` is an
+      env var, so N is an operator decision, not a constant. There is one
+      worker. Worse than the latency: when a refresh fails, the empty result
+      *replaces* whatever was cached, so a panel that had perfectly good
+      headlines two minutes ago goes blank because two feeds timed out once.
+      Today's fix bounds how *often* that costs (the empty result is now held
+      for 2 minutes instead of re-fetched every request); it does not change
+      what it costs or what the user sees. Two changes, both small: keep the
+      last good payload and serve it stale-on-error up to some max staleness
+      (an hour reads as "yesterday's wire", a day does not), and give the whole
+      refresh one wall-clock budget the way `PRICING_DEADLINE_SECONDS` does for
+      the comps chain — a scalar httpx timeout is per-connect/read, never a
+      request budget (quick win; implement directly; inline —
+      `services/prospect_news.py` plus a test that fails the feeds after a good
+      fetch and asserts the good articles are still served)
+- [ ] Every mock or failed scan leaves its photo on the volume with nothing
+      referencing it (2026-09-02 daily run): `scan_card` saves the upload
+      first and only writes a `Scan` row `if not is_mock and not error`, so
+      the two paths that produce no row still produce a file. Mock mode is not
+      an edge case — it is what runs whenever `ANTHROPIC_API_KEY` is unset or
+      out of credits, which is precisely when the user retries — and each retry
+      writes another uuid-named file that nothing will ever reference. They are
+      reclaimable (the orphan sweep on Analytics finds them by definition), but
+      only by someone who thinks to click it, and `storage_usage` counts them
+      as legitimate usage in the meantime. Cheapest fix is to unlink the saved
+      files on the mock/error return, the same way the endpoint already unlinks
+      the front image when the back save fails — the file is useless without a
+      row to point at it. Decide with it whether an *error* scan should keep
+      its photo for the retry to reuse, which is the one argument for leaving
+      it (quick win; implement directly; inline — `routers/scan.py` plus a test
+      asserting the uploads dir is empty after a mock scan)
+- [ ] Nothing in the repo can start the app the way production runs it
+      (2026-09-02 daily run, hit while verifying a UI change): the backend
+      serves the SPA from `backend/static`, which only the Dockerfile ever
+      creates (`COPY --from=frontend /app/dist ./backend/static`), and
+      `backend/static/` is gitignored. So the documented dev flow is two
+      processes and a Vite proxy, and there is no way to exercise the app as
+      deployed — the mode where the SPA fallback, the cache headers and the
+      `/uploads` mount actually apply — without hand-assembling a venv, a JWT
+      secret, a `CARDLISTER_USERS` pair, a `DB_PATH`, and a manual
+      `cp -r frontend/dist backend/static`. That matters beyond convenience:
+      step 9 of the daily routine requires actually exercising anything
+      user-visible, and a ten-minute reconstruction is the step a run under
+      pressure quietly skips. A `scripts/dev.sh` that builds the frontend,
+      stages it into `backend/static`, and boots uvicorn with safe local
+      defaults makes it one command, and gives the Playwright E2E item further
+      down something to point at (quick win; implement directly; inline — one
+      script plus a README line)
+- [ ] The call-up fetch window is a fixed trailing 2 days, so an outage longer
+      than that loses call-ups permanently (2026-09-01 daily run): every cycle
+      of `run_poll_cycle` computes `start = today - 2 days` from *now*, never
+      from the last window it actually covered, and only transactions returned
+      by that request are ever written to `CallupEvent`. So any span the poller
+      does not run through — a Railway restart loop, a container asleep, a
+      three-day MLB Stats API outage (`fetch_callup_transactions` degrades to
+      `[]` on failure, which is indistinguishable from "no transactions") —
+      is skipped and never revisited. Nothing records the gap, and
+      `/api/health` makes it worse rather than better: `poller.stale` only
+      proves the loop is alive *now*, so a container that was down for a week
+      comes back reporting perfectly healthy while three days of call-ups were
+      never fetched. This is a different failure from the two already fixed —
+      those are about events that *were* recorded not being emailed; these
+      events never exist at all, so no digest, count or abandoned-alert push
+      can mention them. Fix needs no schema: derive `start` from the newest
+      `CallupEvent.date` already in the table (falling back to the current 2
+      days when it is empty), clamped to a ceiling — ~10 days — so a long
+      absence widens the request once instead of asking for a season. Decide
+      with it whether a widened window should be reported, since silently
+      backfilling a week of transactions and emailing them all as fresh
+      call-ups is its own surprise (medium; implement directly; inline —
+      `services/callups.py` plus a test that skips a cycle and asserts the
+      next one still sees the missed transaction)
+- [ ] An unpriced model bills silently at Opus rates (2026-09-01 daily run):
+      `analytics.py:_cost` looks the model up in `MODEL_PRICES` and falls back
+      to `_DEFAULT_PRICE` (Opus $5/$25) for anything missing. The fallback
+      itself is the right call — deliberately never undercount — but it is
+      completely silent, and the table is a hardcoded snapshot with no
+      staleness signal, the same shape as the eBay fee schedule in invariant
+      #15. Reaching it is ordinary rather than exotic: `resolve_preset` falls
+      back to env defaults, so a `VISION_MODEL` set on Railway to any id not in
+      the table (a newer model, a dated variant) prices every scan at Opus
+      rates from then on, in the ledger the two users split real API spend
+      with, with nothing anywhere saying the number is a guess. Log once per
+      unknown model id and mark those rows in the Analytics by-model table as
+      estimated-at-Opus, so a wrong figure is visibly a wrong figure (quick
+      win; implement directly; inline — `routers/analytics.py` plus the model
+      table in `Analytics.jsx`)
+- [ ] Nothing pins that an endpoint's rejection paths stay typed rather than
+      500ing (2026-09-01 daily run, the general form of a bug fixed that day):
+      the CSV importer's `csv.reader` call raised `_csv.Error` on a field past
+      its 128 KB limit and nothing caught it, so a bad file reached the client
+      as a blank 500 — and it was found only because a test written for an
+      unrelated cap happened to push a field past that limit. The class is not
+      fixed: this app parses other people's bytes at several seams (CSV import,
+      the eBay compliance webhook body, `_parse_date`/`_parse_money`,
+      `resolve_preset`, the multipart upload itself), each hand-guarded against
+      the failures whoever wrote it thought of. A small hostile-payload sweep
+      would cover the rest for one file's worth of effort: post a handful of
+      plausible-but-broken bodies (a NUL byte mid-CSV, a zero-byte file, a file
+      that is only a BOM, a multipart part with no filename, a CSV whose header
+      row is 200 columns wide) at the two upload endpoints and assert the
+      status is never 5xx. Cheap, and it fails loudly the next time a stdlib
+      limit is discovered in production instead of in a test (quick win;
+      implement directly; inline — one new test module, plus whatever typed
+      rejections it turns out to need)
+- [ ] The Analytics "By day" chart omits days with no scans (2026-09-01 daily
+      run): `analytics()` builds `by_day` from a `defaultdict` keyed on the
+      days that have events, so a day with no scanning is absent from the
+      response rather than present with a zero. Every row carries its own date
+      label, so nothing displayed is *wrong* — but five scattered scan days in
+      a 30-day range render as five adjacent bars, which reads as continuous
+      activity, and "how often do I actually sit down and scan" is a question
+      the panel currently cannot answer. Zero-fill the range server-side (it
+      already knows `since` and `until`) so the gaps are visible as gaps. Small
+      enough to fold into whichever analytics item lands next rather than
+      shipping alone (quick win; implement directly; inline; dataviz skill
+      first — `routers/analytics.py` plus the bar list in `Analytics.jsx`)
 - [ ] A call-up is judged against inventory once, at first sight, and never
       re-judged (2026-08-26 review): `run_poll_cycle` calls
       `count_inventory_matches` only inside the `if tx["tx_id"] in existing:
@@ -29,44 +524,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       but the ticker is still lying (medium; implement directly; inline —
       `services/callups.py` plus a test that adds a matching card between two
       poll cycles and asserts the second one alerts)
-- [ ] The prospect-news cache never caches an empty result, so an empty digest
-      re-fetches every RSS feed on every page load (2026-08-26 review):
-      `fetch_articles` guards with `if _cache["articles"] and now -
-      _cache["at"] < _CACHE_TTL`, keying freshness on the *truthiness of the
-      payload* rather than on the timestamp it stores right beside it. An
-      empty result therefore never satisfies the guard, and empty is not the
-      rare case — it happens when both feeds fail (each a 10s timeout, so ~20s
-      of blocked worker thread per request) and it happens all winter, when no
-      MLB headline scores above the `score_article(a) > 0` floor. `NewsSection`
-      fires `GET /api/news` on every Scanner mount, so the app re-fetches both
-      feeds on every page load precisely when fetching is most expensive and
-      least likely to work. Key the guard on `_cache["at"]` instead, so a
-      result — including an empty one — is honoured for its TTL; consider a
-      shorter negative TTL so a transient feed outage recovers sooner than a
-      genuine offseason lull (quick win; implement directly; inline —
-      `services/prospect_news.py` plus a test that a second call inside the TTL
-      does not re-fetch after an empty first call)
-- [ ] Nothing checks the workflow files, and a broken one fails *open*
-      (2026-08-26 review, prompted by adding `health.yml`): the repo now runs
-      four workflows, two of which carry non-trivial embedded shell — the new
-      health probe is ~60 lines of bash with `jq` parsing. A YAML typo or an
-      unquoted expansion in one of them surfaces only when the schedule fires,
-      and for a *watchdog* workflow the failure mode is the worst one
-      available: it silently stops reporting, which is indistinguishable from
-      production being healthy. `actionlint` catches both halves in one pass —
-      it validates workflow schema and expression syntax, and it runs
-      `shellcheck` over every `run:` block. One fast job, no new services
-      (quick win; implement directly; inline — a job in `ci.yml`; expect to fix
-      a handful of existing quoting warnings on the first run)
-- [ ] Every Prospect Wire headline prints its source twice (2026-08-26
-      review): `NewsSection.jsx` renders `{a.source}` as the emerald uppercase
-      kicker above the headline (line ~112) and again in the gray byline below
-      the summary (line ~132), so every article reads "MLB.com … MLB.com ·
-      2d ago". The byline almost certainly meant to carry the age alone — the
-      kicker already owns the attribution. Cosmetic, but it is on the page the
-      owner opens every time he scans a card (quick win; implement directly;
-      inline — `NewsSection.jsx` only; no test infrastructure exists for
-      components, so verify by build + eye)
 - [ ] The routines open duplicate housekeeping PRs, and the review queue has
       stopped draining (2026-08-31 daily run, observed rather than predicted):
       **PRs #60, #61 and #62 are three separate PRs that each date the same
@@ -75,54 +532,13 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       PRs #63, #64 and #65 each had to carry an HTML comment in the changelog
       explaining why they were *not* touching it. Nothing has merged since
       2026-08-25, so eight PRs are open at once and every new branch now starts
-      from a `main` that is a week behind the work. Two fixes, and they are
-      independent: (a) step 11 of the daily routine must check the open PR list
-      for one already doing the housekeeping before doing it itself — the
-      CLAUDE.md two-agent section already says "changelog housekeeping is
-      idempotent — check before doing it", so this is the routine prompt
-      failing to encode a rule the repo already states; (b) the daily run
-      should report queue depth in its notification when PRs are piling up,
-      because "nothing merged in five days" is the single fact that changes
-      what the owner should do with the run. Owner decision needed on whether
-      a run should *stop shipping* past some depth (quick win; implement
-      directly; inline — `docs/notes/daily-routine-prompt.md`, and the live
-      routine prompt in the cloud must be edited to match or the doc is
-      fiction)
-- [ ] CodeRabbit has stopped reviewing, and the process still assumes it does
-      (2026-08-31 daily run, verified on two PRs): CodeRabbit's only comment on
-      PR #65 and PR #68 is the same notice — *"This repository does not receive
-      automatic reviews because it has fewer than 10 stars"* — with a "Trigger
-      review" checkbox. It reads `.coderabbit.yaml` (the run configuration is
-      quoted in the notice) and then reviews nothing. Older PRs really were
-      reviewed — #53 and #64 both carry CodeRabbit findings that were fixed —
-      so this is a policy change on their side, not a misconfiguration here.
-      Two things follow. First, **the repo currently has one automated reviewer,
-      not two**, while `docs/notes/daily-routine-prompt.md` tells every run that
-      "three reviewers cover it" and uses that as the reason not to self-review;
-      a premise that is no longer true is worse than no premise. Second,
-      `.coderabbit.yaml` is being actively maintained for a reviewer that is not
-      running — PR #67 updated its download-helper instruction this week. Cheapest
-      fix is to have whoever opens the PR post `@coderabbitai review` on it (the
-      notice's own escape hatch), which is a one-line addition to the routine
-      prompt; the alternatives are ten stars or a paid plan, and both are the
-      owner's call. Either way the routine doc needs correcting to say what is
-      actually reviewing (quick win; implement directly; inline —
-      `docs/notes/daily-routine-prompt.md`, plus the live cloud prompt, which
-      only the owner can edit)
-- [ ] An implausible sale price is accepted as readily as a plausible one
-      (2026-08-31, noticed while bounding the sale *date*): `MarkSoldRequest`
-      validates `sold_price > 0` and nothing else, so a fat-fingered `2500`
-      for a `$25.00` card is stored, mirrored to the Sheets price column,
-      counted in the Inventory Revenue tile and filed in the tax export. A hard
-      upper bound is the wrong tool — cards genuinely sell for five figures, so
-      any cap refuses a real sale — but the modal already knows the card's
-      listed price and can ask: confirm once when the entered price is more
-      than ~20× or under ~1/20th of the listed price (skipping the check when
-      there is no listed price to compare against). Same shape as the
-      duplicate-detection confirm and the bulk-orphan warning: a question at
-      the moment of the mistake, not a refusal (quick win; implement directly;
-      inline — `Inventory.jsx` plus a tested pure helper, no schema change)
-
+      from a `main` that is a week behind the work. — **both halves shipped
+      2026-09-07** (step-11 check in PR #69, queue-depth reporting today), but
+      the underlying question is still open and is **the owner's to answer**:
+      should a run *stop shipping* past some queue depth? Reporting depth makes
+      the pileup visible; it does not stop the routine adding to it. Re-observed
+      2026-09-07 — six PRs open (#71–#76), all green, nothing merged since
+      2026-09-01
 - [ ] A scan the client gave up on is billed, stored, and unreachable
       (2026-08-28 review, direct follow-on to the scan timeout that shipped the
       same day): `/api/scan` writes its `UsageEvent` and its `Scan` row —
@@ -140,35 +556,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       the price empty, since the comps at scan time were never stored (medium;
       implement directly; inline — a read-only endpoint beside `/api/scan`
       plus a Scanner affordance)
-- [ ] `POST /api/cards/import.csv` reads an unbounded upload into memory before
-      any cap applies (2026-08-28 review): `import_csv` does `raw = await
-      file.read()`, then `.decode()`, then `list(csv.reader(...))` — three full
-      copies of the file resident at once — and only *then* checks
-      `MAX_IMPORT_ROWS`. The row cap therefore protects the database and
-      protects nothing else: a 500 MB file is fully read, decoded and parsed
-      before the 5000-row limit rejects it. This is the one endpoint that takes
-      an arbitrary-size upload with no byte ceiling; `/api/scan` has had
-      `MAX_UPLOAD_BYTES` with chunked reads since the magic-byte work, and the
-      same shape applies here. It matters more than it looks because there is
-      exactly one worker and one container: an OOM here is the whole app, not
-      one request, and it is reachable by either logged-in user with a
-      mis-selected file — a video, a database backup — not just by an attacker
-      (quick win; implement directly; inline — `routers/cards.py`, chunked read
-      against a byte cap plus a test with an oversized body)
-- [ ] Every request in `api.js` except the scan still has no client timeout
-      (2026-08-28 review, the general form of the wedge fixed the same day):
-      the axios instance is created with no `timeout`, and today's fix set one
-      on `scanCard` alone because that was where the damage was worst. The
-      others fail the same way, more quietly: a hung `/api/pricing` leaves the
-      Comps modal spinning with no error and `pricingLoading` stuck true, a
-      hung save leaves the Save button disabled with the card unsaved, and an
-      Inventory load that never settles shows an empty table that looks like an
-      empty inventory. Set a default on the instance — 30s is generous for
-      everything here, since the one call that legitimately runs longer already
-      names its own — and let `scanCard`'s own value override it, which it does
-      today by passing `timeout` per request. The `formatApiError` timeout
-      wording added today already covers what the user sees (quick win;
-      implement directly; inline — `api.js` only)
 - [ ] Nothing shows the user what the scanner has *learned*, or lets them
       unteach it (2026-08-28 review): every save that differs from its scan
       writes a `Correction` row, `build_cheatsheet` renders the 200 most recent
@@ -207,55 +594,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       ordering note anchored on the PATCH/DELETE routes, which still carry the
       same hazard (quick win; implement directly; inline — cards.py only,
       or fold into the permalink item)
-- [ ] Call-up alerts are silently abandoned after 48 hours of mailer failure
-      (2026-08-25 review): `run_poll_cycle` collects un-emailed events with
-      `CallupEvent.created_at >= cutoff`, cutoff = now − `ALERT_MAX_AGE_HOURS`
-      (48), and only stamps `emailed_at` when `mailer.send_email` returns
-      true. So a failing mailer — wrong SMTP credentials after a Railway env
-      edit, a provider outage, a rate limit — retries the same events every
-      cycle until they cross 48h, at which point they leave the pending window
-      **permanently, unemailed, with nothing recording that an alert was
-      dropped**. Being told a prospect got called up while you hold his 1st
-      Bowman is the feature this app was built around, and this is the one
-      failure mode where it stays quiet and looks healthy: `/api/health`
-      reports the poller fresh, because the heartbeat is stamped after a
-      failure too. The window itself is right (it bounds retries); what's
-      missing is the record. Count events aging out unemailed and surface it —
-      log + the existing ntfy `billing_alerts` push is the cheapest version,
-      and it reuses what's already wired (quick win; implement directly;
-      inline — `services/callups.py` plus a test that fails the mailer and
-      advances the clock past the cutoff)
-- [ ] `/api/health` reports the call-up poller healthy while every alert it
-      produces goes undelivered (2026-08-27 review, direct follow-on to the
-      delivery alerting that shipped the same day): `_poller_state` tracks only
-      whether the *loop* is alive — `last_cycle_at` is stamped after a failed
-      cycle as deliberately as after a good one, because it proves liveness —
-      so `poller.stale` stays false through a mailer outage that is dropping
-      every alert. That is now a bigger gap than it was, because PR #63's
-      `health.yml` fails a scheduled run on `poller.stale` and would sail
-      straight past this. `run_poll_cycle` already returns `pending` and
-      `abandoned`; keep the last cycle's counts on `_poller_state`, report them
-      under `poller`, and have the workflow fail on a non-zero `abandoned`.
-      Decide as part of it whether a non-zero `pending` should fail or warn —
-      one held cycle is a transient the next cycle clears, so it is probably a
-      warning, while an abandoned alert is permanent and never recoverable
-      (quick win; implement directly; inline — `main.py` plus `health.yml` and
-      a test; the workflow half lands only once PR #63 merges)
-- [ ] `mark_sold` silently overwrites a sale that is already recorded
-      (2026-08-27 review): `unmark_sold` refuses to act on a card that is not
-      sold (409, "Card is not marked sold"), but `mark_sold` has no mirror
-      guard — it sets `status`, `sold_price` and `sold_at` unconditionally, so
-      marking an already-sold card sold again replaces the original sale price
-      and date with no warning and no way back to what was there. The paths in
-      are ordinary: a double-submit on the modal, a second browser tab holding
-      a stale Inventory list, or a re-import. `sold_at`/`sold_price` are what
-      the tax-year CSV export and the Sheets "Date Sold" column read, so a
-      clobbered sale is wrong in the one report that has to be right, and it is
-      wrong quietly — the row still looks like a normal sold card. Reject the
-      second mark with a 409 the way unmark-sold does and let the owner
-      unmark-then-remark if a correction is what they meant, which is the
-      existing, reversible path (quick win; implement directly; inline —
-      `routers/cards.py` plus a test asserting the first sale's figures survive)
 - [ ] The call-up digest has no size cap and is all-or-nothing (2026-08-27
       review): `_compose_digest` renders every pending event into one email and
       `run_poll_cycle` treats the send as atomic — one `send_email` for the
@@ -304,54 +642,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       future *server-side* net (P&L, tax export) could share it. Pick before
       building — the second one is the one that scales (quick win; implement
       directly; inline)
-- [ ] `find_exact_match` silently stops applying old corrections as a year
-      fills up (found 2026-08-24, re-filed 2026-08-25 — one bug, two entries,
-      merged here): `services/learning.py:99-110` filters
-      `Correction.year == year`, orders by `created_at desc`, `limit(100)`,
-      then linear-scans that page in Python for a brand + card-number match.
-      A baseball inventory concentrates hard in a few years — 2023 Bowman
-      Chrome alone can carry hundreds of corrections — so once one year passes
-      100 rows, a correction the user made for that exact card falls out of the
-      window and the overlay just stops happening. No error, no note: the
-      learning loop quietly degrades for the earliest cards, which are exactly
-      the ones the user is most likely to have already taught, and it gets
-      worse the more the tool is used.
-      **Fix: move the match into SQL and drop the limit** — both fields are
-      already normalized on write (`_norm` casefolds and strips), so a
-      `func.lower(func.trim(...))` filter matches, the way `check_duplicate`
-      already does it in `routers/cards.py`. Bounded by the match, not by
-      recency. **Caveat to carry into the implementation (measured):** SQL
-      `lower()` is not `str.casefold()` — casefold maps `ß` to `ss` and
-      SQLite's `lower()` is ASCII-only, so the two diverge on non-ASCII input.
-      Brands and card numbers are ASCII in practice (`Bowman`, `BCP-100`), so
-      this is a boundary to state rather than a blocker; a case-folding
-      difference would show up as a *missed* overlay, never a wrong one.
-      Fetching every row for the year and comparing in Python would be exact
-      but reintroduces the unbounded scan this item exists to remove — it just
-      moves the ceiling from 100 rows to all of them.
-      A `match_key` column written at record time was the other proposal and is
-      **rejected**: it is a schema change on an existing table, so it needs a
-      `_COLUMN_MIGRATIONS` entry plus a backfill whose normalization has to
-      reproduce `_norm` exactly or old corrections stay invisible anyway — all
-      to solve something the existing normalized columns already answer
-      (quick win–medium; implement directly; inline — needs a test with >100
-      corrections in one year pinning that the 101st still matches)
-- [ ] A failed row-number parse duplicates a card in the Sheets mirror
-      (2026-08-24 review): `sync_card`'s append branch
-      (`services/google_sheets.py:292-306`) writes the row, then parses
-      `updates.updatedRange` to learn which row it landed on, and returns
-      `None` if that parse raises. `_sync_card_to_sheets` only persists
-      `sheets_row` when a row comes back, so the card keeps a NULL
-      `sheets_row` — and its **next** edit takes the append branch again,
-      adding a second row for the same card while the first stays behind.
-      Every later edit appends again. Nothing raises, nothing logs, and the
-      inventory silently grows copies in the sheet. The append itself
-      succeeded, so the recovery is to find the row rather than give up:
-      fall back to `_last_used_row` (already written, already called under
-      the same lock by `rewrite_all_rows`) when the range is unparseable.
-      Note the resync repair tool fixes the symptom but only when someone
-      notices (medium; implement directly; inline — needs a fake whose append
-      returns a malformed `updatedRange`)
 - [ ] Backfill the conditions already in the database (2026-08-24, follow-on
       to the condition dropdown shipped the same day): `normalize_condition`
       is applied at the two seams where new values arrive — the review form
@@ -420,32 +710,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       `run_in_threadpool` (async `import_csv` has the same shape but is
       milliseconds-scale; fix opportunistically) (medium; implement directly;
       inline — scan.py only)
-- [ ] `storage_usage` under-reports the volume it exists to watch (2026-08-21
-      review, noticed while moving backup snapshots onto that volume): the
-      panel adds `os.path.getsize(DB_PATH)` to the uploads directory and calls
-      that the footprint, so anything else on the volume is invisible — the
-      SQLite `-wal`/`-shm` sidecars if journal mode is ever changed, a backup
-      snapshot mid-download, and a snapshot leaked by a client that
-      disconnected (bounded to an hour by the new sweep, but a full copy of the
-      database while it lasts). The tiles are the only view of volume pressure
-      the app has, and the number they show is the one that will be believed
-      when Railway starts refusing writes. Walk the DB's directory instead of
-      naming one file, and report the remainder as a third figure rather than
-      folding it into `db_bytes`, so a growing "other" is legible rather than
-      looking like database growth (quick win; implement directly; inline —
-      `routers/analytics.py` plus the Analytics tile)
-- [ ] Orphan cleanup leaves `Scan.image_path` pointing at a file it deleted
-      (2026-08-21 review): `_orphaned_uploads` deliberately lets scan rows go
-      unprotected — an unsaved scan's photo is exactly the disk growth the tool
-      reclaims — but the `Scan` row survives with a path to nothing. Harmless
-      today, because nothing renders scan photos; it stops being harmless the
-      moment the "Scan history browser" item below ships, which would show a
-      broken thumbnail for every scan older than the 48h grace window that was
-      never saved. Null the two path columns on the scans whose files the
-      cleanup removed, in the same call, so the record stays honest about what
-      it still has and the history browser can say "photo reclaimed" instead of
-      rendering a hole (quick win; implement directly; inline —
-      `routers/analytics.py:cleanup_uploads` plus a test)
 - [ ] CI guards for the two invariants that break an already-deployed install
       (2026-08-20 review): invariants #1 and #4 are the two whose failure mode
       is silent *and* remote — they work on a fresh DB and a fresh sheet, and
@@ -463,34 +727,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       pinned in the test makes the insert fail and the append pass. Decide with
       it what the migrations baseline is (earliest deployed shape vs. today's
       production shape) (medium; implement directly; inline)
-- [ ] Mark-sold accepts a date in the future (2026-08-20 review, found while
-      fixing the UTC default): the picker carries no `max`, and
-      `MarkSoldRequest` validates only `sold_price > 0` — nothing bounds
-      `sold_at` at all. A mistyped year (2062) is accepted silently, and from
-      there it is permanent furniture: it appears in the `sold-years` picker
-      forever, it sorts to the end of every tax export, and the only way back
-      is unmark-sold and redo. Cap the input at today's local date and reject a
-      `sold_at` more than a day ahead server-side (a day of slack, since the
-      client submits an instant and the two clocks need not agree). Pair it
-      with a floor on how far back a sale can be dated only if the owner wants
-      one — backdating a sale is legitimate, post-dating one is not (quick win;
-      implement directly; inline — Inventory.jsx plus a schema validator and
-      its test)
-- [ ] Production health monitoring does not depend on the routine's network
-      policy (2026-08-20 review, hit during that run): Phase 1 of the daily
-      routine pings
-      `https://cardlister-production.up.railway.app/api/health`, and from the
-      scheduled cloud sandbox that request is refused by the egress proxy
-      (403 to CONNECT), so the health check silently cannot run — the one step
-      of the routine meant to notice a failed deploy or a stale call-up poller.
-      Nothing is wrong with the app; the check just has no route to it. Move
-      the ping into a scheduled GitHub Actions workflow that fails the run when
-      `ok`/`db` is false or the poller is stale, so health is watched from
-      somewhere that can reach it and a failure shows up as a red run rather
-      than a missing sentence in a report. Keep the routine's own attempt —
-      when it works it is free — but have it report the block explicitly rather
-      than the result (quick win; implement directly; inline — new workflow
-      plus a note in `docs/notes/daily-routine-prompt.md`)
 - [ ] `Date Listed` is the one date the CSV importer still takes on faith
       (2026-08-31, direct follow-on to the sale-date bound that shipped the
       same day): `_parse_date` feeds both columns, and `sold_at` is now bounded
@@ -499,11 +735,19 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       harmless: `created_at` is the Sheets "Date Listed" column, it is the
       primary sort key of the resync (`created_at, id` — the ordering
       invariant #1 depends on), and the planned days-to-sell analytics measures
-      created→sold, which a future listing date makes negative. Apply the same
+      created→sold, which a future listing date makes negative. The
+      2026-09-06 review added the normalization half: an aware `+14:00` value
+      is stored as its wall clock (SQLite drops tzinfo without converting —
+      the exact bug `normalize_sold_at` exists to prevent), while the same
+      offset on `Date Sold` in the same row is converted to UTC, and a future
+      `created_at` also pins the row to the top of the `created_at desc`
+      inventory list forever. Apply the same
       `reject_future_sold_at` bound (rename it for both callers) with the same
-      drop-and-warn treatment, and decide with it whether `created_at` should
+      drop-and-warn treatment plus the naive-UTC normalization, and decide
+      with it whether `created_at` should
       fall back to now the way a missing `sold_at` does (quick win; implement
-      directly; inline — `routers/cards.py` plus a test)
+      directly; inline — `routers/cards.py` plus a warn-path case in
+      `test_import_csv.py`)
 - [ ] Test fixtures that are ahead of the calendar fail on a date, not on a
       change (2026-08-31, hit while adding the sale-date bound): the sold-export
       ordering test marked a card sold on `2026-12-20`, so the new bound turned
@@ -719,7 +963,29 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       exist, an unverified notice becomes an unauthenticated "delete this
       user's tokens" request (medium; **design first** — key fetch + cache +
       verify, still 2xx on failure per eBay retry semantics; found by the
-      2026-08-16 weekly deep review)
+      2026-08-16 weekly deep review) — **design + plan written 2026-09-05**
+      (`docs/superpowers/specs/2026-09-05-ebay-deletion-signature-design.md`,
+      `docs/superpowers/plans/2026-09-05-ebay-deletion-signature.md`):
+      recommends in-process ECDSA/SHA-1 verification with a **dual-path
+      verifier input** (raw received bytes first, the official SDKs'
+      compact re-serialization as fallback — what eBay signs is inferred
+      from its SDKs, not documented, so the design verifies under either
+      reading and pins interop with a genuinely eBay-signed vector from the
+      reference SDK's test data), key fetch via the app token
+      `ebay_api._get_app_token()` already mints, cached by kid with an
+      entry-capped negative cache and a global per-minute fetch budget
+      (per-kid caching alone bounds nothing against a fresh forged kid per
+      POST), and **412 on failure behind a confirm-then-enforce
+      rollout** — the 412 reverses this item's own "still 2xx" parenthetical
+      after grounding in eBay's reference SDK (204-verified / 412-failed; a
+      2xx is a terminal ack that discards eBay's redelivery), but ships in
+      shadow mode (ack + log + alert) until `EBAY_SIGNATURE_ENFORCE=1` is
+      set after a genuine signature verifies in production. Degrades to
+      today's unverified ack when `EBAY_APP_ID`/`EBAY_CERT_ID` are unset,
+      scoped to the era before seller OAuth tokens can exist. Zero Anthropic-call delta; no
+      new dependency (`cryptography` via python-jose), no schema, no new
+      route. **Awaiting owner approval on the three decisions at the end of
+      the plan doc.**
 - [ ] SPA mount wiring test: `test_spa_fallback.py` exercises `SpaStaticFiles`
       on a throwaway app over a temp dir, and `backend/static` doesn't exist
       in CI — so reverting `main.py`'s mount to plain `StaticFiles(html=True)`
@@ -936,6 +1202,15 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Later
 
+- [ ] `POST /api/news/poll-now` can interleave with the background poller
+      (2026-09-06 review): both run `run_poll_cycle` on separate sessions in
+      the threadpool, so a manual poll landing between the background cycle's
+      pending query and its `emailed_at` stamp double-sends the digest, and
+      concurrent inserts of the same `tx_id` hit the unique constraint and 500
+      the manual poll. Window is seconds wide with two users and the endpoint
+      is curl-only — note the shape before adding any UI button for it; an
+      asyncio lock around the cycle would close it (small; implement directly;
+      inline — `routers/news.py` / `main.py`)
 - [ ] Batch-pairing vision assist (rainy-day; explicitly deferred by owner
       2026-08-15): one cheap Haiku call per batch classifying thumbnails as
       front/back to improve the pairing proposal — Approach B in
@@ -1032,6 +1307,171 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-08 — `downloadBackup` and `resyncSheet` carry their own client
+      timeouts (5 min and 2 min) rather than the 30s instance default from
+      PR #73: both grow with the data instead of being bounded server-side,
+      and an aborted backup hands the user no recovery file while the server
+      finishes the snapshot anyway. Per-request overrides, the shape the scan
+      already uses (integration PR for #71–#78, raised again there by Codex)
+- [x] 2026-09-06 — `send_test_alert` reports `email_configured` from
+      `mailer.is_configured()`, the same predicate `send_email` gates on, so
+      provider credentials without recipients no longer read as a configured
+      channel that then fails to send (PR #76; re-filed by PR #78 from a
+      branch that predated the fix, and moved here on integration)
+- [x] 2026-09-08 — CLAUDE.md and the routine prompts say how the review bots
+      actually trigger: Codex reviews a PR once on open (👍 reaction = nothing
+      to say) and only re-reviews a later push when told `@codex review`;
+      CodeRabbit reviews only when told `@coderabbitai review`, and a trigger
+      posted before a later push is voided. The rule is now: after the final
+      push, post both comments. Previously the NOTE said Codex would never
+      appear on the PR, which by PR #78 meant ignoring the reviewer with the
+      best hit rate here (integration PR for #71–#78)
+- [x] 2026-09-08 — The exact-card correction overlay is bounded by the match
+      instead of by recency: `find_exact_match` filtered corrections to the
+      year, took the 100 most recent, and scanned that page in Python, so once
+      a year passed 100 corrections — 2024 Bowman Chrome alone can — the
+      card's own correction fell out of the window and the overlay stopped
+      happening, with no error and no note, worst for the earliest cards the
+      user had already taught. Brand and card number now match in SQL
+      (`lower(trim(...))`, the same shape `check_duplicate` uses) with no
+      limit. Exercised against a real 401-correction year: the overlay lands in
+      2.5 ms where it previously did not land at all
+- [x] 2026-09-08 — An unparseable `updatedRange` no longer duplicates a card in
+      the Sheets mirror: `sync_card`'s append branch returned `None` when it
+      could not read the row number out of the API response, so the caller
+      never persisted `sheets_row`, and the card's next edit appended a second
+      row — and every edit after that another one, silently. The append had
+      succeeded, so the row is recoverable: it is now read from the append
+      response's own root-level `tableRange` (the table's extent before the
+      append, so its last row + 1), never from a later probe of the sheet that
+      another writer could have appended to, and returns `None` only when
+      neither range is readable or the recovered row would be the header
+
+- [x] 2026-09-07 — `storage_usage` reports what else is on the volume: it added
+      `getsize(DB_PATH)` to the uploads directory and called that the
+      footprint, so WAL sidecars, a backup snapshot mid-download, and a
+      snapshot leaked by a disconnect (a full copy of the DB) were all
+      invisible to the app's only view of volume pressure. The endpoint now
+      walks the DB's directory and reports the remainder as a separate
+      `other_bytes` figure with an "Other on volume" tile — separate, not
+      folded into `db_bytes`, so a leak reads as a leak rather than as database
+      growth. `uploads/` is pruned from the walk, symlinks are skipped rather
+      than followed off-volume, and a file vanishing mid-walk is stepped over
+- [x] 2026-09-07 — Orphan cleanup clears the `Scan` paths it invalidates:
+      scan rows deliberately don't protect their files, so the sweep left every
+      never-saved scan holding a path to a deleted photo, with nothing
+      recording that it had been reclaimed rather than lost. `cleanup_uploads`
+      now nulls `image_path`/`back_image_path` on exactly the scans whose files
+      it removed and reports `scans_cleared`. Unblocks the scan-history browser,
+      which would otherwise have rendered a broken thumbnail per swept scan
+- [x] 2026-09-07 — The daily routine reports review-queue depth before its own
+      output, and no longer claims three automated reviewers when one is
+      running. Both halves of the 2026-08-31 process item: the queue-depth half
+      (nothing merged in 3+ days, or 4+ PRs open, now leads the notification and
+      tells the run to prefer the smallest useful change) and the CodeRabbit
+      correction (it stopped reviewing automatically — the prompt now names the
+      Claude Action as the one automatic pass and posts `@coderabbitai review`
+      by hand). The step-11 half had already shipped in PR #69. **The live cloud
+      prompt still has to be updated by the owner** — see the warning at the top
+      of `docs/notes/daily-routine-prompt.md`
+- [x] 2026-09-04 — The workflow files are checked by CI. Four workflows run
+      here and two carry non-trivial embedded shell (`health.yml`'s probe,
+      CI's own `changelog-guard`), but nothing validated any of it — a YAML
+      typo or an unquoted expansion surfaced only when that workflow next
+      fired, and for a watchdog workflow that means it silently stops
+      reporting, which is indistinguishable from production being healthy. An
+      `actionlint` job now checks workflow schema and expression syntax and
+      runs shellcheck over every run block, via the project's own pinned image
+      (which bundles shellcheck — without it the shell half no-ops silently).
+      All four existing workflows were already clean, contrary to this item's
+      own prediction; the first thing the job caught was the new step's name,
+      which contained a colon and broke the YAML parse
+- [x] 2026-09-04 — `/api/health` stops reporting the call-up poller healthy
+      while every alert it produces goes undelivered. `stale` tracks only
+      whether the loop is alive — the heartbeat is stamped after a failed
+      cycle as deliberately as after a good one — so it stayed false through a
+      mailer outage dropping every alert, and `health.yml` fails its run on
+      `stale`, so the probe sailed straight past the one failure this app
+      cannot afford to be quiet about. The poller now keeps the counts
+      `run_poll_cycle` already computed and the endpoint reports
+      `alerts_pending`, `alerts_abandoned` and `last_cycle_ok` under `poller`.
+      The probe acts on them by severity: an abandoned alert (past the 48h
+      window, never recovered) fails the run and self-clears when the ~2-day
+      band moves past it, while held alerts and an errored cycle warn, since
+      the next cycle legitimately clears both. A cycle that raises reports
+      `last_cycle_ok: false` with its counts left at their last known values
+      rather than zeroed — an errored cycle did not un-abandon anything. All
+      seven probe outcomes were exercised against fabricated bodies, not just
+      reasoned about
+
+- [x] 2026-09-03 — Every non-scan request in `api.js` now carries a 30-second
+      client-side ceiling. The axios instance had no `timeout` and today's
+      earlier fix set one on `scanCard` alone; the others were failing the
+      same way, more quietly — a hung `/api/pricing` left the Comps modal
+      spinning with `pricingLoading` stuck true, a hung save left the Save
+      button disabled with the card unsaved, and a hung `listCards` showed
+      an empty inventory that looked like an empty inventory. `scanCard`'s
+      longer per-request timeout still overrides the default (axios uses the
+      request-level value when both are given), so the one call that
+      legitimately runs longer is not capped. `formatApiError`'s existing
+      timeout wording covers what the user sees on an ECONNABORTED
+- [x] 2026-09-03 — Marking a card sold at an implausible price asks once
+      before it lands. `MarkSoldRequest` validated only `sold_price > 0`, so
+      a fat-fingered `2500` for a `$25` card was stored, mirrored to the
+      Sheets price column, counted in the Inventory Revenue tile, and filed
+      in the tax export — and the only way back was unmark-sold and redo. A
+      hard cap would refuse a real five-figure sale, so the modal asks
+      instead: when the entered price is ~20× or ~1/20 the card's listed
+      price, a confirm names the ratio and the baseline. The confirm is
+      latched to the price the user actually confirmed, so editing the
+      field afterwards re-arms the check for the new value; a card with no
+      listed price has nothing to compare against and skips the check
+      entirely. Same shape as the duplicate-detection confirm and the
+      bulk-orphan warning — a question at the moment of the mistake, not a
+      refusal. `salePriceSanity.js` is a pure helper with a dedicated test
+- [x] 2026-09-02 — An empty prospect-news result is cached like any other:
+      `fetch_articles` keyed freshness on the truthiness of the payload rather
+      than the timestamp beside it, so an empty result never satisfied the
+      guard and both feeds were re-fetched on every request — 20s of blocked
+      worker thread on a total outage, on a page that fires `GET /api/news`
+      on every Scanner mount, and there is one worker. The guard now reads
+      the timestamp, with its own shorter TTL for an empty result (2 min
+      against 15) so a transient feed failure recovers on the next page load
+      instead of blanking the panel for a quarter hour. `limit` joined the
+      cache key in the same pass — it shapes the payload, so a cached top-8
+      served to a caller asking for three would have been silently wrong
+- [x] 2026-09-02 — Prospect Wire headlines print their source once: the
+      emerald kicker above the headline and the gray byline below the summary
+      both rendered `{a.source}`, so every item read "MLB.com … MLB.com · 2d
+      ago". The byline now carries the age alone, via a pure helper
+      (`lib/articleAge.js`) that returns an empty string for an article with
+      no publish date so the byline is dropped rather than rendering a bare
+      separator — and reads a feed stamped ahead of the server's clock as
+      "today" instead of "-1d ago". Verified in the built app, not just by
+      unit test
+- [x] 2026-09-01 — Mark-sold refuses to overwrite a sale that is already
+      recorded: `unmark_sold` had always guarded its side, `mark_sold` had no
+      mirror, so a double-submit, a stale second tab or a re-import replaced
+      the original `sold_price`/`sold_at` with no warning and no way back —
+      quietly, since the row still looked like a normal sold card, and in the
+      two columns the tax-year export and the Sheets "Date Sold" column read.
+      The second mark is a 409; correcting a sale still works through the
+      existing reversible unmark-then-remark path. No frontend change needed —
+      `MarkSoldModal` already surfaces a server rejection
+- [x] 2026-09-01 — The CSV importer is capped in bytes as well as rows:
+      `import_csv` read, decoded and parsed the whole file — three copies
+      resident — before `MAX_IMPORT_ROWS` could reject it, so the row cap
+      protected the database and nothing else. It now reads in 1 MB chunks
+      against a 10 MB cap and refuses with a 413, the shape `/api/scan` has
+      used since the magic-byte work. Honest about its limit: Starlette has
+      already spooled the body by the time the handler runs, so this bounds
+      our in-process copies rather than the transfer — the ASGI-level
+      early-reject item stays open in Later
+- [x] 2026-09-01 — A CSV field over the parser's 128 KB limit is a 422, not a
+      500: `csv.reader` raised and nothing caught it, so a bad file reached the
+      client as a blank 500 that reads as a broken app. Found while testing the
+      byte cap above, and reachable well under it. The general "nothing pins
+      that rejections stay typed" case is now its own item in Now/next
 - [x] 2026-08-26 — Production health is watched from somewhere that can reach
       it: a scheduled `health.yml` workflow probes `/api/health` every 3 hours
       and fails the run on a non-200, an unreachable or non-JSON response, an
