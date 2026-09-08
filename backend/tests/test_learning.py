@@ -291,7 +291,10 @@ def test_exact_match_survives_a_malformed_extraction(db_session):
     db_session.commit()
 
     for bad in ({"brand": ["Bowman", "Topps"]}, {"card_number": {"n": "BCP-132"}},
-                {"year": [2024]}, {"year": {"value": 2024}}):
+                {"year": [2024]}, {"year": {"value": 2024}},
+                # SQLite's INTEGER is signed 64-bit; wider raises OverflowError
+                # at bind time, the same 500 by a different route.
+                {"year": 2 ** 63}, {"year": -(2 ** 63) - 1}, {"year": 10 ** 30}):
         extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
                      "set_name": "Chrome", "confidence_notes": "", **bad}
         merged = apply_exact_match(db_session, extracted)   # must not raise
@@ -320,3 +323,25 @@ def test_exact_match_still_accepts_a_string_year(db_session):
                  "set_name": "Chrome", "confidence_notes": ""}
     merged = apply_exact_match(db_session, extracted)
     assert merged["set_name"] == "Chrome Prospects"
+
+
+def test_exact_match_does_not_treat_a_boolean_year_as_year_one(db_session):
+    """`bool` is a subclass of `int`, so a `True` year would reach SQL as 1.
+
+    That is not a crash — it is a wrong question: it would apply a correction
+    recorded for year 1 to a card whose year the model failed to read. No
+    overlay is the honest answer.
+    """
+    db_session.add(Correction(
+        username="tester", year=1, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    extracted = {"year": True, "brand": "Bowman", "card_number": "BCP-132",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome"
+    assert not merged["confidence_notes"]

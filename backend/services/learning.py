@@ -171,7 +171,16 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     # this to `int` would silently drop those overlays (test below pins it).
     if not isinstance(brand, str) or not isinstance(card_number, str):
         return None
-    if not isinstance(year, (int, str)):
+    # `bool` is a subclass of `int`, so a `True` year would otherwise sail
+    # through and quietly query `year = 1`, matching a 1-AD correction rather
+    # than reporting no match. Not a crash, just a wrong question to ask.
+    if isinstance(year, bool) or not isinstance(year, (int, str)):
+        return None
+    # SQLite's INTEGER is signed 64-bit and the driver refuses anything wider:
+    # `OverflowError: Python int too large to convert to SQLite INTEGER`, which
+    # is the same 500 on POST /api/scan as the list/dict case above, reached
+    # through a year the model wrote as a huge number (CodeRabbit, PR #78).
+    if isinstance(year, int) and not -(2 ** 63) <= year <= 2 ** 63 - 1:
         return None
     rows = (
         db.query(Correction)
