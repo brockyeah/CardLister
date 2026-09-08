@@ -70,7 +70,10 @@ only in `[Unreleased]` on a branch is not in prod yet.
   The append itself had succeeded, so giving up was the expensive answer, not
   the safe one. Recovery now reads `tableRange` out of that same append
   response — the extent of the table as it was *before* the append — so the row
-  written is its last row plus one.
+  written is its last row plus one. It is read from the response **root**,
+  where `AppendValuesResponse` puts it; `updates` is an `UpdateValuesResponse`
+  and has no such field, so reading it from there made the recovery silently
+  inert — always empty, always `None`, the duplication straight back.
   Deriving it from the same response is the load-bearing part, not an
   optimisation. The obvious alternative is to ask the sheet for its last used
   row afterwards, but `google_sheets._sheets_lock` serializes this process, not
@@ -84,6 +87,13 @@ only in `[Unreleased]` on a branch is not in prod yet.
   `None` is still returned where any row number would be a guess: neither
   `updatedRange` nor `tableRange` readable, or a recovered row of 1, since
   handing the card the header to overwrite is worse than not knowing.
+  The test fake now returns the real `AppendValuesResponse` shape, and a new
+  test checks it against the discovery document shipped with
+  `google-api-python-client`. That check is the durable half of this fix: the
+  fake had nested `tableRange` under `updates` exactly as the code wrongly read
+  it, so four tests asserted a recovery that could never fire against the real
+  API and passed anyway. A fake that shares the code's misunderstanding proves
+  nothing, and nothing else in the suite would have noticed.
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 

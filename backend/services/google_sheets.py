@@ -337,7 +337,17 @@ def sync_card(card, reread_row=None) -> Optional[int]:
                     # row to overwrite on its next save while the row we actually
                     # appended stayed behind, which is the orphan-plus-clobber
                     # this recovery exists to prevent (Codex, PR #78).
-                    last_before = _row_from_range(updates.get("tableRange", ""), end=True)
+                    #
+                    # `tableRange` sits at the response ROOT, not inside
+                    # `updates` — that is an UpdateValuesResponse and has no
+                    # such field (verified against the sheets.v4 discovery
+                    # document; `AppendValuesResponse` is spreadsheetId +
+                    # tableRange + updates). Reading it from `updates` made
+                    # this whole recovery inert: always "", always None, the
+                    # duplication straight back. The test fake nested it the
+                    # same wrong way, so the tests passed while modelling a
+                    # response the API never sends (Codex, PR #78).
+                    last_before = _row_from_range(resp.get("tableRange", ""), end=True)
                     row_num = last_before + 1 if last_before is not None else None
                 # Row 1 is the header; a recovered row that lands there means the
                 # response did not describe an append we can place, and handing

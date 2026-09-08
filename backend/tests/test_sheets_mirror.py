@@ -11,6 +11,8 @@ with a fake spreadsheet that records every call, per the repo's testing note.
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from backend.main import app
@@ -105,13 +107,21 @@ class FakeSheet:
             self.rows[row_no] = body["values"][0]
             if self.append_side_effect is not None:
                 self.append_side_effect(self)
-            updates = {
-                "updatedRange": (self.append_range if self.append_range is not None
-                                 else f"Inventory!A{row_no}:{END_COL}{row_no}"),
+            # Real shape: AppendValuesResponse carries `tableRange` at the
+            # ROOT, alongside `updates` (an UpdateValuesResponse, which has no
+            # tableRange of its own). Nesting it under `updates` — as this fake
+            # first did — makes the recovery test vacuous: it passes against an
+            # implementation that reads a field the API never sends there
+            # (Codex, PR #78). Verified against the sheets.v4 discovery doc.
+            return {
+                "spreadsheetId": "sheet-id",
                 "tableRange": (self.table_range if self.table_range is not None
                                else f"Inventory!A1:{END_COL}{last_before}"),
+                "updates": {
+                    "updatedRange": (self.append_range if self.append_range is not None
+                                     else f"Inventory!A{row_no}:{END_COL}{row_no}"),
+                },
             }
-            return {"updates": updates}
         return _Exec(run)
 
     # --- helpers ------------------------------------------------------------
@@ -457,3 +467,44 @@ def test_append_recovery_never_claims_the_header_row(db_session):
     with _install(fake):
         row = google_sheets.sync_card(card)
     assert row is None
+
+
+def test_fake_append_response_matches_the_real_api_shape():
+    """The fake's append response must have the shape the Sheets API sends.
+
+    This exists because the fake once nested `tableRange` inside `updates`,
+    which is where the recovery code was (wrongly) reading it from — so four
+    tests asserted a recovery that could never fire against the real API, and
+    passed. A fake that encodes the same misunderstanding as the code under
+    test proves nothing, and nothing else in the suite would have caught it.
+
+    Checked against the discovery document shipped with google-api-python-client
+    rather than a hand-copied literal, so it tracks the API rather than someone's
+    memory of it.
+    """
+    import json
+    from pathlib import Path
+
+    import googleapiclient
+
+    doc = (Path(googleapiclient.__file__).parent
+           / "discovery_cache" / "documents" / "sheets.v4.json")
+    if not doc.exists():                       # packaging change upstream
+        pytest.skip("sheets.v4 discovery document not available")
+    schemas = json.loads(doc.read_text())["schemas"]
+
+    fake = FakeSheet()
+    resp = fake.append(body={"values": [["x"]]}).execute()
+
+    append_fields = set(schemas["AppendValuesResponse"]["properties"])
+    update_fields = set(schemas["UpdateValuesResponse"]["properties"])
+    assert "tableRange" in append_fields and "tableRange" not in update_fields, (
+        "the API puts tableRange at the response root, not under updates"
+    )
+    assert set(resp) <= append_fields, f"fake invents root fields: {set(resp) - append_fields}"
+    assert set(resp["updates"]) <= update_fields, (
+        f"fake invents fields under updates: {set(resp['updates']) - update_fields}"
+    )
+    # The two fields the recovery actually depends on, each where the API puts it.
+    assert "tableRange" in resp
+    assert "updatedRange" in resp["updates"]
