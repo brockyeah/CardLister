@@ -27,21 +27,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       opposite error, and the harmless one (quick win; implement directly;
       inline — `services/billing_alerts.py` plus tests that patch both
       channels to fail and assert the second call still attempts delivery)
-- [ ] The alert-wiring self-test reports email configured when it is not
-      (2026-09-08 review, found beside the item above): `send_test_alert`
-      builds its readout from `bool(SENDGRID_API_KEY or SMTP_USERNAME)`, but
-      `mailer.is_configured()` — the check `send_email` actually gates on —
-      additionally requires `ALERT_EMAILS` and a from-address, and for the SMTP
-      path `SMTP_PASSWORD` too. Set a SendGrid key and no recipients and the
-      panel answers `email_configured: true`, `email_sent: false`, which reads
-      as a provider problem when it is a missing env var the readout could have
-      named. The whole point of a wiring test is to be the one thing that is
-      right about the wiring. Fix: report `mailer.is_configured()` itself, and
-      return the specific missing piece rather than a bare boolean. Sharpens
-      the "integration-configuration readout on Analytics manage-data" item
-      below rather than replacing it — that one adds a readout, this one
-      corrects the readout that already exists (quick win; implement directly;
-      inline — `services/billing_alerts.py`, `services/mailer.py`)
 - [ ] The ntfy push is an unauthenticated public channel carrying raw provider
       error text (2026-09-08 review): `_push_via_ntfy` posts to
       `https://ntfy.sh/<NTFY_TOPIC>` with no credential, and an ntfy topic is
@@ -329,22 +314,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       design should settle whether the effort/px cap are worth storing beside
       it or whether the preset key is enough to derive them)
 
-- [ ] `downloadBackup` and `resyncSheet` inherit the 30s client timeout but
-      are unbounded server-side (2026-09-03, flagged twice by the auto-review
-      on PR #73): the axios default ceiling added there is right for
-      pricing/cards/CSV, but `downloadBackup()` (a `VACUUM INTO` copy of the
-      whole SQLite file) and `resyncSheet()` (a clear-then-rewrite of the
-      entire Inventory tab through the Sheets API) now inherit it too, and
-      neither is bounded on the backend the way pricing is by
-      `PRICING_DEADLINE_SECONDS`. Both are comfortably under 30s at the
-      two-user / small-DB scale today, so this is a coupling to watch rather
-      than a live bug — but as the DB or the sheet grows, a backup or resync
-      that crosses 30s surfaces as a generic `ECONNABORTED` toast instead of
-      the specific 507 handling `analytics.py` already has for a full disk.
-      Fix when it bites: give each a longer explicit per-request `timeout`
-      override the way `scanCard` does, sized to its own worst case (quick
-      win; implement directly; inline — `api.js`, plus deciding whether the
-      backup/resync endpoints should also carry their own server-side budget)
 - [ ] `Card.notes` has no upper length bound anywhere in the pipeline
       (2026-09-03 review): `notes` is `Text nullable=True` on the model and
       `Optional[str]` on `CardBase` / `CardUpdate` with no `max_length`, and
@@ -1338,6 +1307,17 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-08 — `downloadBackup` and `resyncSheet` carry their own client
+      timeouts (5 min and 2 min) rather than the 30s instance default from
+      PR #73: both grow with the data instead of being bounded server-side,
+      and an aborted backup hands the user no recovery file while the server
+      finishes the snapshot anyway. Per-request overrides, the shape the scan
+      already uses (integration PR for #71–#78, raised again there by Codex)
+- [x] 2026-09-06 — `send_test_alert` reports `email_configured` from
+      `mailer.is_configured()`, the same predicate `send_email` gates on, so
+      provider credentials without recipients no longer read as a configured
+      channel that then fails to send (PR #76; re-filed by PR #78 from a
+      branch that predated the fix, and moved here on integration)
 - [x] 2026-09-08 — CLAUDE.md and the routine prompts say how the review bots
       actually trigger: Codex reviews a PR once on open (👍 reaction = nothing
       to say) and only re-reviews a later push when told `@codex review`;

@@ -83,11 +83,22 @@ const downloadFile = (url, fallbackName, config = {}) =>
     })
     .catch((err) => readBlobError(err).then((e) => Promise.reject(e)))
 
+// Two calls whose work grows with the data rather than being bounded
+// server-side like pricing: a backup is a VACUUM INTO of the whole database
+// plus the transfer of that file, and a resync is a clear-then-rewrite of the
+// whole Inventory tab through the Sheets API. Neither belongs under the 30s
+// instance default — aborting a backup client-side gives the user no recovery
+// file while the server finishes the snapshot anyway (Codex, integration PR
+// for #71–#78). Passed per request, like the scan's, so the override beats the
+// default without a second axios client.
+export const BACKUP_TIMEOUT_MS = 300_000
+export const RESYNC_TIMEOUT_MS = 120_000
+
 export const downloadBackup = () =>
   // The fallback name is only reached if the server sends no
   // Content-Disposition; its own name carries the snapshot time, from its own
   // clock, so two backups on one day don't collide.
-  downloadFile('/api/analytics/backup.db', 'cardlister-backup.db')
+  downloadFile('/api/analytics/backup.db', 'cardlister-backup.db', { timeout: BACKUP_TIMEOUT_MS })
 
 export const getUploadOrphans = () =>
   api.get('/api/analytics/uploads/orphans').then((r) => r.data)
@@ -96,7 +107,7 @@ export const cleanupUploadOrphans = () =>
 export const getStorageUsage = () =>
   api.get('/api/analytics/storage').then((r) => r.data)
 export const resyncSheet = () =>
-  api.post('/api/sheets/resync').then((r) => r.data)
+  api.post('/api/sheets/resync', null, { timeout: RESYNC_TIMEOUT_MS }).then((r) => r.data)
 
 // --- News / call-up ticker ---
 export const getNews = () => api.get('/api/news').then((r) => r.data)

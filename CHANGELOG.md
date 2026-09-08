@@ -567,6 +567,16 @@ over the poller/alerts, learning, validation, and the new frontend libs.
   `tableRange` recovery that shipped rather than the `_last_used_row` design
   it replaced, and the `find_exact_match` comment no longer claims the columns
   are normalized on write (nothing does; the `lower(trim())` is load-bearing).
+- Backups and Sheets resyncs carry their own client timeouts (5 min and 2 min)
+  instead of the 30s instance default PR #73 introduced. Both grow with the
+  data rather than being bounded server-side, and aborting a backup
+  client-side hands the user no recovery file while the server finishes the
+  snapshot anyway. PR #73 had recorded the coupling as a backlog item; Codex
+  raised it again on the integration PR, and the fix is two per-request
+  overrides, the same shape the scan already uses.
+- A backlog item PR #78 filed against `send_test_alert`'s `email_configured`
+  readout is moved to Shipped: PR #76 had already fixed it two days earlier,
+  and #78 branched from a `main` that did not yet have that fix.
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
