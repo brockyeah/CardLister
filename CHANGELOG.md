@@ -52,6 +52,13 @@ only in `[Unreleased]` on a branch is not in prod yet.
   `year`, which has always been compared in SQL — that one predates this
   change and is fixed here too, since it is the same one-line guard. All three
   now answer `None`, which is the answer there was to give anyway.
+  Two neighbouring cases go with it. An integer year wider than SQLite's signed
+  64-bit `INTEGER` raises `OverflowError` at bind time — the same 500, reached
+  through a year the model wrote as a huge number (`2**63` raises, `2**63 - 1`
+  does not). And a boolean year, `bool` being a subclass of `int`, would reach
+  SQL as `1` and apply a correction recorded for year 1 to a card whose year was
+  never read: not a crash, just a wrong question to ask, and `None` is the
+  honest answer to it.
   `year` deliberately admits `str` as well as `int`: the column is INTEGER and
   SQLite's affinity coerces `year = '2024'`, so a string year from vision
   matches today and has to keep matching. Narrowing the guard to `int` would
