@@ -5,6 +5,36 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
+- [ ] CLAUDE.md tells every run to ignore the reviewer that found the most
+      (2026-09-08 daily run, observed on PR #78): the **NOTE** at the end of
+      CLAUDE.md says Codex review "happens outside GitHub — the owner runs
+      Codex themselves and relays its findings back in chat. Nothing will
+      appear on the PR, so don't wait for it, look for it in CI, or treat its
+      absence as a pass." That is no longer true. A
+      `chatgpt-codex-connector[bot]` is installed on the repo and posts inline
+      review comments directly on the PR — its own notice says reviews trigger
+      on opening a PR, marking a draft ready, or commenting `@codex review`.
+      This is not a footnote: on PR #78 Codex raised **both** of the findings
+      that mattered, and the second one was that the fix for the first was
+      *inert* — `tableRange` read from `updates` instead of the response root,
+      so the recovery could never fire, with the test fake nesting the field
+      the same wrong way so four tests passed against a code path that did
+      nothing. The Claude auto-review had reviewed the same code twice and
+      affirmatively signed off on it both times, including the specific
+      reasoning Codex overturned. So the standing instruction points future
+      runs away from the reviewer with the best hit rate on this repo, and the
+      doc's "don't treat its absence as a pass" is now backwards — its
+      *presence* is what a run should wait for.
+      Fix: correct the NOTE to say Codex reviews on the PR (and how to trigger
+      it), keep the chat-relay path as an additional channel rather than the
+      only one, and have the routine wait for the Codex review the same way it
+      waits for the Claude action. Worth deciding at the same time whether a
+      run should re-request Codex after each push, since it reviews a specific
+      commit and a fix lands after the review that prompted it (quick win;
+      implement directly; inline — CLAUDE.md, plus
+      `docs/notes/daily-routine-prompt.md`, which repeats the same claim; note
+      CLAUDE.md is also touched by open PRs #74/#76/#77, so this wants to land
+      on its own small branch rather than widening a feature PR)
 - [ ] A total alert-delivery failure buys six hours of silence (2026-09-08
       review): both `notify_credits_exhausted` and
       `notify_callup_alerts_undelivered` in `services/billing_alerts.py` stamp
