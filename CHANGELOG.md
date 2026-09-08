@@ -10,6 +10,53 @@ entry moves under a dated heading when its PR merges to `main`. The changelog
 as it reads **on `main` is the record of what production runs** — anything
 only in `[Unreleased]` on a branch is not in prod yet.
 
+## [Unreleased]
+
+### Fixed
+
+- The scanner stops forgetting what you taught it about a card once a year
+  fills up. `find_exact_match` — the overlay that re-applies your past
+  corrections when the same brand + card number + year is scanned again —
+  filtered corrections to the year, took the **100 most recent**, and looked
+  for the card inside that page in Python. A baseball collection concentrates
+  hard in a few years, so this had a specific and quiet failure: once one year
+  passed 100 corrections, a correction you made for that exact card fell out of
+  the window and the overlay simply stopped happening. No error, no note in
+  `confidence_notes`, nothing on the page to distinguish it from a card you had
+  never taught — and it degraded in the worst possible order, hitting the
+  earliest cards first, which are precisely the ones you have already corrected
+  and expect the tool to have learned. It also got worse the more the tool was
+  used, which is the opposite of what a learning loop is for.
+  Brand and card number now match **in SQL** (`lower(trim(...))`, the same
+  comparison `check_duplicate` in `routers/cards.py` already uses on the same
+  normalized columns), with no row limit, so the query is bounded by the match
+  rather than by recency. Verified against a real database holding 401
+  corrections in one year, with the card's own correction as the *oldest* of
+  them: the overlay lands in 2.5 ms where before it did not land at all.
+  One boundary, stated rather than hidden: SQLite's `lower()`/`trim()` are not
+  Python's `casefold()`/`strip()` — ASCII-only case mapping, and `trim` strips
+  spaces rather than all whitespace — so the SQL filter is marginally
+  *stricter* than the `_norm` re-check that still decides what counts as a
+  match. Brands and card numbers are ASCII in practice, and the divergence can
+  only ever cost a missed overlay, never produce a wrong one.
+
+- A Sheets append whose response cannot be parsed no longer grows a second copy
+  of the card. `sync_card`'s append branch writes the row, then reads
+  `updates.updatedRange` ("Inventory!A5:V5") to learn which row it landed on,
+  and returned `None` if that parse raised. The caller persists `sheets_row`
+  only when a row comes back — so the card kept a NULL one, its **next** edit
+  took the append branch again and added a second row while the first stayed
+  behind, and every later edit appended another. Nothing raised and nothing
+  logged; the inventory just quietly grew copies in the sheet, and the resync
+  repair tool fixes it only once somebody notices.
+  The append itself had succeeded, so giving up was the expensive answer, not
+  the safe one. Recovery is now to *find* the row: fall back to
+  `_last_used_row` — already used by `rewrite_all_rows`, and called here while
+  still holding the same lock, so nothing can have appended in between. It
+  returns `None` only in the two cases where a row number would be a guess: the
+  probe reports header-only (claiming row 1 would hand the card the header to
+  overwrite on its next save) or the probe itself fails.
+
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
 PRs #63–#68 were reconciled on one integration branch and merged together, so
