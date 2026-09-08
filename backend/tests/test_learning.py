@@ -271,3 +271,28 @@ def test_exact_match_ignores_a_different_card_in_the_same_year(db_session):
     merged = apply_exact_match(db_session, extracted)
     assert merged["set_name"] == "Chrome"
     assert not merged["confidence_notes"]
+
+
+def test_exact_match_survives_a_malformed_extraction(db_session):
+    """A non-string brand/card number answers None instead of 500ing the scan.
+
+    `_norm` passes non-strings through untouched and both values come from
+    model-extracted JSON, so a malformed extraction can hand `find_exact_match`
+    a list or a dict. That was inert while the match was a Python `==`; as a
+    bound parameter it is `sqlite3.ProgrammingError: type 'list' is not
+    supported`, which reaches the client as a 500 on POST /api/scan.
+    """
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    for bad in ({"brand": ["Bowman", "Topps"]}, {"card_number": {"n": "BCP-132"}}):
+        extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
+                     "set_name": "Chrome", "confidence_notes": "", **bad}
+        merged = apply_exact_match(db_session, extracted)   # must not raise
+        assert merged["set_name"] == "Chrome"
+        assert not merged["confidence_notes"]

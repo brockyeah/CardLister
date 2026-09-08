@@ -154,6 +154,15 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     year = extracted.get("year")
     if not card_number or not brand or not year:
         return None
+    # `_norm` passes non-strings through untouched, and both values come from
+    # model-extracted JSON — so a malformed extraction can hand us a list or a
+    # dict here. That was inert while the match was a Python `==` (a list never
+    # equals a normalized column value, so the answer was None); as a bound
+    # parameter it is `sqlite3.ProgrammingError: type 'list' is not supported`,
+    # i.e. a 500 on POST /api/scan. There is no match to find either way, so
+    # answer None as before.
+    if not isinstance(brand, str) or not isinstance(card_number, str):
+        return None
     rows = (
         db.query(Correction)
         .filter(Correction.year == year)

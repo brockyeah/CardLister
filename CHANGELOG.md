@@ -39,6 +39,16 @@ only in `[Unreleased]` on a branch is not in prod yet.
   *stricter* than the `_norm` re-check that still decides what counts as a
   match. Brands and card numbers are ASCII in practice, and the divergence can
   only ever cost a missed overlay, never produce a wrong one.
+  Moving the comparison into the database also moved where a *malformed*
+  extraction lands, so the same change closes that: `_norm` passes non-strings
+  through untouched and these values come from model-extracted JSON, so a bad
+  extraction can hand the lookup a list or a dict. That was inert as a Python
+  `==` — a list never equals a normalized column value, so the answer was
+  `None` — but as a bound parameter it is
+  `sqlite3.ProgrammingError: type 'list' is not supported`, which reaches the
+  client as a 500 on the scan. There is no match to find either way, so the
+  lookup now answers `None` for a non-string, exactly as it did before, and a
+  test pins it.
 
 - A Sheets append whose response cannot be parsed no longer grows a second copy
   of the card. `sync_card`'s append branch writes the row, then reads
