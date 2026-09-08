@@ -5,13 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # How far ahead of our own clock a sale may be dated. A sale is an event that
-# has already happened, so the only reason to accept anything ahead of "now" at
-# all is clock skew: the client submits an instant built from *its* clock, and
-# the two need not agree. A day of slack covers that with room to spare while
-# still rejecting the mistyped year (2062) this bound exists for. Backdating is
-# deliberately unbounded — recording a sale weeks later is ordinary, and a floor
-# would reject it.
-SOLD_AT_MAX_SKEW = timedelta(days=1)
+# has already happened, so the slack exists only to admit every value a client
+# can legitimately submit for "today". The client anchors the picked day at
+# noon UTC (`soldAtFromDateInput`), so a user at UTC+X submitting their local
+# today sends an instant up to 12+X hours ahead of our clock — 26h at the
+# +14:00 extreme (their new day's first two hours, before UTC midnight rolls).
+# A flat day of slack refused exactly that: the modal's own *default* date
+# 422'd for those two hours. 26h admits it while still rejecting the mistyped
+# year (2062) this bound exists for. Backdating is deliberately unbounded —
+# recording a sale weeks later is ordinary, and a floor would reject it.
+SOLD_AT_MAX_SKEW = timedelta(hours=26)
 
 
 def normalize_sold_at(value: datetime) -> datetime:

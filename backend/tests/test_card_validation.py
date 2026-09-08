@@ -156,6 +156,25 @@ def test_mark_sold_rejects_a_future_sale_date(db_session):
         assert r.status_code == 200, r.text
 
 
+def test_mark_sold_admits_the_pickers_worst_legitimate_today(db_session):
+    """The client anchors a picked day at noon UTC, so a user at UTC+14
+    submitting their local "today" during its first two hours sends an instant
+    up to 26 hours ahead of the server's clock. The old flat-day allowance
+    refused the modal's own default date there; 26h must admit it and still
+    refuse anything past it."""
+    with TestClient(app) as client:
+        headers = _auth(client)
+        created = client.post("/api/cards", json=_payload(), headers=headers).json()
+        worst = datetime.utcnow() + timedelta(hours=25, minutes=30)
+        r = _mark_sold(client, headers, created["id"],
+                       sold_price=25, sold_at=worst.isoformat())
+        assert r.status_code == 200, r.text
+        beyond = datetime.utcnow() + timedelta(hours=27)
+        r = _mark_sold(client, headers, created["id"],
+                       sold_price=25, sold_at=beyond.isoformat())
+        assert r.status_code == 422, r.text
+
+
 def test_mark_sold_still_accepts_a_backdated_sale(db_session):
     """Backdating is deliberately unbounded — recording a sale weeks after the
     fact is ordinary, and a floor would reject it."""
@@ -180,8 +199,8 @@ def test_a_future_sale_cannot_slip_through_on_a_utc_offset(db_session):
         headers = _auth(client)
         created = client.post("/api/cards", json=_payload(), headers=headers).json()
         # Just under two days ahead in wall-clock terms, but a real instant
-        # only ~1.4 days ahead thanks to the +14:00 offset. Both readings are
-        # past the one-day allowance, so this must be refused either way.
+        # only ~34 hours ahead thanks to the +14:00 offset. Both readings are
+        # past the 26-hour allowance, so this must be refused either way.
         wall = datetime.utcnow() + timedelta(days=2)
         r = _mark_sold(client, headers, created["id"], sold_price=25,
                        sold_at=wall.replace(tzinfo=timezone(timedelta(hours=14))).isoformat())
