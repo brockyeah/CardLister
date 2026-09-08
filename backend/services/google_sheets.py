@@ -138,6 +138,24 @@ def _ensure_header(service, sheet_id: str) -> None:
         logger.warning("Sheets header check failed: %s", e)
 
 
+def _row_from_range(a1_range: str, end: bool = False) -> Optional[int]:
+    """Row number out of an A1 range like "Inventory!A5:V5", or None.
+
+    `end=True` reads the range's *last* row rather than its first — which is
+    what `tableRange` needs, since it describes a whole table (`A1:V5` → 5).
+    Returns None rather than raising on anything unparseable, so the caller
+    decides what an unreadable response means.
+    """
+    try:
+        body = a1_range.split("!")[1]
+    except (IndexError, AttributeError):
+        return None
+    parts = body.split(":")
+    cell = parts[-1] if end and len(parts) > 1 else parts[0]
+    digits = "".join(ch for ch in cell if ch.isdigit())
+    return int(digits) if digits else None
+
+
 def _last_used_row(service, sheet_id: str) -> int:
     """Last row holding any data, probed across every mirror column.
 
@@ -296,32 +314,35 @@ def sync_card(card, reread_row=None) -> Optional[int]:
                     insertDataOption="INSERT_ROWS",
                     body={"values": [row_values]},
                 ).execute()
-                updated_range = resp.get("updates", {}).get("updatedRange", "")
+                updates = resp.get("updates", {})
                 # updatedRange looks like "Inventory!A5:S5" — pull the row number
-                try:
-                    row_part = updated_range.split("!")[1]
-                    row_num = int("".join(ch for ch in row_part.split(":")[0] if ch.isdigit()))
-                    return row_num
-                except (IndexError, ValueError):
+                row_num = _row_from_range(updates.get("updatedRange", ""))
+                if row_num is None:
                     # The append itself succeeded — only the bookkeeping failed —
                     # so giving up here is the expensive answer, not the safe one:
                     # the caller persists `sheets_row` only when a row comes back,
                     # so the card keeps a NULL one and its *next* edit takes this
                     # same append branch, adding a second row while the first
                     # stays behind. Every later edit appends again, silently.
-                    # We are still holding the lock and nothing can have appended
-                    # since, so the row we just wrote is the last used one.
-                    try:
-                        row_num = _last_used_row(service, sheet_id)
-                    except Exception as e:
-                        logger.warning(
-                            "Sheets append row-number recovery failed for card %s: %s",
-                            getattr(card, "id", "?"), e,
-                        )
-                        return None
-                    # A header-only probe means the append is not visible to us;
-                    # claiming row 1 would hand the card the header to overwrite.
-                    return row_num if row_num >= 2 else None
+                    #
+                    # Recover from `tableRange` — the extent of the table as it
+                    # was *before* this append — so our row is its last row + 1.
+                    # It rides along in the response we already have, which is
+                    # what makes it the right source: reading the sheet's last
+                    # used row instead would be a second, later call, and
+                    # `_sheets_lock` serializes this process, not the
+                    # spreadsheet. The owner editing the sheet by hand, or any
+                    # other integration appending in that window, would make the
+                    # last used row *theirs* — and we would hand this card that
+                    # row to overwrite on its next save while the row we actually
+                    # appended stayed behind, which is the orphan-plus-clobber
+                    # this recovery exists to prevent (Codex, PR #78).
+                    last_before = _row_from_range(updates.get("tableRange", ""), end=True)
+                    row_num = last_before + 1 if last_before is not None else None
+                # Row 1 is the header; a recovered row that lands there means the
+                # response did not describe an append we can place, and handing
+                # the card the header to overwrite is worse than not knowing.
+                return row_num if row_num is not None and row_num >= 2 else None
         except Exception as e:
             logger.warning("Sheets sync failed for card %s: %s", getattr(card, "id", "?"), e)
             return None

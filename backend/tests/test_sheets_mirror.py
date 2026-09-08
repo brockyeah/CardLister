@@ -32,13 +32,19 @@ _range = range
 class FakeSheet:
     """Minimal stand-in for the Sheets API, holding rows as a dict {row_no: values}."""
 
-    def __init__(self, rows=None, fail_on=None, append_range=None):
+    def __init__(self, rows=None, fail_on=None, append_range=None,
+                 table_range=None, append_side_effect=None):
         self.rows = dict(rows or {})
         self.calls = []          # (op, range) in order
         self.fail_on = fail_on or set()
         # When set, the append response reports this as `updatedRange` instead
         # of the real one — the API answering in a shape we cannot parse.
         self.append_range = append_range
+        # Likewise for `tableRange` (the table's extent *before* the append).
+        self.table_range = table_range
+        # Called right after the append lands, standing in for a writer outside
+        # this process — the owner editing the sheet, another integration.
+        self.append_side_effect = append_side_effect
 
     # --- API surface used by google_sheets.py -------------------------------
     def spreadsheets(self):
@@ -94,11 +100,18 @@ class FakeSheet:
                insertDataOption=None, body=None):
         def run():
             self.calls.append(("append", range))
-            row_no = (max(self.rows) if self.rows else 1) + 1
+            last_before = max(self.rows) if self.rows else 1
+            row_no = last_before + 1
             self.rows[row_no] = body["values"][0]
-            if self.append_range is not None:
-                return {"updates": {"updatedRange": self.append_range}}
-            return {"updates": {"updatedRange": f"Inventory!A{row_no}:{END_COL}{row_no}"}}
+            if self.append_side_effect is not None:
+                self.append_side_effect(self)
+            updates = {
+                "updatedRange": (self.append_range if self.append_range is not None
+                                 else f"Inventory!A{row_no}:{END_COL}{row_no}"),
+                "tableRange": (self.table_range if self.table_range is not None
+                               else f"Inventory!A1:{END_COL}{last_before}"),
+            }
+            return {"updates": updates}
         return _Exec(run)
 
     # --- helpers ------------------------------------------------------------
@@ -388,25 +401,59 @@ def test_unparseable_append_range_does_not_duplicate_the_card(db_session):
     assert fake.players() == ["Alpha"]              # not ["Alpha", "Alpha"]
 
 
-def test_append_recovery_never_claims_the_header_row(db_session):
-    """A probe that reports header-only means the append is not visible to us —
-    returning row 1 would hand the card the header to overwrite on its next
-    save, so we keep the old NULL behaviour for that case alone."""
+def test_append_recovery_ignores_a_row_another_writer_added(db_session):
+    """Recovery must not infer our row from the sheet's last row.
+
+    `_sheets_lock` serializes this process, not the spreadsheet: the owner
+    editing the sheet by hand, or another integration appending, can land a row
+    between our append and any later probe. Deriving the row from that probe
+    would hand this card the other writer's row to overwrite on its next save,
+    while the row we actually appended stayed behind — the orphan-plus-clobber
+    the recovery exists to prevent. `tableRange` comes from the same response as
+    the append, so no window exists (Codex, PR #78).
+    """
     card = _mkcard(db_session, "Alpha")
-    fake = FakeSheet(append_range="")
-    with _install(fake), patch.object(google_sheets, "_last_used_row", lambda *a: 1):
+
+    def someone_else_appends(fake):
+        fake.rows[max(fake.rows) + 1] = ["Owner's own row"]
+
+    fake = FakeSheet(append_range="", append_side_effect=someone_else_appends)
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+
+    assert row == 2, "must be our appended row, not the other writer's row 3"
+    assert fake.rows[2][0] == "Alpha"
+    assert fake.rows[3] == ["Owner's own row"]     # left untouched
+
+
+def test_append_recovery_places_the_row_after_an_existing_block(db_session):
+    """tableRange's last row + 1 — not a hardcoded row 2."""
+    card = _mkcard(db_session, "Delta")
+    fake = FakeSheet(rows={2: ["A"], 3: ["B"], 4: ["C"]}, append_range="")
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row == 5
+    assert fake.rows[5][0] == "Delta"
+
+
+def test_append_recovery_gives_up_when_neither_range_is_readable(db_session):
+    """Both ranges unparseable: return None rather than guess a row.
+
+    None is the old lossy behaviour — the card re-appends next edit — which is
+    the right trade only here, where any row we named would be a guess.
+    """
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="", table_range="")
+    with _install(fake):
         row = google_sheets.sync_card(card)
     assert row is None
 
 
-def test_append_recovery_failure_is_swallowed(db_session):
-    """A failing recovery probe degrades to None, never to a raised save."""
+def test_append_recovery_never_claims_the_header_row(db_session):
+    """A tableRange that would place us at row 1 is not a row we can use —
+    handing the card the header to overwrite is worse than not knowing."""
     card = _mkcard(db_session, "Alpha")
-    fake = FakeSheet(append_range="")
-
-    def boom(*_a):
-        raise RuntimeError("probe boom")
-
-    with _install(fake), patch.object(google_sheets, "_last_used_row", boom):
+    fake = FakeSheet(append_range="", table_range="Inventory!A0:V0")
+    with _install(fake):
         row = google_sheets.sync_card(card)
     assert row is None

@@ -68,12 +68,22 @@ only in `[Unreleased]` on a branch is not in prod yet.
   logged; the inventory just quietly grew copies in the sheet, and the resync
   repair tool fixes it only once somebody notices.
   The append itself had succeeded, so giving up was the expensive answer, not
-  the safe one. Recovery is now to *find* the row: fall back to
-  `_last_used_row` — already used by `rewrite_all_rows`, and called here while
-  still holding the same lock, so nothing can have appended in between. It
-  returns `None` only in the two cases where a row number would be a guess: the
-  probe reports header-only (claiming row 1 would hand the card the header to
-  overwrite on its next save) or the probe itself fails.
+  the safe one. Recovery now reads `tableRange` out of that same append
+  response — the extent of the table as it was *before* the append — so the row
+  written is its last row plus one.
+  Deriving it from the same response is the load-bearing part, not an
+  optimisation. The obvious alternative is to ask the sheet for its last used
+  row afterwards, but `google_sheets._sheets_lock` serializes this process, not
+  the spreadsheet: the owner editing the sheet by hand, or any other
+  integration appending in that window, would make the last used row *theirs*.
+  The card would then be handed that row to overwrite on its next save while
+  the row actually appended stayed behind — an orphan plus a clobbered row,
+  strictly worse than the duplication being fixed. A test pins it by having a
+  second writer append between the two, and it fails against the
+  last-used-row version.
+  `None` is still returned where any row number would be a guess: neither
+  `updatedRange` nor `tableRange` readable, or a recovered row of 1, since
+  handing the card the header to overwrite is worse than not knowing.
 
 ## 2026-08-31 — Health probe, alert delivery, hung-scan timeout, field validation, changelog guard (PR #69)
 
