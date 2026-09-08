@@ -26,9 +26,12 @@ Last reconciled with the live routines: 2026-08-14.
 >    next one will.
 > 2. **Steps 10 and 13–14 (reviewer count, queue-depth reporting)** are the changes made
 >    here on 2026-09-07 and are not in the live prompt at all.
+> 3. **Step 10's two trigger comments** (`@coderabbitai review` and `@codex review` after
+>    the final push) were added on 2026-09-08, along with the matching sentence in the
+>    Routine B block below.
 >
-> Both need the owner to paste the updated prompt block below into claude.ai → Routines.
-> Until then this file describes what the routine *should* do, not what it does.
+> All of it needs the owner to paste the updated prompt blocks below into claude.ai →
+> Routines. Until then this file describes what the routines *should* do, not what they do.
 
 ## The weekly rhythm
 
@@ -136,20 +139,25 @@ PHASE 3 — Build (standing authorization):
 10. Open a PR automatically: if the branch has shipped work and no open PR, open
     one against main whose body summarizes the [Unreleased] changelog entries.
     Never merge it yourself — merging is the owner's call.
-    Do NOT review your own PR. One reviewer runs automatically: the Claude Auto
-    Review GitHub Action. CodeRabbit no longer reviews on its own — it posts
-    "this repository does not receive automatic reviews because it has fewer
-    than 10 stars" and stops — so after opening the PR, post a single
-    `@coderabbitai review` comment on it to trigger the pass by hand; if that
-    produces nothing, say so in the report rather than assuming it ran. Codex
-    now reviews ON the PR as `chatgpt-codex-connector[bot]`, posting inline
-    P1/P2 comments — it is configured as a GitHub reviewer for this repo — so
-    treat its findings like any other bot's: verify each against the code and
-    push the fix. The owner may also run Codex separately and relay findings in
-    chat, so a quiet PR is still not a pass. Stay subscribed to the PR and
-    address findings as event wakes deliver them — that is how a PR reaches
-    green with no owner intervention. Do not block your Phase 4 report waiting
-    on reviews that have not arrived yet; the session will wake when they do.
+    Do NOT review your own PR. Three reviewers cover it, and only one of them
+    re-reviews a later push on its own: the Claude Auto Review GitHub Action.
+    The other two must be asked, so **after every push that you expect to be
+    the last one, post two comments on the PR: `@coderabbitai review` and
+    `@codex review`.** CodeRabbit does nothing without that comment (the repo
+    is under its 10-star threshold — it posts "this repository does not receive
+    automatic reviews" and stops) and a trigger posted before a later push is
+    voided by it ("Head commit changed"), so post it last. Codex
+    (`chatgpt-codex-connector[bot]`) reviews the PR once when it is opened — a
+    👍 reaction on the PR is its "nothing to say", otherwise inline P1/P2
+    comments — but never looks at later commits unless told `@codex review`.
+    Treat both bots' findings like the Action's: verify each against the code,
+    push the fix, re-trigger both. If a trigger produces nothing, say so in the
+    report rather than assuming it ran. The owner may also run Codex separately
+    and relay findings in chat, so a quiet PR is still not a pass. Stay
+    subscribed to the PR and address findings as event wakes deliver them —
+    that is how a PR reaches green with no owner intervention. Do not block your
+    Phase 4 report waiting on reviews that have not arrived yet; the session
+    will wake when they do.
 11. Changelog housekeeping: when a previous PR has merged, move its [Unreleased]
     entries under a dated heading with the PR number. Insert the new heading
     ABOVE the entries — never overwrite the [Unreleased] line itself, or the
@@ -221,24 +229,27 @@ PHASE 4 — Report (always):
 - **Reviewers, none of them the author — but count them honestly.** The Auto Review Action
   authenticates with the owner's subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so it costs no
   API credits and reviews from a context that never saw the code being written.
-  **Codex now reviews on the PR** as `chatgpt-codex-connector[bot]` — verified 2026-09-07
-  on PR #77, where it posted three inline P2 findings, all three correct. The docs had
-  said Codex "will never appear on the PR" and told runs not to look for it there, which
-  by then would have meant ignoring real findings; it is set up as a GitHub reviewer for
-  this repo and triggers on PR open, ready-for-review, and `@codex review`. The owner may
-  still run Codex separately and relay findings in chat, so a quiet PR is not a pass. The
-  routine deliberately does NOT also
-  review in-session: the author reviewing their own work is the weakest possible pass.
-  **CodeRabbit stopped reviewing automatically** (verified 2026-09-07 on PRs #73–#76,
-  each carrying only the notice *"This repository does not receive automatic reviews
-  because it has fewer than 10 stars"*; PRs #71 and #72 were still reviewed, so the
-  policy changed on their side around 2026-09-03 — it is not a misconfiguration here).
-  It still reads `.coderabbit.yaml` and quotes the config back in the notice, which is
-  what made the loss easy to miss. This mattered because the prompt used the *count* of
-  reviewers as its reason not to self-review: a premise that has silently gone from three
-  to two is worse than no premise. The notice's own escape hatch — a `@coderabbitai
-  review` comment — is the cheap fix and is now step 10; ten stars or a paid plan are the
-  alternatives, and both are the owner's call.
+  **Codex reviews on the PR** as `chatgpt-codex-connector[bot]` — verified 2026-09-07
+  on PR #77 (three inline P2 findings, all correct) and 2026-09-08 on PR #78, where it
+  found that the fix for its own first finding was inert. The docs had said Codex "will
+  never appear on the PR" and told runs not to look for it there, which by then meant
+  ignoring the reviewer with the best hit rate on this repo. It reviews once on PR open
+  (a 👍 reaction is its "nothing to say" — PRs #72 and #76 got one) and otherwise only
+  when told `@codex review`, so the second pass on #78 only happened because the run
+  asked for it. The owner may still run Codex separately and relay findings in chat, so
+  a quiet PR is not a pass. The routine deliberately does NOT also review in-session:
+  the author reviewing their own work is the weakest possible pass.
+  **CodeRabbit does not review without being asked** (under its 10-star threshold; the
+  loss was noticed and recorded in the backlog on 2026-08-31, and every PR from #71 on
+  has carried only the notice *"This repository does not receive automatic reviews
+  because it has fewer than 10 stars"* until a `@coderabbitai review` comment was posted
+  by hand — it is a policy on their side, not a misconfiguration here). It still reads
+  `.coderabbit.yaml` and quotes the config back in the notice, which is what made the
+  loss easy to miss. This mattered because the prompt used the *count* of reviewers as
+  its reason not to self-review: a premise that has silently gone from three to two is
+  worse than no premise. The two trigger comments after the final push are the cheap
+  fix and are now step 10; ten stars or a paid plan are the alternatives, and both are
+  the owner's call.
 - **Queue depth is reported before output.** The routine ships 1–2 quick wins a day and
   cannot merge anything, so if the owner stops merging, its PRs accumulate silently —
   each run reads a `main` that is further behind the work, and every branch's
@@ -256,10 +267,13 @@ Runs Sundays at 9:00 PM EDT.
 
 ```text
 Weekly deep review. Every PR this week was already reviewed line-by-line by the
-Claude Auto Review Action and CodeRabbit — and possibly by Codex, which the owner
-runs outside GitHub and which leaves no record on the PR, so do not try to verify
-its coverage. Do NOT repeat diff-scoped review; you exist to find what it
-structurally cannot see. Read whole files and whole subsystems, not diffs.
+Claude Auto Review Action, by Codex (`chatgpt-codex-connector[bot]`, on the PR),
+and by CodeRabbit when a `@coderabbitai review` comment was posted — and possibly
+by the owner running Codex outside GitHub, which leaves no record, so do not try
+to verify that coverage. Do NOT repeat diff-scoped review; you exist to find what
+it structurally cannot see. Read whole files and whole subsystems, not diffs.
+If you open a PR, the same rule as the daily routine applies: after your final
+push, post `@coderabbitai review` and `@codex review` on it.
 
 SCOPE: everything merged to main in the last 7 days
 (`git log origin/main --since=7.days`), plus any subsystem those commits touched.

@@ -445,7 +445,12 @@ export default function Scanner() {
             <div className="font-bold">Batch queue ({queue.filter((q) => q.status === 'saved').length}/{queue.length} saved)</div>
             <button
               type="button"
-              className="text-xs text-gray-400 underline"
+              // Same guard as the per-item Review button: clearQueue nulls the
+              // active key, and resetAfterSave still runs from doSave's
+              // click-time closure, so clearing mid-save let it reload a
+              // stale queue snapshot over whatever the user had just done.
+              disabled={submitting}
+              className="text-xs text-gray-400 underline disabled:opacity-50"
               onClick={clearQueue}
             >
               Clear queue

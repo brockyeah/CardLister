@@ -138,7 +138,11 @@ def test_alerts_test_reports_email_unconfigured_without_recipients(monkeypatch):
     same answer `notify_callup_alerts_undelivered` gives when it diagnoses a
     misconfiguration. The two used to disagree.
     """
+    # Full SMTP credentials, so the only thing missing is the recipient list —
+    # without SMTP_PASSWORD the test passed for the wrong reason (no password
+    # is unconfigured too) and pinned nothing about recipients.
     monkeypatch.setenv("SMTP_USERNAME", "user@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
     monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
     monkeypatch.delenv("ALERT_EMAILS", raising=False)
     monkeypatch.delenv("NTFY_TOPIC", raising=False)

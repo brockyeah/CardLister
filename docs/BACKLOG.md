@@ -5,36 +5,6 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Now / next
 
-- [ ] CLAUDE.md tells every run to ignore the reviewer that found the most
-      (2026-09-08 daily run, observed on PR #78): the **NOTE** at the end of
-      CLAUDE.md says Codex review "happens outside GitHub — the owner runs
-      Codex themselves and relays its findings back in chat. Nothing will
-      appear on the PR, so don't wait for it, look for it in CI, or treat its
-      absence as a pass." That is no longer true. A
-      `chatgpt-codex-connector[bot]` is installed on the repo and posts inline
-      review comments directly on the PR — its own notice says reviews trigger
-      on opening a PR, marking a draft ready, or commenting `@codex review`.
-      This is not a footnote: on PR #78 Codex raised **both** of the findings
-      that mattered, and the second one was that the fix for the first was
-      *inert* — `tableRange` read from `updates` instead of the response root,
-      so the recovery could never fire, with the test fake nesting the field
-      the same wrong way so four tests passed against a code path that did
-      nothing. The Claude auto-review had reviewed the same code twice and
-      affirmatively signed off on it both times, including the specific
-      reasoning Codex overturned. So the standing instruction points future
-      runs away from the reviewer with the best hit rate on this repo, and the
-      doc's "don't treat its absence as a pass" is now backwards — its
-      *presence* is what a run should wait for.
-      Fix: correct the NOTE to say Codex reviews on the PR (and how to trigger
-      it), keep the chat-relay path as an additional channel rather than the
-      only one, and have the routine wait for the Codex review the same way it
-      waits for the Claude action. Worth deciding at the same time whether a
-      run should re-request Codex after each push, since it reviews a specific
-      commit and a fix lands after the review that prompted it (quick win;
-      implement directly; inline — CLAUDE.md, plus
-      `docs/notes/daily-routine-prompt.md`, which repeats the same claim; note
-      CLAUDE.md is also touched by open PRs #74/#76/#77, so this wants to land
-      on its own small branch rather than widening a feature PR)
 - [ ] A total alert-delivery failure buys six hours of silence (2026-09-08
       review): both `notify_credits_exhausted` and
       `notify_callup_alerts_undelivered` in `services/billing_alerts.py` stamp
@@ -229,8 +199,9 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       null the active key, and `setTimeout`-reload B from the stale queue
       snapshot — silently discarding anything typed into B meanwhile. The
       2026-09-06 review shipped the stopgap (the queue's Review button is
-      `disabled={submitting}`, closing the only path that switches the active
-      item mid-save), but the underlying shape remains: `resetAfterSave` reads
+      `disabled={submitting}`; the integration PR for #71–#78 gave "Clear
+      queue" the same guard, since it also switches the active item mid-save),
+      but the underlying shape remains: `resetAfterSave` reads
       `activeKey` and `queue` from the render that created the click handler.
       The durable fix is the same one `pricingSeq` embodies — track the active
       key in a ref and have `resetAfterSave` bail when the item it is
@@ -1367,6 +1338,14 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
 
 ## Shipped
 
+- [x] 2026-09-08 — CLAUDE.md and the routine prompts say how the review bots
+      actually trigger: Codex reviews a PR once on open (👍 reaction = nothing
+      to say) and only re-reviews a later push when told `@codex review`;
+      CodeRabbit reviews only when told `@coderabbitai review`, and a trigger
+      posted before a later push is voided. The rule is now: after the final
+      push, post both comments. Previously the NOTE said Codex would never
+      appear on the PR, which by PR #78 meant ignoring the reviewer with the
+      best hit rate here (integration PR for #71–#78)
 - [x] 2026-09-08 — The exact-card correction overlay is bounded by the match
       instead of by recency: `find_exact_match` filtered corrections to the
       year, took the 100 most recent, and scanned that page in Python, so once
@@ -1382,9 +1361,11 @@ move items to **Shipped** (with date) instead of deleting so runs don't re-propo
       could not read the row number out of the API response, so the caller
       never persisted `sheets_row`, and the card's next edit appended a second
       row — and every edit after that another one, silently. The append had
-      succeeded, so the row is recoverable: it now falls back to
-      `_last_used_row` under the same lock, and returns `None` only when that
-      probe reports header-only or itself fails
+      succeeded, so the row is recoverable: it is now read from the append
+      response's own root-level `tableRange` (the table's extent before the
+      append, so its last row + 1), never from a later probe of the sheet that
+      another writer could have appended to, and returns `None` only when
+      neither range is readable or the recovered row would be the header
 
 - [x] 2026-09-07 — `storage_usage` reports what else is on the volume: it added
       `getsize(DB_PATH)` to the uploads directory and called that the

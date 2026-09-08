@@ -294,7 +294,10 @@ def test_exact_match_survives_a_malformed_extraction(db_session):
                 {"year": [2024]}, {"year": {"value": 2024}},
                 # SQLite's INTEGER is signed 64-bit; wider raises OverflowError
                 # at bind time, the same 500 by a different route.
-                {"year": 2 ** 63}, {"year": -(2 ** 63) - 1}, {"year": 10 ** 30}):
+                {"year": 2 ** 63}, {"year": -(2 ** 63) - 1}, {"year": 10 ** 30},
+                # A fractional year is not a year; an integral float is
+                # folded to int and matches (pinned in the string-year test).
+                {"year": 2024.5}):
         extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
                      "set_name": "Chrome", "confidence_notes": "", **bad}
         merged = apply_exact_match(db_session, extracted)   # must not raise
@@ -319,10 +322,13 @@ def test_exact_match_still_accepts_a_string_year(db_session):
     ))
     db_session.commit()
 
-    extracted = {"year": "2024", "brand": "Bowman", "card_number": "BCP-132",
-                 "set_name": "Chrome", "confidence_notes": ""}
-    merged = apply_exact_match(db_session, extracted)
-    assert merged["set_name"] == "Chrome Prospects"
+    # 2024.0 matched before the type guard existed (SQLite compares REAL
+    # 2024.0 equal to INTEGER 2024), so it must keep matching too.
+    for year in ("2024", 2024.0):
+        extracted = {"year": year, "brand": "Bowman", "card_number": "BCP-132",
+                     "set_name": "Chrome", "confidence_notes": ""}
+        merged = apply_exact_match(db_session, extracted)
+        assert merged["set_name"] == "Chrome Prospects", year
 
 
 def test_exact_match_does_not_treat_a_boolean_year_as_year_one(db_session):

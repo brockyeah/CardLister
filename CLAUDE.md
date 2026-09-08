@@ -180,7 +180,11 @@ to push" does not work across the two.
 
 - **Never merge PRs — that is the owner's call.** Open the PR, drive it to green, respond to the Claude auto-review action's findings (it exists to give a second opinion from a clean context; don't self-review in its place).
 
-**NOTE** Codex reviews your output once you are done with any implementation, and it arrives two ways. It **does** post on the PR as `chatgpt-codex-connector[bot]` (configured as a GitHub reviewer for this repo; triggers on PR open, ready-for-review, and `@codex review`), leaving inline P1/P2 comments — verified 2026-09-07 on PR #77. Treat those like any other review bot's findings: verify each against the code and push the fix. The owner **also** runs Codex themselves outside GitHub and relays findings back in chat, and that half leaves no trace on the PR — so a quiet PR is still not a pass, and follow-up concerns arriving after work looks finished are review feedback on code you already shipped. (This note previously said nothing would ever appear on the PR, which by 2026-09-07 meant ignoring real findings.)
+**NOTE** Two review bots run on every PR besides the Claude Auto Review Action, and **neither re-reviews a later push on its own — so after your final push, post two comments on the PR: `@coderabbitai review` and `@codex review`.**
+- **Codex** (`chatgpt-codex-connector[bot]`) reviews a PR once, automatically, when it is opened. A 👍 reaction on the PR is its "reviewed, nothing to say"; otherwise it leaves inline P1/P2 comments. It does **not** look at commits pushed afterwards unless asked with `@codex review` — on PR #78 the fix for its first finding was itself inert, and only the prompted second pass caught that.
+- **CodeRabbit** does not review at all without a `@coderabbitai review` comment (the repo is under its 10-star threshold), and a trigger posted before a later push is voided by that push ("Head commit changed"), so post it last.
+
+Treat both bots' findings like the Action's: verify each against the code, push the fix, re-trigger. The owner may also run Codex from the CLI and relay findings in chat, so a quiet PR is still not a pass, and concerns arriving after work looks finished are review feedback on code you already shipped.
 
 ## Other agent configs
 

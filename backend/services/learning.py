@@ -171,6 +171,12 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     # this to `int` would silently drop those overlays (test below pins it).
     if not isinstance(brand, str) or not isinstance(card_number, str):
         return None
+    # An integral float (`2024.0`) matched before the type guard existed —
+    # SQLite compares REAL 2024.0 equal to INTEGER 2024 — so refusing it here
+    # would be the same quiet missed overlay the str case above guards
+    # against. Fold it to the int; anything with a fraction is not a year.
+    if isinstance(year, float) and year.is_integer():
+        year = int(year)
     # `bool` is a subclass of `int`, so a `True` year would otherwise sail
     # through and quietly query `year = 1`, matching a 1-AD correction rather
     # than reporting no match. Not a crash, just a wrong question to ask.
@@ -185,9 +191,10 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     rows = (
         db.query(Correction)
         .filter(Correction.year == year)
-        # Same shape as check_duplicate in routers/cards.py: both columns are
-        # already normalized on write, so a lower(trim(...)) comparison finds
-        # the card without paging.
+        # Same shape as check_duplicate in routers/cards.py. Nothing normalizes
+        # these columns on write (record_correction stores the saved strings
+        # verbatim), so the lower(trim(...)) here is what makes the comparison
+        # case- and padding-insensitive — it is load-bearing, not redundant.
         .filter(func.lower(func.trim(Correction.brand)) == brand)
         .filter(func.lower(func.trim(Correction.card_number)) == card_number)
         # id tiebreaker for the same reason as build_cheatsheet: this returns
