@@ -12,6 +12,7 @@ are NEVER overridden — the same card number exists as base, refractor, gold /5
 import json
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import Correction, Scan
@@ -129,7 +130,25 @@ def build_cheatsheet(db: Session) -> str:
 
 def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     """Corrected IDENTITY fields from the latest correction of the same card
-    (normalized brand + card number + year), or None."""
+    (normalized brand + card number + year), or None.
+
+    Brand and card number are matched **in SQL**, so the result is bounded by
+    the match rather than by recency. It used to fetch the 100 most recent
+    corrections for the year and scan that page in Python, which quietly broke
+    down on exactly the inventory this app has: a collection concentrates in a
+    few years, so once one year passes 100 corrections, a correction the user
+    made for this very card falls out of the window and the overlay simply
+    stops happening — no error, no note, worse the longer the tool is used,
+    and worst for the earliest cards, which are the ones already taught.
+
+    Boundary worth stating: SQLite's `lower()`/`trim()` are not Python's
+    `casefold()`/`strip()` (ASCII-only case mapping; `trim` strips spaces, not
+    all whitespace), so the SQL filter is slightly *stricter* than `_norm` on
+    non-ASCII or tab-padded input. Brands and card numbers are ASCII in
+    practice ("Bowman", "BCP-100"), and the divergence can only ever cost a
+    missed overlay, never produce a wrong one. The `_norm` re-check below is
+    kept as the authority on what counts as a match.
+    """
     card_number = _norm(extracted.get("card_number"))
     brand = _norm(extracted.get("brand"))
     year = extracted.get("year")
@@ -138,11 +157,15 @@ def find_exact_match(db: Session, extracted: dict) -> Optional[dict]:
     rows = (
         db.query(Correction)
         .filter(Correction.year == year)
+        # Same shape as check_duplicate in routers/cards.py: both columns are
+        # already normalized on write, so a lower(trim(...)) comparison finds
+        # the card without paging.
+        .filter(func.lower(func.trim(Correction.brand)) == brand)
+        .filter(func.lower(func.trim(Correction.card_number)) == card_number)
         # id tiebreaker for the same reason as build_cheatsheet: this returns
         # the *latest* correction for the card, and two rows sharing a
         # created_at would otherwise resolve in whatever order SQLite chose.
         .order_by(Correction.created_at.desc(), Correction.id.desc())
-        .limit(100)
         .all()
     )
     for row in rows:
