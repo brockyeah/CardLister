@@ -12,6 +12,24 @@ readable record of what they say, so it must be updated whenever a prompt change
 
 Last reconciled with the live routines: 2026-08-14.
 
+> **⚠ The live Routine A prompt is currently BEHIND this file — owner action needed.**
+> Checked 2026-09-07 against the prompt the scheduler actually delivered. Two gaps:
+>
+> 1. **Step 11 (changelog housekeeping) is missing the `chore/changelog-<date>` branch
+>    rule** that PR #69 added here. The live prompt still says only "move its
+>    `[Unreleased]` entries under a dated heading", with no instruction to use a
+>    dedicated branch and no "check whether a `chore/changelog-*` PR is already open"
+>    guard. CI's `changelog-guard` job now **fails any PR that dates a heading from a
+>    non-`chore/changelog-*` branch**, so the live prompt instructs the run to do
+>    something that turns its own PR red by construction. It has not bitten yet only
+>    because no PR with `[Unreleased]` entries has merged since the guard shipped — the
+>    next one will.
+> 2. **Steps 10 and 13–14 (reviewer count, queue-depth reporting)** are the changes made
+>    here on 2026-09-07 and are not in the live prompt at all.
+>
+> Both need the owner to paste the updated prompt block below into claude.ai → Routines.
+> Until then this file describes what the routine *should* do, not what it does.
+
 ## The weekly rhythm
 
 | Routine | Cadence | Purpose |
@@ -52,7 +70,11 @@ PHASE 0 — Ground yourself (always):
 
 PHASE 1 — Health check (always):
 1. Check repo state: open PRs (drive any of ours toward green), open issues, CI
-   status on main, and security/dependency alerts. Hit production health at
+   status on main, and security/dependency alerts. **Measure the review queue
+   here, not later: count the open PRs and note the date of the last merge to
+   main.** The queue is an input to what you build (step 7) and the lead of your
+   report (step 13), so it has to be known before Phase 3, not discovered after
+   it. Hit production health at
    https://cardlister-production.up.railway.app/api/health — confirm ok/db true,
    that the reported revision matches origin/main HEAD (if it lags, a deploy
    failed), and that the call-up poller is not stale.
@@ -85,7 +107,12 @@ PHASE 2 — Ideas (always):
    already used there.
 
 PHASE 3 — Build (standing authorization):
-7. Implement the top 1–2 quick wins from the backlog without asking. Gates: full
+7. Implement the top 1–2 quick wins from the backlog without asking. **First
+   consult the queue depth from step 1: if nothing has merged in 3+ days or 4+
+   PRs are already open, the binding constraint is the owner's review time, not
+   your output — ship the smallest useful change, or none, and say which you
+   chose and why.** Count the PR you are about to open when you apply that
+   threshold; it is the one that tips the queue. Gates: full
    backend suite green and frontend build green. Backend: run from the repo
    root as `python3 -m pytest backend/tests -q` (locally, where the repo-root
    venv exists, `.venv/bin/python -m pytest backend/tests -q`). Frontend:
@@ -109,13 +136,20 @@ PHASE 3 — Build (standing authorization):
 10. Open a PR automatically: if the branch has shipped work and no open PR, open
     one against main whose body summarizes the [Unreleased] changelog entries.
     Never merge it yourself — merging is the owner's call.
-    Do NOT review your own PR. Three reviewers cover it: the Claude Auto Review
-    GitHub Action, CodeRabbit, and Codex — which the owner runs himself outside
-    GitHub and relays back in chat, so never wait for Codex on the PR or read its
-    absence as a pass. Stay subscribed to the PR and address action/CodeRabbit
-    findings as event wakes deliver them — that is how a PR reaches green with no
-    owner intervention. Do not block your Phase 4 report waiting on reviews that
-    have not arrived yet; the session will wake when they do.
+    Do NOT review your own PR. One reviewer runs automatically: the Claude Auto
+    Review GitHub Action. CodeRabbit no longer reviews on its own — it posts
+    "this repository does not receive automatic reviews because it has fewer
+    than 10 stars" and stops — so after opening the PR, post a single
+    `@coderabbitai review` comment on it to trigger the pass by hand; if that
+    produces nothing, say so in the report rather than assuming it ran. Codex
+    now reviews ON the PR as `chatgpt-codex-connector[bot]`, posting inline
+    P1/P2 comments — it is configured as a GitHub reviewer for this repo — so
+    treat its findings like any other bot's: verify each against the code and
+    push the fix. The owner may also run Codex separately and relay findings in
+    chat, so a quiet PR is still not a pass. Stay subscribed to the PR and
+    address findings as event wakes deliver them — that is how a PR reaches
+    green with no owner intervention. Do not block your Phase 4 report waiting
+    on reviews that have not arrived yet; the session will wake when they do.
 11. Changelog housekeeping: when a previous PR has merged, move its [Unreleased]
     entries under a dated heading with the PR number. Insert the new heading
     ABOVE the entries — never overwrite the [Unreleased] line itself, or the
@@ -132,9 +166,20 @@ PHASE 3 — Build (standing authorization):
 
 PHASE 4 — Report (always):
 12. End with a "Top picks" section: the 2–3 highest-leverage next actions and why.
-13. Send exactly one notification: lead with what shipped or broke, then top picks
-    — include the PR link if one was opened. State plainly anything you could not
-    finish and why. If truly nothing changed and nothing shipped, stay silent.
+13. Report the review queue measured in step 1. If nothing has merged in 3+
+    days, or 4+ PRs are open (counting any you opened today), say so FIRST in
+    the notification, ahead of what you shipped — at that point the binding
+    constraint is the owner's review time, not the routine's output, and a run
+    that reports only its own work hides the one fact that should change what
+    the owner does next. Say which build choice the depth led you to in step 7.
+14. Send exactly one notification: lead with queue depth if it tripped the rule
+    above, otherwise with what shipped or broke, then top picks — include the PR
+    link if one was opened. State plainly anything you could not finish and why.
+    If truly nothing changed and nothing shipped, stay silent — **unless the
+    queue tripped the step 13 rule, which is never silent.** A run that shipped
+    nothing *because* the queue is deep is exactly the run whose one fact the
+    owner needs, and the silence rule would otherwise suppress precisely that
+    notification.
 ```
 
 ### Rationale
@@ -173,13 +218,35 @@ PHASE 4 — Report (always):
   babysat automatically (CI green, review comments addressed), but merging stays a
   human decision — that's the gate that keeps main (and therefore the prod changelog)
   trustworthy.
-- **Three reviewers, none of them the author.** The Auto Review Action authenticates with
-  the owner's subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so it costs no API credits and
-  reviews from a context that never saw the code being written. CodeRabbit adds a second
-  automated pass driven by `.coderabbit.yaml`'s repo-specific path instructions. Codex is
-  run by the owner outside GitHub and relayed in chat — it will never appear on the PR,
-  so its absence must not be read as approval. The routine deliberately does NOT also
+- **Reviewers, none of them the author — but count them honestly.** The Auto Review Action
+  authenticates with the owner's subscription (`CLAUDE_CODE_OAUTH_TOKEN`), so it costs no
+  API credits and reviews from a context that never saw the code being written.
+  **Codex now reviews on the PR** as `chatgpt-codex-connector[bot]` — verified 2026-09-07
+  on PR #77, where it posted three inline P2 findings, all three correct. The docs had
+  said Codex "will never appear on the PR" and told runs not to look for it there, which
+  by then would have meant ignoring real findings; it is set up as a GitHub reviewer for
+  this repo and triggers on PR open, ready-for-review, and `@codex review`. The owner may
+  still run Codex separately and relay findings in chat, so a quiet PR is not a pass. The
+  routine deliberately does NOT also
   review in-session: the author reviewing their own work is the weakest possible pass.
+  **CodeRabbit stopped reviewing automatically** (verified 2026-09-07 on PRs #73–#76,
+  each carrying only the notice *"This repository does not receive automatic reviews
+  because it has fewer than 10 stars"*; PRs #71 and #72 were still reviewed, so the
+  policy changed on their side around 2026-09-03 — it is not a misconfiguration here).
+  It still reads `.coderabbit.yaml` and quotes the config back in the notice, which is
+  what made the loss easy to miss. This mattered because the prompt used the *count* of
+  reviewers as its reason not to self-review: a premise that has silently gone from three
+  to two is worse than no premise. The notice's own escape hatch — a `@coderabbitai
+  review` comment — is the cheap fix and is now step 10; ten stars or a paid plan are the
+  alternatives, and both are the owner's call.
+- **Queue depth is reported before output.** The routine ships 1–2 quick wins a day and
+  cannot merge anything, so if the owner stops merging, its PRs accumulate silently —
+  each run reads a `main` that is further behind the work, and every branch's
+  `[Unreleased]` changelog entry becomes a conflict against the others. This has already
+  bitten twice: eight PRs were open at once on 2026-08-31, and six on 2026-09-07 with
+  nothing merged for a week. The run always knew this and never said it, because the
+  report was scoped to what the run itself did. "Nothing has merged in N days" is the
+  single fact that changes what the owner should do with the run, so it now leads.
 
 ---
 
