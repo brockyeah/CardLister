@@ -1,11 +1,23 @@
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.services import prospect_news
 from backend.models import CallupEvent
+
+
+@pytest.fixture
+def clean_news_cache():
+    """The article cache is module-level state, so tests that exercise it have
+    to leave it as they found it or they change what a later test fetches."""
+    before = dict(prospect_news._cache)
+    prospect_news._cache.update(at=0.0, articles=[], limit=None)
+    yield prospect_news._cache
+    prospect_news._cache.clear()
+    prospect_news._cache.update(before)
 
 
 def _auth(client):
@@ -29,6 +41,59 @@ def test_clean_summary_strips_tags_unescapes_entities_and_truncates():
 
     short = prospect_news._clean_summary("<b>Short</b> &amp; sweet.")
     assert short == "Short & sweet."
+
+
+def test_an_empty_result_is_still_cached(clean_news_cache):
+    """The expensive case must not also be the uncached one.
+
+    The guard used to read `if _cache["articles"] and ...`, keying freshness on
+    the truthiness of the payload rather than on the timestamp stored beside
+    it — so an empty result never satisfied it. Empty is the ordinary outcome
+    of both feeds failing (10s timeout each, ~20s of blocked worker thread) and
+    of an offseason where nothing clears the score floor, and NewsSection fires
+    GET /api/news on every Scanner mount.
+    """
+    with patch.object(prospect_news, "_feeds", return_value=["http://feed/a", "http://feed/b"]):
+        with patch.object(prospect_news, "_fetch_feed", return_value=[]) as fetch:
+            assert prospect_news.fetch_articles() == []
+            assert fetch.call_count == 2
+            assert prospect_news.fetch_articles() == []
+            assert fetch.call_count == 2, "an empty result re-fetched every feed"
+
+
+def test_the_empty_result_is_held_for_a_shorter_ttl_than_a_real_one(clean_news_cache):
+    """A feed outage should recover on the next page load or two, not in 15
+    minutes — while a real result keeps the full TTL it always had."""
+    import time
+
+    with patch.object(prospect_news, "_feeds", return_value=["http://feed/a"]):
+        with patch.object(prospect_news, "_fetch_feed", return_value=[]) as fetch:
+            # Empty and older than the negative TTL: re-fetch.
+            clean_news_cache.update(at=time.time() - prospect_news._EMPTY_CACHE_TTL - 1,
+                                    articles=[], limit=8)
+            prospect_news.fetch_articles()
+            assert fetch.call_count == 1
+
+            # A populated cache of the same age is still fresh, because the
+            # long TTL applies to it.
+            clean_news_cache.update(at=time.time() - prospect_news._EMPTY_CACHE_TTL - 1,
+                                    articles=[{"title": "cached"}], limit=8)
+            assert prospect_news.fetch_articles() == [{"title": "cached"}]
+            assert fetch.call_count == 1
+
+    assert prospect_news._EMPTY_CACHE_TTL < prospect_news._CACHE_TTL
+
+
+def test_a_different_limit_is_not_served_from_the_cache(clean_news_cache):
+    """`limit` shapes the payload, so it has to be part of the cache key — a
+    cached top-8 handed to a caller asking for 3 is silently wrong."""
+    articles = [{"title": f"a{i}", "summary": "called up", "link": "", "source": "s",
+                 "published_iso": None, "age_days": None, "published_parsed": None}
+                for i in range(8)]
+    with patch.object(prospect_news, "_feeds", return_value=["http://feed/a"]):
+        with patch.object(prospect_news, "_fetch_feed", return_value=articles):
+            assert len(prospect_news.fetch_articles(limit=8)) == 8
+            assert len(prospect_news.fetch_articles(limit=3)) == 3
 
 
 def test_news_endpoint_returns_callups_and_articles(db_session):

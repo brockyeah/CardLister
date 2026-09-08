@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getNews } from '../api'
+import { formatArticleAge } from '../lib/articleAge.js'
 
 // Same guard as CardTable's listing links: article links come from external
 // RSS feeds, so never render a non-http(s) value as a clickable href.
@@ -106,7 +107,9 @@ export default function NewsSection() {
                   The Headlines
                 </div>
                 <div className="divide-y divide-ink-700">
-                  {data.articles.map((a, i) => (
+                  {data.articles.map((a, i) => {
+                    const age = formatArticleAge(a.age_days)
+                    return (
                     <div key={i} className={i === 0 ? 'pb-3' : 'py-3'}>
                       <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-emerald-400 mb-1">
                         {a.source}
@@ -128,12 +131,15 @@ export default function NewsSection() {
                       {a.summary && (
                         <p className="font-sans text-sm text-gray-400 mt-1 line-clamp-2">{a.summary}</p>
                       )}
-                      <div className="font-sans text-xs text-gray-500 mt-1">
-                        {a.source}
-                        {a.age_days === 0 ? ' · today' : a.age_days ? ` · ${a.age_days}d ago` : ''}
-                      </div>
+                      {/* Age only. The emerald kicker above the headline
+                          already carries the source, so printing it again here
+                          made every item read "MLB.com … MLB.com · 2d ago". */}
+                      {age && (
+                        <div className="font-sans text-xs text-gray-500 mt-1">{age}</div>
+                      )}
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
