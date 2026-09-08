@@ -204,3 +204,144 @@ def test_create_card_with_scan_id_records_correction(db_session):
     diff = json.loads(corrections[0].diff_json)
     assert diff["set_name"]["to"] == "Chrome Prospects"
     assert diff["player_name"]["to"] == "Tony Blanco Jr."
+
+
+def test_exact_match_survives_a_year_with_more_than_100_corrections(db_session):
+    """The overlay must be bounded by the match, not by recency.
+
+    This is the failure the SQL filter exists to remove: the old query took the
+    100 most recent corrections *for the year* and scanned that page in Python,
+    so in a year the collection is deep in — 2024 Bowman Chrome alone can carry
+    hundreds — the card's own correction fell out of the window and the overlay
+    stopped happening with no error and no note.
+    """
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects",
+                                   "player_name": "Tony Blanco Jr."}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+    # 150 newer corrections in the same year, all for other cards.
+    for i in range(150):
+        db_session.add(Correction(
+            username="tester", year=2024, brand="Topps", set_name="Chrome",
+            card_number=f"T-{i}",
+            corrected_json=json.dumps({"set_name": "Chrome"}),
+            diff_json=json.dumps({"set_name": {"from": "chrome", "to": "Chrome"}}),
+        ))
+    db_session.commit()
+
+    extracted = {"player_name": "", "year": 2024, "brand": "bowman",
+                 "set_name": "Chrome", "card_number": "bcp-132", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome Prospects"
+    assert merged["player_name"] == "Tony Blanco Jr."
+
+
+def test_exact_match_returns_the_latest_correction_for_the_card(db_session):
+    """Two corrections of the same card: the newest wins, ties broken on id."""
+    for set_name in ("Chrome Prospects", "Chrome Prospects Refractor"):
+        db_session.add(Correction(
+            username="tester", year=2024, brand="Bowman", set_name=set_name,
+            card_number="BCP-132",
+            corrected_json=json.dumps({"set_name": set_name}),
+            diff_json=json.dumps({"set_name": {"from": "Chrome", "to": set_name}}),
+        ))
+    db_session.commit()
+
+    extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome Prospects Refractor"
+
+
+def test_exact_match_ignores_a_different_card_in_the_same_year(db_session):
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-999",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome"
+    assert not merged["confidence_notes"]
+
+
+def test_exact_match_survives_a_malformed_extraction(db_session):
+    """A non-string brand/card number answers None instead of 500ing the scan.
+
+    `_norm` passes non-strings through untouched and both values come from
+    model-extracted JSON, so a malformed extraction can hand `find_exact_match`
+    a list or a dict. That was inert while the match was a Python `==`; as a
+    bound parameter it is `sqlite3.ProgrammingError: type 'list' is not
+    supported`, which reaches the client as a 500 on POST /api/scan.
+    """
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    for bad in ({"brand": ["Bowman", "Topps"]}, {"card_number": {"n": "BCP-132"}},
+                {"year": [2024]}, {"year": {"value": 2024}},
+                # SQLite's INTEGER is signed 64-bit; wider raises OverflowError
+                # at bind time, the same 500 by a different route.
+                {"year": 2 ** 63}, {"year": -(2 ** 63) - 1}, {"year": 10 ** 30}):
+        extracted = {"year": 2024, "brand": "Bowman", "card_number": "BCP-132",
+                     "set_name": "Chrome", "confidence_notes": "", **bad}
+        merged = apply_exact_match(db_session, extracted)   # must not raise
+        assert merged["set_name"] == "Chrome"
+        assert not merged["confidence_notes"]
+
+
+def test_exact_match_still_accepts_a_string_year(db_session):
+    """A year that arrives as "2024" rather than 2024 must still match.
+
+    `Correction.year` is an INTEGER column and SQLite's type affinity coerces
+    `year = '2024'` to the integer, so a string year from vision matches today.
+    The malformed-extraction guard therefore admits `str` as well as `int`;
+    narrowing it to `int` would silently stop applying those overlays, which is
+    the same invisible degradation this PR set out to remove.
+    """
+    db_session.add(Correction(
+        username="tester", year=2024, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    extracted = {"year": "2024", "brand": "Bowman", "card_number": "BCP-132",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome Prospects"
+
+
+def test_exact_match_does_not_treat_a_boolean_year_as_year_one(db_session):
+    """`bool` is a subclass of `int`, so a `True` year would reach SQL as 1.
+
+    That is not a crash — it is a wrong question: it would apply a correction
+    recorded for year 1 to a card whose year the model failed to read. No
+    overlay is the honest answer.
+    """
+    db_session.add(Correction(
+        username="tester", year=1, brand="Bowman", set_name="Chrome Prospects",
+        card_number="BCP-132",
+        corrected_json=json.dumps({"set_name": "Chrome Prospects"}),
+        diff_json=json.dumps({"set_name": {"from": "Chrome", "to": "Chrome Prospects"}}),
+    ))
+    db_session.commit()
+
+    extracted = {"year": True, "brand": "Bowman", "card_number": "BCP-132",
+                 "set_name": "Chrome", "confidence_notes": ""}
+    merged = apply_exact_match(db_session, extracted)
+    assert merged["set_name"] == "Chrome"
+    assert not merged["confidence_notes"]
