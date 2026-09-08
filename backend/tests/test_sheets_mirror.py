@@ -32,10 +32,13 @@ _range = range
 class FakeSheet:
     """Minimal stand-in for the Sheets API, holding rows as a dict {row_no: values}."""
 
-    def __init__(self, rows=None, fail_on=None):
+    def __init__(self, rows=None, fail_on=None, append_range=None):
         self.rows = dict(rows or {})
         self.calls = []          # (op, range) in order
         self.fail_on = fail_on or set()
+        # When set, the append response reports this as `updatedRange` instead
+        # of the real one — the API answering in a shape we cannot parse.
+        self.append_range = append_range
 
     # --- API surface used by google_sheets.py -------------------------------
     def spreadsheets(self):
@@ -93,6 +96,8 @@ class FakeSheet:
             self.calls.append(("append", range))
             row_no = (max(self.rows) if self.rows else 1) + 1
             self.rows[row_no] = body["values"][0]
+            if self.append_range is not None:
+                return {"updates": {"updatedRange": self.append_range}}
             return {"updates": {"updatedRange": f"Inventory!A{row_no}:{END_COL}{row_no}"}}
         return _Exec(run)
 
@@ -349,3 +354,59 @@ def test_import_then_resync_gives_one_row_per_card(db_session):
         client.post("/api/sheets/resync", headers=headers)
 
     assert sorted(fake.players()) == ["Alpha", "Bravo"]
+
+
+# --- append row-number recovery ---------------------------------------------
+
+def test_append_recovers_its_row_when_updated_range_is_unparseable(db_session):
+    """An unreadable `updatedRange` must not lose the row the append landed on.
+
+    The append succeeded; only the bookkeeping failed. Returning None there is
+    what duplicated cards: the caller persists `sheets_row` only when a row
+    comes back, so the card stayed NULL and its next edit appended again.
+    """
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="")          # `updates.updatedRange` missing
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+    assert row == 2
+    assert fake.players() == ["Alpha"]
+
+
+def test_unparseable_append_range_does_not_duplicate_the_card(db_session):
+    """The card's second save updates its row instead of appending a copy."""
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="Inventory!AA")   # no row digits to parse
+    with _install(fake):
+        row = google_sheets.sync_card(card)
+        card.sheets_row = row
+        db_session.commit()
+        row_again = google_sheets.sync_card(card)
+
+    assert row == 2 and row_again == 2
+    assert len(fake.ops("append")) == 1             # exactly one row ever added
+    assert fake.players() == ["Alpha"]              # not ["Alpha", "Alpha"]
+
+
+def test_append_recovery_never_claims_the_header_row(db_session):
+    """A probe that reports header-only means the append is not visible to us —
+    returning row 1 would hand the card the header to overwrite on its next
+    save, so we keep the old NULL behaviour for that case alone."""
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="")
+    with _install(fake), patch.object(google_sheets, "_last_used_row", lambda *a: 1):
+        row = google_sheets.sync_card(card)
+    assert row is None
+
+
+def test_append_recovery_failure_is_swallowed(db_session):
+    """A failing recovery probe degrades to None, never to a raised save."""
+    card = _mkcard(db_session, "Alpha")
+    fake = FakeSheet(append_range="")
+
+    def boom(*_a):
+        raise RuntimeError("probe boom")
+
+    with _install(fake), patch.object(google_sheets, "_last_used_row", boom):
+        row = google_sheets.sync_card(card)
+    assert row is None

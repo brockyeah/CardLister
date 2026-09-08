@@ -303,7 +303,25 @@ def sync_card(card, reread_row=None) -> Optional[int]:
                     row_num = int("".join(ch for ch in row_part.split(":")[0] if ch.isdigit()))
                     return row_num
                 except (IndexError, ValueError):
-                    return None
+                    # The append itself succeeded — only the bookkeeping failed —
+                    # so giving up here is the expensive answer, not the safe one:
+                    # the caller persists `sheets_row` only when a row comes back,
+                    # so the card keeps a NULL one and its *next* edit takes this
+                    # same append branch, adding a second row while the first
+                    # stays behind. Every later edit appends again, silently.
+                    # We are still holding the lock and nothing can have appended
+                    # since, so the row we just wrote is the last used one.
+                    try:
+                        row_num = _last_used_row(service, sheet_id)
+                    except Exception as e:
+                        logger.warning(
+                            "Sheets append row-number recovery failed for card %s: %s",
+                            getattr(card, "id", "?"), e,
+                        )
+                        return None
+                    # A header-only probe means the append is not visible to us;
+                    # claiming row 1 would hand the card the header to overwrite.
+                    return row_num if row_num >= 2 else None
         except Exception as e:
             logger.warning("Sheets sync failed for card %s: %s", getattr(card, "id", "?"), e)
             return None
